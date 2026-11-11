@@ -4,19 +4,24 @@ Quét kênh / từ khóa Douyin → tải video → edit (che sub Trung, lật, 
 (VoiceStudio, tự chọn giọng nam/nữ) → duyệt trên giao diện web → đăng / **lên lịch** Reels lên nhiều Page, nhiều tài khoản.
 Ghi chú cho lập trình viên / Claude: xem [CLAUDE.md](CLAUDE.md).
 
-## Cài đặt trên Windows 10/11
+## Cài đặt trên Windows 10/11 — 1 file
 
-```powershell
-git clone https://github.com/snopvsreal/douyin-down.git
-cd douyin-down
-powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1   # cài Git, uv, FFmpeg (full), thư viện, Chromium
-```
+**Bấm đúp `install_windows.bat`.** File này tự làm hết: cài Git, uv (Python 3.12), FFmpeg bản full, thư viện Python,
+Chromium, backend tải Douyin, tải trước model AI (~1.5 GB), tạo `config.yaml` (hỏi Anthropic API key), cài VoiceStudio
+(hỏi trước), tạo shortcut **dytool** trên Desktop, hỏi đăng nhập Douyin và mở tool.
 
-1. Cài **VoiceStudio** cho Windows: https://github.com/debpalash/VoiceStudio/releases/latest → mở app →
-   Model Catalogue → chấp nhận license **OmniVoice** và **higgs-audio-v2-tokenizer**.
-2. Mở `config.yaml`, điền `anthropic_api_key` (mục `edit > subtitles`).
-3. `uv run dytool douyin-login` → đăng nhập douyin.com trong cửa sổ hiện ra (quét QR) → cookie tự lưu.
-4. Chạy `scripts\run_ui.bat` → mở http://127.0.0.1:8000. **Đóng cửa sổ đen = tắt tool.**
+- Đặt trong thư mục dự án → cài tại chỗ.
+- Dùng riêng (chỉ copy mỗi file này sang máy mới) → tự đăng nhập GitHub và clone repo private về `%USERPROFILE%\douyin-down`.
+- Lỗi giữa chừng: sửa rồi chạy lại, các bước đã xong sẽ bỏ qua. Lần đầu mất khoảng 15–30 phút.
+
+Cài từng bước (thay cho file trên): `powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1`.
+
+Sau khi cài:
+
+1. Mở **VoiceStudio** → Model Catalogue → chấp nhận license **OmniVoice** và **higgs-audio-v2-tokenizer**.
+2. Chưa nhập API key lúc cài → điền `anthropic_api_key` trong `config.yaml` (mục `edit > subtitles`).
+3. Cookie Douyin hết hạn → nút **Đăng nhập Douyin** trên giao diện (hoặc `uv run dytool douyin-login`).
+4. Mở tool: shortcut **dytool** trên Desktop (= `scripts\run_ui.bat`) → http://127.0.0.1:8000. **Đóng cửa sổ đen = tắt tool.**
    Tự chạy khi bật máy: tạo shortcut của `run_ui.bat` trong thư mục `shell:startup`.
 5. Trên giao diện: **Tài khoản & Page** → thêm tài khoản → *Đăng nhập Facebook* → bật Page → thêm nguồn.
 

@@ -13,7 +13,8 @@ uv run dytool douyin-login                # đăng nhập douyin.com -> lưu coo
 uv run dytool fb-login                    # (cũ, 1 tài khoản) — giờ đăng nhập FB qua giao diện, mỗi tài khoản 1 phiên
 uv run dytool edit-file video.mp4         # edit thử 1 file theo config.yaml
 ```
-Windows: `powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1` rồi `scripts\run_ui.bat`.
+Windows: bấm đúp `install_windows.bat` (1 file lai batch + PowerShell, cài mọi thứ; giữ **CRLF + chỉ ASCII** khi sửa
+vì Windows PowerShell 5.1 đọc file theo ANSI) rồi chạy shortcut dytool / `scripts\run_ui.bat`.
 
 **Đừng chạy giao diện bằng preview của app Claude** (`preview_start` có lệnh khởi động): app sẽ tự tắt server
 khi nhàn rỗi → worker chết giữa chừng. Chạy tiến trình riêng (run_ui.bat / `nohup caffeinate -i uv run dytool ui

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Tổng quan{% endblock %}
+{% block body %}
+<div class="row">
+  <div><h1>Tổng quan</h1><p class="sub">Tự động tải → edit → lồng tiếng → đăng cho các Page đang bật.</p></div>
+  <div class="spacer"></div>
+  {% if worker.running %}
+    <form method="post" action="/worker/stop"><button class="btn danger">⏸ Tắt chạy tự động</button></form>
+  {% else %}
+    <form method="post" action="/worker/start"><button class="btn primary">▶ Bật chạy tự động</button></form>
+  {% endif %}
+</div>
+
+<div class="grid g4" style="margin-bottom:16px">
+  <div class="card stat"><div class="n">{{ totals.get('review', 0) }}</div><div class="l">Chờ duyệt</div></div>
+  <div class="card stat"><div class="n">{{ totals.get('scheduled', 0) + totals.get('schedule_pending', 0) }}</div><div class="l">Đã lên lịch</div></div>
+  <div class="card stat"><div class="n">{{ totals.get('uploaded', 0) }}</div><div class="l">Đã đăng</div></div>
+  <div class="card stat"><div class="n">{{ totals.get('failed', 0) }}</div><div class="l">Lỗi</div></div>
+</div>
+
+<div class="card" style="margin-bottom:16px" hx-get="/partials/progress" hx-trigger="load, every 2s" hx-swap="innerHTML">
+  <p class="muted">Đang tải tiến trình…</p>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <h2>Page đang chạy</h2>
+    {% if not pages %}
+      <p class="muted">Chưa bật Page nào. Vào <a href="/accounts">Tài khoản & Page</a> để thêm tài khoản và bật Page.</p>
+    {% endif %}
+    <table>
+      {% for p in pages %}{% set st = stats[p.id] %}
+      <tr>
+        <td><a href="/pages/{{ p.id }}"><b>{{ p.name }}</b></a><div class="small muted">{{ p.acc_name }}</div></td>
+        <td class="small">
+          <span class="pill warn">{{ st.get('review', 0) }} chờ duyệt</span>
+          <span class="pill info">{{ st.get('approved', 0) }} chờ đăng</span>
+          <span class="pill ok">{{ st.get('uploaded', 0) }} đã đăng</span>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="card" hx-get="/partials/status" hx-trigger="load, every 4s" hx-swap="innerHTML">
+    <p class="muted">Đang tải trạng thái…</p>
+  </div>
+</div>
+{% endblock %}

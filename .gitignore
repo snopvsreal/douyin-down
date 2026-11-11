@@ -1,0 +1,9 @@
+config.yaml
+data/
+vendor/
+.venv/
+__pycache__/
+*.pyc
+*.log
+.DS_Store
+.claude/settings.local.json

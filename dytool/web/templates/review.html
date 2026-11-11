@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Duyệt video{% endblock %}
+{% block body %}
+<div class="row">
+  <div><h1>Duyệt video</h1><p class="sub">Xem video đã edit, sửa caption rồi duyệt. Video được duyệt sẽ đăng theo lịch của Page.</p></div>
+  <div class="spacer"></div>
+  <form method="get" class="row">
+    <select name="page" onchange="this.form.submit()" style="width:auto">
+      <option value="">Tất cả Page</option>
+      {% for p in pages %}<option value="{{ p.id }}" {{ 'selected' if cur_page == p.id }}>{{ p.name }}</option>{% endfor %}
+    </select>
+  </form>
+</div>
+
+{% if sched %}
+<div class="card" style="margin-bottom:16px; padding:0">
+  <div class="row" style="padding:12px 14px 0"><h2 style="margin:0">Lịch đăng</h2><div class="spacer"></div>
+    <span class="small muted">Lịch đã gửi lên Facebook sẽ do Facebook tự đăng, máy không cần bật</span></div>
+  <table>
+    <tr><th>Giờ đăng</th><th>Page</th><th>Caption</th><th>Trạng thái</th><th></th></tr>
+    {% for v in sched %}
+    <tr>
+      <td><b>{{ time.strftime('%H:%M', time.localtime(v.scheduled_at)) }}</b>
+        <div class="small muted">{{ time.strftime('%d/%m/%Y', time.localtime(v.scheduled_at)) }}</div></td>
+      <td>{{ v.page_name }}</td>
+      <td class="trunc small">{{ v.caption }}</td>
+      <td><span class="pill {{ 'ok' if v.status == 'scheduled' else 'warn' }}">{{ STATUS_VI[v.status] }}</span></td>
+      <td style="white-space:nowrap">
+        {% if v.status == 'schedule_pending' %}
+          <button class="btn sm" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/unschedule" hx-swap="outerHTML">Huỷ lịch</button>
+        {% else %}
+          <a class="btn sm" target="_blank"
+             href="https://business.facebook.com/latest/content_calendar?asset_id={{ v.asset_id }}">Xem/sửa trên FB ↗</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<div class="videos">
+  {% for v in videos %}
+  <div class="card vcard" id="v-{{ v.page_id }}-{{ v.id }}">
+    <video src="/media/edited/p{{ v.page_id }}_{{ v.id }}.mp4" controls preload="metadata" playsinline></video>
+    <div class="meta small">
+      <span class="pill info">{{ v.page_name }}</span> · ❤ {{ '{:,}'.format(v.likes or 0) }} · {{ (v.duration or 0)|round|int }}s
+      · <a href="https://www.douyin.com/video/{{ v.id }}" target="_blank">gốc ↗</a>
+    </div>
+    <form hx-target="#v-{{ v.page_id }}-{{ v.id }} .act" hx-swap="innerHTML">
+      <textarea name="caption">{{ v.caption or '' }}</textarea>
+      <div class="row" style="margin-top:8px; flex-wrap:nowrap">
+        <input type="datetime-local" name="when" value="{{ suggest(v.page_id) }}" style="flex:1">
+        <button class="btn primary sm" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/schedule">🗓 Lên lịch</button>
+      </div>
+      <div class="act row" style="margin-top:8px">
+        <button class="btn ok sm" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/approve">✓ Duyệt</button>
+        <button class="btn sm" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/publish_now"
+                hx-confirm="Đăng ngay lên {{ v.page_name }} (bỏ qua giới hạn giờ đăng)?">Đăng ngay</button>
+        <button class="btn sm" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/save">Lưu caption</button>
+        <button class="btn danger sm" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/reject">✕ Bỏ</button>
+      </div>
+    </form>
+  </div>
+  {% else %}
+  <div class="card muted">Không có video nào chờ duyệt.</div>
+  {% endfor %}
+</div>
+{% endblock %}

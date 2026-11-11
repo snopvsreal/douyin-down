@@ -1,0 +1,19 @@
+<div class="row" style="margin-bottom:8px">
+  <h2 style="margin:0">Trạng thái</h2><div class="spacer"></div>
+  <span class="pill {{ 'ok' if worker.running else '' }}">{{ 'Đang chạy' if worker.running else 'Đang dừng' }}</span>
+</div>
+<p class="small" style="margin:0 0 10px"><b>Đang làm:</b> {{ worker.current }}</p>
+<div class="row health small" style="margin-bottom:12px">
+  <span class="pill {{ 'ok' if health.tdl else 'err' }}">Backend tải Douyin: {{ 'bật' if health.tdl else 'tắt' }}</span>
+  {% if not health.tdl %}
+    <form method="post" action="/services/tdl"><button class="btn sm">Bật</button></form>
+  {% endif %}
+  <form method="post" action="/services/douyin-login"><button class="btn sm"
+        title="Mở trình duyệt để đăng nhập lại douyin.com khi cookie hết hạn">Đăng nhập Douyin</button></form>
+  <span class="pill {{ 'ok' if health.voicestudio else 'err' }}">VoiceStudio: {{ 'bật' if health.voicestudio else 'tắt — hãy mở app' }}</span>
+</div>
+<div class="log">
+  {% for l in logs %}
+    <div class="{{ l.level }}">{{ time.strftime('%H:%M:%S', time.localtime(l.ts)) }} {{ l.msg }}</div>
+  {% else %}<div class="muted">Chưa có nhật ký.</div>{% endfor %}
+</div>

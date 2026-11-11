@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}dytool{% endblock %} · dytool</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js"></script>
+</head>
+<body>
+<div class="layout">
+  <nav class="side">
+    <div class="brand">dytool<small>Douyin → Facebook</small></div>
+    {% set p = request.url.path %}
+    <a href="/" class="{{ 'on' if p == '/' }}">Tổng quan</a>
+    <a href="/accounts" class="{{ 'on' if p.startswith('/accounts') or p.startswith('/pages') }}">Tài khoản & Page</a>
+    <a href="/review" class="{{ 'on' if p.startswith('/review') }}">Duyệt video</a>
+    <a href="/queue" class="{{ 'on' if p.startswith('/queue') }}">Tiến trình</a>
+  </nav>
+  <main>{% block body %}{% endblock %}</main>
+</div>
+</body>
+</html>

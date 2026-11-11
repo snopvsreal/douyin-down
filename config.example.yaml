@@ -1,0 +1,101 @@
+# Sao chép thành config.yaml rồi sửa.  cp config.example.yaml config.yaml
+
+data_dir: data                # chứa video gốc, video đã edit, database
+
+douyin:
+  api: http://127.0.0.1:5555  # TikTokDownloader chạy ở chế độ Web API (dytool server)
+  cookie: ""                  # cookie douyin.com đã đăng nhập (xem README)
+  proxy: ""
+
+  # Theo dõi kênh: dán link trang cá nhân https://www.douyin.com/user/<sec_uid>
+  channels:
+    - url: https://www.douyin.com/user/MS4wLjABAAAA_xxxxxxxx
+      name: kenh-a
+      max_age_days: 3         # chỉ lấy video đăng trong N ngày gần nhất
+
+  # Tìm theo từ khóa
+  keywords:
+    - keyword: 猫咪
+      max_results: 20
+      publish_time: 1         # 0 = mọi lúc, 1 = 1 ngày, 7 = 1 tuần, 180 = 6 tháng
+      sort_type: 1            # 0 = tổng hợp, 1 = nhiều like nhất, 2 = mới nhất
+
+  filters:
+    min_likes: 1000
+    min_duration: 5           # giây
+    max_duration: 180
+
+  poll_minutes: 20            # chu kỳ kiểm tra video mới khi chạy `dytool watch`
+
+edit:
+  hflip: true                 # lật video ngang
+  rotate_deg: 0               # 0 = không nghiêng
+  tint:
+    color: "0x0066FF"         # xanh dương
+    opacity: 0.12
+  # Che phụ đề tiếng Trung in cứng bằng cách làm mờ dải ngang chứa sub
+  hide_hardsub:
+    enabled: true
+    mode: auto                # auto = tự dò vị trí sub bằng OCR (RapidOCR) | fixed = dùng y_from/y_to
+    y_from: 0.72              # chỉ dùng khi mode: fixed (tính theo % chiều cao)
+    y_to: 0.90
+    blur: 20
+  subtitles:
+    enabled: true
+    whisper_model: small      # tiny | base | small | medium | large-v3 (lớn hơn = chuẩn hơn, chậm hơn)
+    source_lang: zh
+    translator: claude        # claude (cần biến môi trường ANTHROPIC_API_KEY, dịch tự nhiên nhất)
+                              # google (miễn phí nhưng hay bị Google chặn bằng captcha)
+    anthropic_api_key: ""     # dán key Claude (sk-ant-...) vào đây
+    claude_model: claude-sonnet-5-5
+    font: Arial
+    font_size_pct: 0.040      # cỡ chữ = 4% chiều cao video
+    margin_v_pct: 0.18        # khoảng cách sub tới đáy (% chiều cao)
+  # Lồng tiếng Việt bằng VoiceStudio (https://github.com/debpalash/VoiceStudio) — mở app trước khi chạy
+  dub:
+    enabled: true
+    api: http://127.0.0.1:3900
+    model: omnivoice            # engine TTS trong VoiceStudio
+    gender: auto                # auto = tự nhận giọng nam/nữ từng câu theo giọng gốc | male | female
+    # Giọng cho từng giới tính. Tool tự tạo profile (thiết kế bằng OmniVoice theo instruct + seed) nếu chưa có.
+    # Muốn dùng giọng thật: điền ref_audio (file 5-15s, giọng bạn có quyền sử dụng) + ref_text.
+    # instruct chỉ hiểu: male/female; child, teenager, young adult, middle-aged, elderly;
+    #                    very low/low/moderate/high/very high pitch
+    voices:
+      male:   {name: dytool-nam, instruct: "male, young adult, moderate pitch", seed: 7, ref_audio: "", ref_text: ""}
+      female: {name: dytool-nu,  instruct: "female, young adult, high pitch",   seed: 11, ref_audio: "", ref_text: ""}
+    voice: dytool-vi            # giọng dự phòng khi không dùng voices
+    voice_seed: 42              # đổi số này (rồi xoá profile cũ trong app) để ra giọng khác
+    voice_instruct: ""          # mô tả giọng khi tự tạo, vd "male, young adult" (tuỳ chọn)
+    voice_ref_audio: ""         # hoặc: đường dẫn file giọng mẫu 5-15s của bạn để clone
+    voice_ref_text: ""          # lời nói trong file giọng mẫu
+    language: vi
+    speed: 1.0
+    # Nhịp đọc (học từ giọng đọc tiếng Việt thật — xem dytool/phrasing.py)
+    merge_gap: 0.35             # các câu gốc cách nhau < 0.35s được gom thành 1 lượt đọc liền
+    max_utterance: 10           # 1 lượt đọc tối đa 10s
+    max_rate_boost: 1.2         # cho phép đọc nhanh hơn tốc độ tự nhiên tối đa 1.2x (qua duration của VoiceStudio)
+    max_shorten: 2              # vẫn dài -> Claude rút gọn rồi đọc lại, tối đa 2 lần
+    max_drift: 0.6              # giọng được trễ tối đa 0.6s so với hình
+    num_step: 32                # chất lượng giọng OmniVoice (16 = nhanh, 32 = đẹp hơn)
+    background_volume: 0.9      # nhạc nền (đã tách giọng Trung)
+    voice_volume: 1.0
+    original_voice_volume: 0.0  # 0 = bỏ hẳn giọng Trung
+    crf: 20
+    max_long_edge: 1920       # thu nhỏ video 2K/4K về 1080p
+    preset: medium
+
+facebook:
+  # mode: browser = đăng qua trình duyệt (Meta Business Suite), cần `uv run dytool fb-login` 1 lần
+  #       reels / video = đăng qua Graph API (cần page_id + page_token)
+  page_name: "Meow Meow"      # tên Page — tool kiểm tra ô "Đăng lên" đúng Page này mới đăng
+  asset_id: "1354310957773346"  # asset_id của Page trong Business Suite (xem trên URL business.facebook.com)
+  show_browser: false         # true = hiện cửa sổ trình duyệt khi đăng
+  post_on_copyright_issue: false  # Facebook báo vấn đề bản quyền -> không đăng
+  page_id: ""
+  page_token: ""              # Page Access Token có quyền pages_manage_posts, pages_read_engagement
+  graph_version: v23.0
+  mode: browser               # browser | reels | video
+  caption: "{desc_vi}\n\n#reels #xuhuong"
+  max_posts_per_day: 6
+  min_gap_minutes: 90

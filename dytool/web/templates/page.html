@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}{{ page.name }}{% endblock %}
+{% block body %}
+<div class="row">
+  <div><h1>{{ page.name }}</h1>
+    <p class="sub">Tài khoản: {{ page.acc_name }} · asset_id {{ page.asset_id }} ·
+      <a href="https://www.facebook.com/profile.php?id={{ page.profile_id }}" target="_blank">Mở Page ↗</a></p></div>
+  <div class="spacer"></div>
+  <form method="post" action="/pages/{{ page.id }}/scan"><button class="btn">Quét nguồn ngay</button></form>
+</div>
+{% if request.query_params.get('saved') %}<div class="notice">Đã lưu cài đặt.</div>{% endif %}
+
+<div class="grid g4" style="margin-bottom:16px">
+  <div class="card stat"><div class="n">{{ stats.get('review', 0) }}</div><div class="l">Chờ duyệt</div></div>
+  <div class="card stat"><div class="n">{{ stats.get('approved', 0) }}</div><div class="l">Chờ đăng</div></div>
+  <div class="card stat"><div class="n">{{ stats.get('uploaded', 0) }}</div><div class="l">Đã đăng</div></div>
+  <div class="card stat"><div class="n">{{ stats.get('failed', 0) }}</div><div class="l">Lỗi</div></div>
+</div>
+
+<div class="grid g2">
+  <div>
+    <div class="card" style="margin-bottom:16px">
+      <h2>Nguồn video Douyin</h2>
+      {% macro source_fields(kind='keyword', value='', prm={}) %}
+        <div class="row">
+          <select name="kind" style="max-width:120px">
+            <option value="keyword" {{ 'selected' if kind == 'keyword' }}>Từ khóa</option>
+            <option value="channel" {{ 'selected' if kind == 'channel' }}>Kênh</option></select>
+          <input type="text" name="value" required value="{{ value }}"
+                 placeholder="Từ khóa tiếng Trung (vd 猫咪) hoặc link douyin.com/user/…" style="flex:1">
+        </div>
+        {% set mr = prm.get('max_results', 20) %}{% set pt = prm.get('publish_time', 1) %}
+        {% set so = prm.get('sort_type', 1) %}{% set ad = prm.get('max_age_days', 3) %}
+        <div class="grid g4">
+          <div><label>Số video / lần</label><input type="number" name="max_results" value="{{ mr }}" min="5"></div>
+          <div><label>Đăng trong</label><select name="publish_time">
+            {% for v, l in [(1,'1 ngày'),(7,'1 tuần'),(180,'6 tháng'),(0,'mọi lúc')] %}
+              <option value="{{ v }}" {{ 'selected' if pt == v }}>{{ l }}</option>{% endfor %}</select></div>
+          <div><label>Sắp xếp</label><select name="sort_type">
+            {% for v, l in [(1,'nhiều like'),(2,'mới nhất'),(0,'tổng hợp')] %}
+              <option value="{{ v }}" {{ 'selected' if so == v }}>{{ l }}</option>{% endfor %}</select></div>
+          <div><label>Kênh: video trong (ngày)</label><input type="number" name="max_age_days" value="{{ ad }}" step="0.5"></div>
+        </div>
+      {% endmacro %}
+
+      <table>
+        {% for src in sources %}{% set prm = json.loads(src.params) %}
+        <tr style="{{ 'opacity:.5' if not src.enabled }}">
+          <td><span class="pill {{ 'info' if src.kind == 'keyword' else '' }}">{{ 'Từ khóa' if src.kind == 'keyword' else 'Kênh' }}</span></td>
+          <td style="width:100%">
+            <div class="trunc"><b>{{ src.value }}</b>{% if not src.enabled %} <span class="pill">tạm tắt</span>{% endif %}</div>
+            <div class="small muted">{% if src.kind == 'keyword' %}{{ prm.max_results }} video · {{ {0:'mọi lúc',1:'1 ngày',7:'1 tuần',180:'6 tháng'}[prm.publish_time] }} · {{ {0:'tổng hợp',1:'nhiều like',2:'mới nhất'}[prm.sort_type] }}{% else %}video trong {{ prm.max_age_days }} ngày{% endif %}</div>
+            <details style="margin-top:6px">
+              <summary class="btn sm" style="list-style:none">Sửa</summary>
+              <form method="post" action="/sources/{{ src.id }}/update" style="margin-top:8px">
+                {{ source_fields(src.kind, src.value, prm) }}
+                <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if src.enabled }}> Đang dùng nguồn này</label>
+                <button class="btn primary sm">Lưu nguồn</button>
+              </form>
+            </details>
+          </td>
+          <td style="white-space:nowrap; text-align:right">
+            <form method="post" action="/sources/{{ src.id }}/toggle" style="display:inline">
+              <button class="btn sm">{{ 'Tạm tắt' if src.enabled else 'Bật' }}</button></form>
+            <form method="post" action="/sources/{{ src.id }}/delete" style="display:inline"
+                  onsubmit="return confirm('Xoá nguồn {{ src.value }}?')"><button class="btn sm danger">Xoá</button></form>
+          </td>
+        </tr>
+        {% else %}<tr><td class="muted">Chưa có nguồn nào.</td></tr>{% endfor %}
+      </table>
+      <form method="post" action="/pages/{{ page.id }}/sources" style="margin-top:12px">
+        <h2 style="margin:8px 0">Thêm nguồn</h2>
+        {{ source_fields() }}
+        <button class="btn" style="margin-top:10px">+ Thêm nguồn</button>
+      </form>
+    </div>
+  </div>
+
+  <form method="post" action="/pages/{{ page.id }}/settings" class="card">
+    <h2>Cài đặt Page</h2>
+    <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if page.enabled }}> <b>Bật Page này</b> (worker sẽ quét, edit, đăng)</label>
+    <label class="check"><input type="checkbox" name="auto_publish" {{ 'checked' if s.auto_publish }}> Tự đăng, không cần duyệt</label>
+    <label class="check"><input type="checkbox" name="auto_schedule" {{ 'checked' if s.auto_schedule }}>
+      <span><b>Tự lên lịch</b>: video đã duyệt tự xếp vào khung giờ trống tiếp theo và lên lịch trên Facebook</span></label>
+    <label>Khung giờ đăng mỗi ngày (giờ Việt Nam, cách nhau bằng dấu phẩy)</label>
+    <input type="text" name="schedule_slots" value="{{ s.schedule_slots }}" placeholder="07:00, 11:30, 19:30, 21:00">
+    <p class="small muted" style="margin:4px 0 0">Kết hợp với “Tự đăng, không cần duyệt” = hoàn toàn tự động: edit xong là tự lên lịch.
+      Không tick = chờ bạn bấm Duyệt rồi mới xếp lịch. Mỗi ngày không vượt “Tối đa bài/ngày”.</p>
+
+    <h2 style="margin-top:16px">Đăng bài</h2>
+    <label>Mẫu caption — <code>{desc_vi}</code> = mô tả gốc đã dịch</label>
+    <textarea name="caption_template">{{ s.caption_template }}</textarea>
+    <div class="grid g3">
+      <div><label>Tối đa bài/ngày</label><input type="number" name="max_posts_per_day" value="{{ s.max_posts_per_day }}" min="1"></div>
+      <div><label>Cách nhau (phút)</label><input type="number" name="min_gap_minutes" value="{{ s.min_gap_minutes }}" min="0"></div>
+      <div><label>Quét nguồn mỗi (phút)</label><input type="number" name="poll_minutes" value="{{ s.poll_minutes }}" min="5"></div>
+    </div>
+
+    <h2 style="margin-top:16px">Chia sẻ vào nhóm</h2>
+    <label>Tên nhóm (tối đa 3, cách nhau bằng dấu phẩy) — Page phải đã tham gia nhóm</label>
+    <input type="text" name="share_groups" value="{{ s.share_groups }}" placeholder="vd: Hội Yêu Mèo Việt Nam, Mèo Ngố Club">
+    <label>Lời đăng riêng trong nhóm (để trống = giống caption)</label>
+    <textarea name="group_text" style="min-height:60px">{{ s.group_text }}</textarea>
+    <p class="small muted" style="margin:4px 0 0">Mỗi lần đăng ngay / lên lịch, bài sẽ đồng thời được chia sẻ vào các nhóm này.
+      Nhóm lỗi (Page chưa tham gia…) thì vẫn đăng lên Page và báo lỗi ở Tiến trình.</p>
+
+    <h2 style="margin-top:16px">Lọc video</h2>
+    <div class="grid g3">
+      <div><label>Like tối thiểu</label><input type="number" name="min_likes" value="{{ s.min_likes }}"></div>
+      <div><label>Dài tối thiểu (giây)</label><input type="number" name="min_duration" value="{{ s.min_duration }}"></div>
+      <div><label>Dài tối đa (giây)</label><input type="number" name="max_duration" value="{{ s.max_duration }}"></div>
+    </div>
+
+    <h2 style="margin-top:16px">Mẫu edit</h2>
+    <label class="check"><input type="checkbox" name="hflip" {{ 'checked' if s.hflip }}> Lật ngang</label>
+    <div class="grid g3">
+      <div><label>Màu phủ</label><input type="color" name="tint_color" value="{{ s.tint_color }}"></div>
+      <div><label>Độ đậm phủ: <output id="op">{{ (s.tint_opacity * 100)|round|int }}%</output></label>
+        <input type="range" name="tint_opacity" min="0" max="0.4" step="0.01" value="{{ s.tint_opacity }}"
+               oninput="op.value=Math.round(this.value*100)+'%'"></div>
+      <div><label>Nghiêng (độ)</label><input type="number" name="rotate_deg" value="{{ s.rotate_deg }}" step="0.5"></div>
+    </div>
+    <label class="check"><input type="checkbox" name="subs_enabled" {{ 'checked' if s.subs_enabled }}> Phụ đề tiếng Việt</label>
+    <label class="check"><input type="checkbox" name="dub_enabled" {{ 'checked' if s.dub_enabled }}> Lồng tiếng Việt (cần mở VoiceStudio)</label>
+    <label>Dịch theo</label>
+    <select name="text_source">
+      <option value="auto" {{ 'selected' if s.text_source == 'auto' }}>Tự động: có phụ đề trên video thì đọc phụ đề (đối chiếu giọng nói), không có thì nghe giọng</option>
+      <option value="ocr" {{ 'selected' if s.text_source == 'ocr' }}>Luôn đọc phụ đề trên video</option>
+      <option value="asr" {{ 'selected' if s.text_source == 'asr' }}>Luôn nghe giọng nói</option>
+    </select>
+    <label class="check"><input type="checkbox" name="dub_text_only" {{ 'checked' if s.dub_text_only }}> Lồng tiếng cả video chỉ có chữ, không có lời (đọc phụ đề thành giọng)</label>
+
+    <h2 style="margin-top:16px">Giọng lồng tiếng</h2>
+    <label>Chọn giọng</label>
+    <select name="gender">
+      <option value="auto" {{ 'selected' if s.gender == 'auto' }}>Tự nhận nam/nữ theo giọng gốc</option>
+      <option value="male" {{ 'selected' if s.gender == 'male' }}>Luôn giọng nam</option>
+      <option value="female" {{ 'selected' if s.gender == 'female' }}>Luôn giọng nữ</option>
+    </select>
+    <label>Mô tả giọng nam (male/female · child, teenager, young adult, middle-aged, elderly · low/moderate/high pitch)</label>
+    <input type="text" name="voice_male" value="{{ s.voice_male }}">
+    <label>Mô tả giọng nữ</label>
+    <input type="text" name="voice_female" value="{{ s.voice_female }}">
+    <label>Seed (đổi số để ra giọng khác)</label>
+    <input type="number" name="voice_seed" value="{{ s.voice_seed }}">
+
+    <div class="row" style="margin-top:16px"><button class="btn primary">Lưu cài đặt</button></div>
+  </form>
+</div>
+{% endblock %}

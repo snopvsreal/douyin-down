@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Tài khoản & Page{% endblock %}
+{% block body %}
+<h1>Tài khoản & Page</h1>
+<p class="sub">Mỗi tài khoản Facebook có phiên đăng nhập riêng. Sau khi đăng nhập, tool tự tìm các Page bạn quản lý.</p>
+{% if logging_in %}<div hx-get="/partials/accounts" hx-trigger="every 3s" hx-swap="none"></div>{% endif %}
+
+<div class="card" style="margin-bottom:16px">
+  <form method="post" action="/accounts" class="row">
+    <input type="text" name="name" placeholder="Tên gợi nhớ, vd: Tài khoản chính" required style="max-width:320px">
+    <button class="btn primary">+ Thêm tài khoản Facebook</button>
+  </form>
+</div>
+
+{% for a in accounts %}
+<div class="card" style="margin-bottom:16px">
+  <div class="row">
+    <h2 style="margin:0">{{ a.name }}</h2>
+    {% if a.id in logging_in %}
+      <span class="pill warn">Đang chờ đăng nhập — hoàn tất trong cửa sổ Chromium vừa mở</span>
+    {% elif a.status == 'da_dang_nhap' %}
+      <span class="pill ok">Đã đăng nhập</span>
+    {% else %}
+      <span class="pill err">Chưa đăng nhập</span>
+    {% endif %}
+    <div class="spacer"></div>
+    <form method="post" action="/accounts/{{ a.id }}/login"><button class="btn sm">Đăng nhập Facebook</button></form>
+    <form method="post" action="/accounts/{{ a.id }}/discover"><button class="btn sm">Quét lại Page</button></form>
+    <form method="post" action="/accounts/{{ a.id }}/delete" onsubmit="return confirm('Xoá tài khoản {{ a.name }} và các Page của nó khỏi tool? (không ảnh hưởng Facebook)')">
+      <button class="btn sm danger">Xoá</button></form>
+  </div>
+  <table style="margin-top:10px">
+    <tr><th>Page</th><th>Trạng thái</th><th></th></tr>
+    {% for p in pages if p.account_id == a.id %}
+      <tr>
+        <td><b>{{ p.name }}</b><div class="small muted">asset_id {{ p.asset_id }}</div></td>
+        <td>{% if p.enabled %}<span class="pill ok">Đang bật</span>{% else %}<span class="pill">Tắt</span>{% endif %}</td>
+        <td style="text-align:right"><a class="btn sm" href="/pages/{{ p.id }}">Cài đặt</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="3" class="muted">Chưa có Page. Đăng nhập rồi bấm “Quét lại Page”.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% else %}
+<p class="muted">Chưa có tài khoản nào.</p>
+{% endfor %}
+{% endblock %}

@@ -1,3 +1,4 @@
-*.bat text eol=crlf
-*.ps1 text eol=crlf
+# Giữ nguyên CRLF trong repo (tải file lẻ từ GitHub trên Windows vẫn chạy đúng)
+*.bat -text
+*.ps1 -text
 *.sh text eol=lf

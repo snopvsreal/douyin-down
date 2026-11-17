@@ -1,0 +1,13 @@
+<div class="acc-progress" hx-get="/partials/accounts/{{ a.id }}" hx-trigger="every 2s" hx-swap="outerHTML">
+  <div class="row small" style="margin-bottom:4px">
+    <b>{{ 'Đăng nhập' if kind == 'login' else 'Quét Page' }}</b>
+    <span class="muted">{{ st.text }}</span>
+    <div class="spacer"></div>
+    <span class="muted">{{ st.pct }}%</span>
+  </div>
+  {% set waiting = kind == 'login' and st.pct < 30 %}
+  <div class="bar{% if waiting %} waiting{% endif %}" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+       aria-valuenow="{{ st.pct }}" aria-valuetext="{{ st.text }}">
+    <span style="width:{{ 100 if waiting else [st.pct, 3]|max }}%"></span></div>
+  {% if st.error %}<div class="small" style="color:var(--err); margin-top:4px">{{ st.error }}</div>{% endif %}
+</div>

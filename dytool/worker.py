@@ -30,6 +30,8 @@ class Worker:
         self._thread: threading.Thread | None = None
         self._last_scan: dict[int, float] = {}
         self._dy = None
+        self._vs_warned = 0.0
+        self._acc_busy_until: dict[int, float] = {}
 
     # ---------- điều khiển ----------
     def start(self):
@@ -127,13 +129,22 @@ class Worker:
         for row in self.store.q("SELECT * FROM videos WHERE status IN ('schedule_pending','publish_now','approved') "
                                 "ORDER BY status='schedule_pending' DESC, status='publish_now' DESC, updated_at"):
             page = all_pages.get(row["page_id"]) if row["status"] != "approved" else by_id.get(row["page_id"])
+            if page and self._acc_busy_until.get(page["account_id"], 0) > time.time():
+                continue            # trình duyệt của tài khoản đang mở (đăng nhập / quét Page) -> thử lại sau
             if page and (row["status"] != "approved" or self._can_post(page)):
                 self._upload(page, row)
                 return True
-        # 2) edit
+        # 2) edit (Page bật lồng tiếng mà VoiceStudio đang tắt -> để video chờ, không tính là lỗi)
+        vs_up = None
         for row in self.store.q("SELECT * FROM videos WHERE status='downloaded' ORDER BY likes DESC LIMIT 20"):
             if row["page_id"] in by_id:
-                self._edit(by_id[row["page_id"]], row)
+                page = by_id[row["page_id"]]
+                if self.store.page_settings(page)["dub_enabled"]:
+                    if vs_up is None:
+                        vs_up = self._voicestudio_up()
+                    if not vs_up:
+                        continue
+                self._edit(page, row)
                 return True
         # 3) tải
         for row in self.store.q("SELECT * FROM videos WHERE status='new' ORDER BY likes DESC LIMIT 20"):
@@ -282,6 +293,19 @@ class Worker:
             self.store.set_video(row["id"], page["id"], status="failed", error=f"tải: {e}")
             self.store.log(f"[{page['name']}] Lỗi tải {row['id']}: {e}", "error", page["id"])
 
+    def _voicestudio_up(self) -> bool:
+        import httpx
+        api = self.cfg["edit"].get("dub", {}).get("api", "http://127.0.0.1:3900").rstrip("/")
+        try:
+            ok = httpx.get(api + "/health", timeout=3).status_code < 500
+        except httpx.HTTPError:
+            ok = False
+        if not ok and time.time() - self._vs_warned > 600:     # nhắc 10 phút/lần, không spam log
+            self.store.log("VoiceStudio chưa mở -> tạm dừng edit các Page bật lồng tiếng. Mở app VoiceStudio để chạy tiếp.",
+                           "error")
+            self._vs_warned = time.time()
+        return ok
+
     def _edit(self, page, row):
         from . import subtitles
         from .editor import edit
@@ -305,6 +329,14 @@ class Worker:
             if "SIGTERM" in str(e) or "SIGKILL" in str(e):
                 # bị ngắt do tắt/khởi động lại tool -> làm lại sau, không tính là lỗi
                 self.store.set_video(row["id"], page["id"], status="downloaded")
+                return
+            import httpx
+            from .dub import DubError
+            if isinstance(e, (httpx.ConnectError, DubError)) and not self._voicestudio_up():
+                # VoiceStudio bị tắt giữa chừng -> để video chờ, edit lại khi app mở lại
+                self.store.set_video(row["id"], page["id"], status="downloaded")
+                self.store.log(f"[{page['name']}] VoiceStudio bị tắt khi đang lồng tiếng {row['id']} -> sẽ làm lại",
+                               "error", page["id"])
                 return
             self.store.set_video(row["id"], page["id"], status="failed", error=f"edit: {e}")
             self.store.log(f"[{page['name']}] Lỗi edit {row['id']}: {e}", "error", page["id"])
@@ -352,6 +384,10 @@ class Worker:
                 self.store.set_video(row["id"], page["id"], status="uploaded", uploaded_at=int(time.time()),
                                      fb_url=res.get("url"), error=note)
                 self.store.log(f"[{page['name']}] Đã đăng {row['id']}", page_id=page["id"])
+        except fb_browser.ProfileBusy as e:
+            # đang đăng nhập / quét Page cho tài khoản này -> giữ nguyên trạng thái, thử lại sau 2 phút
+            self._acc_busy_until[page["account_id"]] = time.time() + 120
+            self.store.log(f"[{page['name']}] Chưa đăng {row['id']}: {e}", "error", page["id"])
         except Exception as e:
             self.store.set_video(row["id"], page["id"], status="failed", error=f"đăng: {e}")
             self.store.log(f"[{page['name']}] Lỗi đăng {row['id']}: {e}", "error", page["id"])

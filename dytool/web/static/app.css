@@ -77,3 +77,13 @@ textarea { min-height: 84px; resize: vertical; }
   .g2, .g3, .g4 { grid-template-columns: 1fr 1fr; }
   main { padding: 16px; }
 }
+
+/* thanh tiến trình đăng nhập / quét Page */
+.acc-progress { margin-top: 10px; }
+.bar { height: 8px; border-radius: 99px; background: var(--bg); border: 1px solid var(--line); overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .4s ease; }
+.bar.waiting > span { background: repeating-linear-gradient(45deg, var(--accent) 0 8px, var(--accent-weak) 8px 16px);
+  background-size: 22px 22px; animation: bar-stripe 1s linear infinite; }
+@keyframes bar-stripe { from { background-position: 0 0; } to { background-position: 22px 0; } }
+@media (prefers-reduced-motion: reduce) { .bar.waiting > span { animation: none; } .bar > span { transition: none; } }
+.btn[disabled] { opacity: .5; cursor: not-allowed; }

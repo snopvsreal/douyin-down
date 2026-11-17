@@ -39,7 +39,9 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
     app.mount("/media", StaticFiles(directory=str(data)), name="media")
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
     tpl = Jinja2Templates(directory=str(HERE / "templates"))
-    tpl.env.globals.update(STATUS_VI=STATUS_VI, time=time)
+    tpl.env.globals.update(STATUS_VI=STATUS_VI, time=time,
+                           # đổi theo lần sửa app.css -> trình duyệt không dùng bản CSS cũ trong cache
+                           css_ver=int((HERE / "static" / "app.css").stat().st_mtime))
     tpl.env.filters["ago"] = lambda ts: _ago(ts)
 
     def render(request: Request, name: str, **ctx):
@@ -102,10 +104,13 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
     # ---------------- Tài khoản & Page ----------------
     @app.get("/accounts", response_class=HTMLResponse)
     def accounts(request: Request):
+        for k in [k for k, p in procs.items() if k.startswith("login") and p.poll() is not None]:
+            _finalize(int(k[5:]))
         accs = store.q("SELECT * FROM accounts ORDER BY id")
         pages = store.q("SELECT * FROM pages ORDER BY account_id, id")
-        return render(request, "accounts.html", accounts=accs, pages=pages,
-                      logging_in={int(k[5:]) for k, p in procs.items() if k.startswith("login") and p.poll() is None})
+        running = {int(k[5:]) for k, p in procs.items() if k.startswith("login") and p.poll() is None}
+        return render(request, "accounts.html", accounts=accs, pages=pages, logging_in=running,
+                      jobs={aid: {"st": _job_state(aid), "kind": procs_kind.get(aid, "login")} for aid in running})
 
     @app.post("/accounts")
     def add_account(name: str = Form(...)):
@@ -113,31 +118,63 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
         store.account_dir(data, aid)
         return RedirectResponse("/accounts", 303)
 
+    def _busy(aid: int) -> bool:
+        p = procs.get(f"login{aid}")
+        return bool(p and p.poll() is None)
+
+    def _spawn_account_job(aid: int, do_login: bool):
+        """Chạy đăng nhập (+ quét Page) hoặc chỉ quét Page ở tiến trình con; tiến trình ghi ra login.log
+        (dòng STEP=pct|chữ), giao diện đọc để vẽ thanh tiến trình."""
+        acc_dir = store.account_dir(data, aid)
+        code = ("import sys,json; from pathlib import Path; from dytool import fb_browser as f\n"
+                "d=Path(sys.argv[1])\n"
+                "try:\n"
+                + ("    f.login(d, on_step=f.report)\n" if do_login else "")
+                + "    print('PAGES='+json.dumps(f.discover_pages(d, on_step=f.report)), flush=True)\n"
+                "except Exception as e:\n"
+                "    print('ERROR='+str(e).splitlines()[0][:300], flush=True)\n")
+        log = open(acc_dir / "login.log", "w")
+        procs[f"login{aid}"] = subprocess.Popen([sys.executable, "-u", "-c", code, str(acc_dir)], cwd=ROOT,
+                                               stdout=log, stderr=subprocess.STDOUT)
+        procs_kind[aid] = "login" if do_login else "discover"
+
+    procs_kind: dict[int, str] = {}
+
     @app.post("/accounts/{aid}/login")
     def login(aid: int):
         """Mở cửa sổ Chromium để người dùng tự đăng nhập; xong thì tự quét Page."""
-        acc_dir = store.account_dir(data, aid)
-        code = ("import sys,json; from pathlib import Path; from dytool import fb_browser as f; "
-                "d=Path(sys.argv[1]); f.login(d); print('PAGES='+json.dumps(f.discover_pages(d)))")
-        log = open(acc_dir / "login.log", "w")
-        procs[f"login{aid}"] = subprocess.Popen([sys.executable, "-c", code, str(acc_dir)], cwd=ROOT,
-                                               stdout=log, stderr=subprocess.STDOUT)
+        if _busy(aid):          # đang có cửa sổ mở cho tài khoản này -> không mở thêm (trùng hồ sơ trình duyệt)
+            return RedirectResponse("/accounts", 303)
+        _spawn_account_job(aid, do_login=True)
         store.x("UPDATE accounts SET status='dang_dang_nhap' WHERE id=?", (aid,))
         store.log(f"Mở trình duyệt đăng nhập cho tài khoản #{aid}")
         return RedirectResponse("/accounts", 303)
 
     @app.post("/accounts/{aid}/discover")
     def discover(aid: int):
-        from .. import fb_browser
-        acc_dir = store.account_dir(data, aid)
-        try:
-            res = fb_browser.discover_pages(acc_dir)
-        except Exception as e:
-            store.log(f"Tài khoản #{aid}: không quét được Page ({e})", "error")
-            store.x("UPDATE accounts SET status='chua_dang_nhap' WHERE id=?", (aid,))
-            return RedirectResponse("/accounts", 303)
-        _save_discovery(aid, res)
+        if not _busy(aid):
+            _spawn_account_job(aid, do_login=False)
+            store.log(f"Tài khoản #{aid}: đang quét lại Page")
         return RedirectResponse("/accounts", 303)
+
+    def _job_state(aid: int) -> dict:
+        """Đọc login.log -> {pct, text, error, pages}."""
+        try:
+            out = (store.account_dir(data, aid) / "login.log").read_text(errors="ignore")
+        except OSError:
+            out = ""
+        st = {"pct": 0, "text": "Đang khởi động…", "error": None, "pages": None}
+        for line in out.splitlines():
+            if line.startswith("STEP="):
+                pct, _, text = line[5:].partition("|")
+                st["pct"], st["text"] = int(pct or 0), text
+            elif line.startswith("ERROR="):
+                st["error"] = line[6:]
+            elif line.startswith("PAGES="):
+                st["pages"] = json.loads(line[6:])
+        if procs_kind.get(aid) == "discover":     # chỉ quét Page: các bước 40-100% -> giãn ra 0-100%
+            st["pct"] = max(0, (st["pct"] - 40) * 100 // 60)
+        return st
 
     def _save_discovery(aid: int, res: dict):
         for p in res["pages"]:
@@ -145,23 +182,29 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
         store.x("UPDATE accounts SET status='da_dang_nhap', fb_user=? WHERE id=?", (res.get("fb_user"), aid))
         store.log(f"Tài khoản #{aid}: tìm thấy {len(res['pages'])} Page")
 
-    @app.get("/partials/accounts", response_class=HTMLResponse)
-    def accounts_poll(request: Request):
-        # hoàn tất đăng nhập đang chờ
-        for key, p in list(procs.items()):
-            if key.startswith("login") and p.poll() is not None:
-                aid = int(key[5:])
-                out = (store.account_dir(data, aid) / "login.log").read_text(errors="ignore")
-                line = next((l for l in out.splitlines() if l.startswith("PAGES=")), None)
-                if line:
-                    _save_discovery(aid, json.loads(line[6:]))
-                else:
-                    store.x("UPDATE accounts SET status='chua_dang_nhap' WHERE id=?", (aid,))
-                    store.log(f"Tài khoản #{aid}: đăng nhập chưa xong", "error")
-                procs.pop(key)
-                # báo trình duyệt tải lại trang để hiện Page vừa tìm thấy
-                return HTMLResponse("", headers={"HX-Refresh": "true"})
-        return HTMLResponse("")
+    @app.get("/partials/accounts/{aid}", response_class=HTMLResponse)
+    def account_progress(request: Request, aid: int):
+        if not _busy(aid):
+            _finalize(aid)      # việc đã xong -> lưu kết quả, tải lại trang để hiện Page vừa tìm thấy
+            return HTMLResponse("", headers={"HX-Refresh": "true"})
+        return render(request, "_account_progress.html", a={"id": aid}, st=_job_state(aid),
+                      kind=procs_kind.get(aid, "login"))
+
+    def _finalize(aid: int):
+        p = procs.pop(f"login{aid}", None)
+        if not p:
+            return
+        kind = procs_kind.pop(aid, "login")
+        st = _job_state(aid)
+        if st["pages"] is not None:
+            _save_discovery(aid, st["pages"])
+            return
+        reason = st["error"] or "tiến trình dừng giữa chừng"
+        if kind == "login":
+            store.x("UPDATE accounts SET status='chua_dang_nhap' WHERE id=?", (aid,))
+            store.log(f"Tài khoản #{aid}: đăng nhập chưa xong — {reason}", "error")
+        else:
+            store.log(f"Tài khoản #{aid}: không quét được Page — {reason}", "error")
 
     @app.post("/accounts/{aid}/delete")
     def delete_account(aid: int):

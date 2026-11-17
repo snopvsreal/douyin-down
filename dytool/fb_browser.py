@@ -16,15 +16,34 @@ class FBError(RuntimeError):
     pass
 
 
+class ProfileBusy(FBError):
+    """Hồ sơ trình duyệt của tài khoản đang được 1 cửa sổ Chromium khác dùng (đang đăng nhập / đang đăng bài)."""
+
+
+def report(pct: int, text: str) -> None:
+    """In 1 dòng tiến trình cho giao diện đọc (tiến trình đăng nhập chạy ở tiến trình con, ghi ra login.log)."""
+    print(f"STEP={int(pct)}|{text}", flush=True)
+
+
+def _noop(pct: int, text: str) -> None:
+    pass
+
+
 def _context(pw, data_dir: Path, headless: bool):
     # channel="chromium": dùng Chromium đầy đủ cả khi chạy ẩn (headless shell không đọc được cookie
     # mà bản có cửa sổ đã mã hoá bằng Keychain -> mất phiên đăng nhập)
-    ctx = pw.chromium.launch_persistent_context(
-        str(data_dir / PROFILE), headless=headless, channel="chromium", user_agent=UA, locale="vi-VN",
-        viewport={"width": 1366, "height": 900},
-        args=["--disable-blink-features=AutomationControlled"]
-             + (["--use-mock-keychain", "--password-store=basic"] if sys.platform == "darwin" else []),
-    )
+    try:
+        ctx = pw.chromium.launch_persistent_context(
+            str(data_dir / PROFILE), headless=headless, channel="chromium", user_agent=UA, locale="vi-VN",
+            viewport={"width": 1366, "height": 900},
+            args=["--disable-blink-features=AutomationControlled"]
+                 + (["--use-mock-keychain", "--password-store=basic"] if sys.platform == "darwin" else []),
+        )
+    except Exception as e:
+        if "ProcessSingleton" in str(e) or "already in use" in str(e):
+            raise ProfileBusy("Trình duyệt của tài khoản này đang mở (đang đăng nhập hoặc đang đăng bài) — "
+                              "đợi xong rồi thử lại") from None
+        raise
     state = data_dir / STATE
     if state.exists() and not logged_in(ctx):
         import json
@@ -46,23 +65,36 @@ def logged_in(ctx) -> bool:
     return any(c["name"] == "c_user" for c in ctx.cookies("https://www.facebook.com"))
 
 
-def login(data_dir: Path, timeout_min: int = 10) -> None:
+def login(data_dir: Path, timeout_min: int = 10, on_step=_noop) -> None:
     """Mở Chromium để BẠN tự đăng nhập Facebook (kể cả 2FA). Tự đóng khi đăng nhập xong."""
     from playwright.sync_api import sync_playwright
+    on_step(3, "Mở trình duyệt")
     with sync_playwright() as pw:
         ctx = _context(pw, data_dir, headless=False)
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        page.goto("https://www.facebook.com/")
-        print("Hãy đăng nhập Facebook trong cửa sổ vừa mở (tool không đọc mật khẩu)...")
-        deadline = time.time() + timeout_min * 60
-        while time.time() < deadline and not logged_in(ctx):
-            time.sleep(2)
-        if not logged_in(ctx):
-            ctx.close()
-            raise FBError("Hết thời gian chờ đăng nhập")
-        time.sleep(3)
-        _save_state(ctx, data_dir)
-        ctx.close()
+        try:
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            page.goto("https://www.facebook.com/")
+            print("Hãy đăng nhập Facebook trong cửa sổ vừa mở (tool không đọc mật khẩu)...")
+            deadline = time.time() + timeout_min * 60
+            last = 0.0
+            while time.time() < deadline and not logged_in(ctx):
+                if not ctx.pages:
+                    raise FBError("Bạn đã đóng cửa sổ đăng nhập trước khi đăng nhập xong")
+                if time.time() - last >= 5:
+                    left = int(deadline - time.time())
+                    on_step(10, f"Chờ bạn đăng nhập trong cửa sổ Chromium (còn {left // 60}:{left % 60:02d})")
+                    last = time.time()
+                time.sleep(1)
+            if not logged_in(ctx):
+                raise FBError(f"Hết {timeout_min} phút chờ đăng nhập")
+            on_step(30, "Đã đăng nhập — đang lưu phiên")
+            time.sleep(3)
+            _save_state(ctx, data_dir)
+        finally:
+            try:
+                ctx.close()
+            except Exception:
+                pass
     print("Đã lưu phiên đăng nhập.")
 
 
@@ -270,37 +302,63 @@ def publish(data_dir: Path, video: Path, caption: str, cfg: dict, dry_run: bool 
             ctx.close()
 
 
-def discover_pages(acc_dir: Path) -> dict:
+def _page_links(page) -> dict[str, str]:
+    import re
+    found: dict[str, str] = {}
+    for a in page.query_selector_all('a[href*="facebook.com/"]'):
+        name = (a.inner_text() or "").strip()
+        href = a.get_attribute("href") or ""
+        m = re.search(r"profile\.php\?id=(\d+)|facebook\.com/([A-Za-z0-9.]{5,})/?$", href)
+        if not name or "\n" in name or len(name) > 80 or not m or name == "Meta Business Suite":
+            continue
+        found.setdefault(name, m.group(1) or m.group(2))
+    return found
+
+
+def discover_pages(acc_dir: Path, on_step=_noop) -> dict:
     """Quét các Page mà tài khoản quản lý. Trả về {"fb_user": tên, "pages": [{name, profile_id, asset_id}]}.
     asset_id (Page ID trong Business Suite) đọc từ trường delegate_page_id trong trang Page."""
     import re
     from playwright.sync_api import sync_playwright
+    on_step(40, "Mở danh sách Page bạn quản lý")
     with sync_playwright() as pw:
         ctx = _context(pw, acc_dir, headless=True)
         try:
             if not logged_in(ctx):
                 raise FBError("Tài khoản chưa đăng nhập")
             page = ctx.new_page()
-            page.goto("https://www.facebook.com/pages/?category=your_pages", wait_until="domcontentloaded")
-            page.wait_for_timeout(7000)
             found: dict[str, str] = {}
-            for a in page.query_selector_all('a[href*="facebook.com/"]'):
-                name = (a.inner_text() or "").strip()
-                href = a.get_attribute("href") or ""
-                m = re.search(r"profile\.php\?id=(\d+)|facebook\.com/([A-Za-z0-9.]{5,})/?$", href)
-                if not name or "\n" in name or len(name) > 80 or not m or name == "Meta Business Suite":
-                    continue
-                found.setdefault(name, m.group(1) or m.group(2))
+            # ngay sau khi đăng nhập, danh sách Page tải chậm -> chờ tới khi số Page đứng yên (tối đa ~30s, thử 2 lần)
+            for attempt in range(2):
+                page.goto("https://www.facebook.com/pages/?category=your_pages", wait_until="domcontentloaded")
+                prev, stable = -1, 0
+                for _ in range(15):
+                    page.wait_for_timeout(2000)
+                    found = _page_links(page)
+                    on_step(45, f"Đang đọc danh sách Page… thấy {len(found)}")
+                    stable = stable + 1 if len(found) == prev and found else 0
+                    prev = len(found)
+                    if stable >= 2:
+                        break
+                if found:
+                    break
             pages = []
-            for name, pid in found.items():
+            total = len(found)
+            for i, (name, pid) in enumerate(found.items()):
+                on_step(50 + 45 * i // max(total, 1), f"Lấy mã Page {i + 1}/{total}: {name}")
                 url = (f"https://www.facebook.com/profile.php?id={pid}" if pid.isdigit()
                        else f"https://www.facebook.com/{pid}")
                 page.goto(url, wait_until="domcontentloaded")
-                page.wait_for_timeout(5000)
-                m = re.search(r'"delegate_page_id":"(\d+)"', page.content())
+                m = None
+                for _ in range(5):          # chờ tối đa ~10s cho tới khi có delegate_page_id
+                    page.wait_for_timeout(2000)
+                    m = re.search(r'"delegate_page_id":"(\d+)"', page.content())
+                    if m:
+                        break
                 if m:
                     pages.append({"name": name, "profile_id": pid, "asset_id": m.group(1)})
             user = next((c["value"] for c in ctx.cookies("https://www.facebook.com") if c["name"] == "c_user"), "")
+            on_step(100, f"Xong — tìm thấy {len(pages)} Page")
             return {"fb_user": user, "pages": pages}
         finally:
             ctx.close()

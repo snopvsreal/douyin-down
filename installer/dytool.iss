@@ -231,11 +231,17 @@ var
   RC: Integer;
   Cmd: String;
 begin
+  // $a = các tiến trình "tổ tiên" của chính lệnh này (PowerShell <- trình cài <- … <- dytool khi tự cập nhật). Với tổ
+  // tiên chỉ đóng đúng nó, KHÔNG đóng cả cây (/T): cây của app chứa chính trình cài -> trước đây trình cài tự đóng
+  // mình khi dytool tự cập nhật (app biến mất, không cài, không mở lại).
   Cmd := '$r=''' + Root + '''; $d=@(''\.venv\'',''\.python\'',''\vendor\'',''\tools\''); ' +
+         '$a=@(); $x=$PID; for ($i=0; $i -lt 30 -and $x; $i++) { $a+=$x; ' +
+         '$x=(Get-CimInstance Win32_Process -Filter (''ProcessId='' + $x)).ParentProcessId }; ' +
          'Get-CimInstance Win32_Process | ForEach-Object { $p=$_; ' +
          'if ($p.ProcessId -ne $PID -and $p.ExecutablePath -and ' +
          '($d | Where-Object { $p.ExecutablePath -like ($r + $_ + ''*'') })) ' +
-         '{ taskkill /PID $p.ProcessId /T /F | Out-Null } }; Start-Sleep -Seconds 2';
+         '{ if ($a -contains $p.ProcessId) { taskkill /PID $p.ProcessId /F | Out-Null } ' +
+         'else { taskkill /PID $p.ProcessId /T /F | Out-Null } } }; Start-Sleep -Seconds 2';
   Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
        '-NoProfile -ExecutionPolicy Bypass -Command "' + Cmd + '"', '', SW_HIDE, ewWaitUntilTerminated, RC);
 end;

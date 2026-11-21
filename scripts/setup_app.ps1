@@ -122,10 +122,20 @@ try {
     # chạy card GTX 10xx). Tách giọng Demucs nhanh ~3 lần. Chọn tay: biến môi trường DYTOOL_TORCH=cpu | gpu
     $variant = "cpu"
     $gpuName = ""
+    # Trình cài có thể chạy script này bằng PowerShell 32-bit: khi đó System32 bị chuyển hướng sang SysWOW64 (không có
+    # nvidia-smi) -> tìm cả qua Sysnative / thư mục NVIDIA. Môi trường đang có torch GPU thì giữ GPU (không tự hạ CPU).
+    $smi = @("$env:windir\Sysnative\nvidia-smi.exe", "$env:windir\System32\nvidia-smi.exe",
+             "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
+             (Get-Command nvidia-smi -ErrorAction SilentlyContinue).Source) |
+        Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    $hadGpu = [bool](Get-ChildItem "$Root\.venv\Lib\site-packages" -Filter "torch-*+cu*.dist-info" -ErrorAction SilentlyContinue)
     if ($env:DYTOOL_TORCH -in @("cpu", "gpu")) { $variant = $env:DYTOOL_TORCH }
-    elseif (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
-        $q = & nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>$null | Select-Object -First 1
+    elseif ($smi) {
+        $q = & $smi --query-gpu=name,compute_cap --format=csv,noheader 2>$null | Select-Object -First 1
         if ($q -match '^\s*(.+?),\s*(\d+\.\d+)\s*$' -and [double]$Matches[2] -ge 5.0) { $variant = "gpu"; $gpuName = $Matches[1] }
+    }
+    if ($variant -eq "cpu" -and $hadGpu -and -not $env:DYTOOL_TORCH) {
+        $variant = "gpu"; $gpuName = "(đang dùng bản GPU)"
     }
     if ($variant -eq "gpu") { Write-Host "   Có card NVIDIA $gpuName -> cài bản tăng tốc GPU (tải thêm ~2.5 GB)" }
     & uv sync --frozen --python 3.12 --extra $variant 2>&1 | ForEach-Object { "   $_" } | Out-Host     # in vào setup.log (Start-Transcript không bắt được chữ của lệnh ngoài)

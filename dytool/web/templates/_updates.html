@@ -1,0 +1,46 @@
+{# Khung "Cập nhật" ở Tổng quan: tự làm mới 2s khi đang tải / cài, 60s lúc bình thường #}
+<section class="card updates" id="cap-nhat" aria-labelledby="h-upd"
+         hx-get="/partials/updates" hx-trigger="every {{ '2s' if busy else '60s' }}" hx-swap="outerHTML">
+  <div class="row">
+    <h2 id="h-upd" style="margin:0">Cập nhật</h2>
+    <div class="spacer"></div>
+    <span class="small muted">{% if checked_at %}Kiểm tra lúc {{ vnt(checked_at, '%H:%M') }}{% else %}Đang kiểm tra…{% endif %}</span>
+    <button class="btn sm ghost" hx-post="/updates/check" hx-target="closest section" hx-swap="outerHTML"
+            hx-disabled-elt="this">Kiểm tra lại</button>
+  </div>
+  {% if msg %}<p class="hint" role="alert" style="color:var(--warn); margin:8px 0 0">{{ msg }}</p>{% endif %}
+  {% if check_error %}<p class="hint" style="margin:6px 0 0">Không hỏi được GitHub ({{ check_error[:120] }}) — kiểm tra mạng.</p>{% endif %}
+  <table class="upd-table">
+    {% for r in rows %}
+    {% set j = r.job %}
+    <tr>
+      <td><b>{{ r.name }}</b>
+        <div class="small muted">{% if r.missing %}Chưa cài trên máy này{% else %}Đang dùng {{ r.installed }}{% endif %}
+          {% if r.latest and (r.has_update or r.missing) %} · Bản mới: <a href="{{ r.page }}" target="_blank" rel="noopener">{{ r.latest }}</a>{% endif %}</div>
+        {% if j and j.state in ('downloading', 'installing') %}
+          <div class="upd-progress" role="status">
+            <progress max="100" {% if j.pct is not none %}value="{{ j.pct }}"{% endif %} aria-label="Tiến độ cập nhật {{ r.name }}"></progress>
+            <span class="small">{{ j.msg }}</span></div>
+        {% elif j and j.state == 'error' %}
+          <div class="small" role="alert" style="color:var(--err)">Cập nhật lỗi: {{ j.msg }}</div>
+        {% elif j and j.state == 'done' %}
+          <div class="small" style="color:var(--ok)">{{ j.msg }}</div>
+        {% endif %}
+      </td>
+      <td style="text-align:right; white-space:nowrap">
+        {% if j and j.state in ('downloading', 'installing') %}
+          <span class="pill warn">Đang cập nhật</span>
+        {% elif r.has_update %}
+          <button class="btn sm primary" hx-post="/updates/{{ r.app }}" hx-target="closest section" hx-swap="outerHTML"
+                  hx-disabled-elt="this"
+                  hx-confirm="{% if r.app == 'dytool' %}dytool sẽ tự đóng trong lúc cài bản {{ r.latest }} ({{ r.size_mb }} MB) rồi tự mở lại. Việc đang làm dở sẽ làm lại sau. Cập nhật ngay?{% elif r.app == 'voicestudio' %}VoiceStudio sẽ được đóng trong lúc cài bản {{ r.latest }} ({{ r.size_mb }} MB) rồi mở lại. Cập nhật ngay?{% else %}ShardBrowser sẽ được tắt trong lúc cài bản {{ r.latest }} ({{ r.size_mb }} MB) rồi mở lại. Cập nhật ngay?{% endif %}">Cập nhật lên {{ r.latest }}</button>
+        {% elif r.missing %}
+          <span class="pill">Chưa cài</span>
+        {% elif r.latest %}
+          <span class="pill ok">Mới nhất</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>

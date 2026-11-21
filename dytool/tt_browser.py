@@ -104,9 +104,10 @@ def valid_schedule(when: dt.datetime | None) -> dt.datetime | None:
 
 
 def publish(acc_dir: Path, video: Path, caption: str, schedule_at: dt.datetime | None = None,
-            dry_run: bool = False, headless: bool = False) -> dict:
+            dry_run: bool = False, headless: bool = False, expect_user: str = "") -> dict:
     """Đăng (hoặc hẹn giờ) 1 video lên TikTok. dry_run=True: điền hết form rồi DỪNG trước nút Post.
-    schedule_at: giờ VN (naive) — phải sau ít nhất 20 phút và trong 10 ngày (giới hạn của TikTok)."""
+    schedule_at: giờ VN (naive) — phải sau ít nhất 20 phút và trong 10 ngày (giới hạn của TikTok).
+    expect_user: @tên kênh đã lưu — hồ sơ đang đăng nhập kênh khác (đổi hồ sơ / đăng nhập nhầm) thì dừng."""
     from playwright.sync_api import sync_playwright
     from tiktok_uploader import upload as tu
     from . import progress
@@ -126,6 +127,14 @@ def publish(acc_dir: Path, video: Path, caption: str, schedule_at: dt.datetime |
         try:
             if not logged_in(ctx):
                 raise TTError("Phiên đăng nhập TikTok đã hết — vào Tài khoản & Page bấm Đăng nhập TikTok")
+            if expect_user:
+                progress.step("Kiểm tra đúng kênh")
+                who = _whoami(page).get("username") or ""
+                if who and who.lstrip("@").lower() != expect_user.lstrip("@").lower():
+                    raise TTError(f"Hồ sơ trình duyệt đang đăng nhập @{who}, không phải kênh @{expect_user.lstrip('@')} "
+                                  "— dừng để tránh đăng nhầm kênh. Đăng nhập lại đúng kênh ở Tài khoản & kênh")
+                if not who:
+                    print("Không đọc được tên kênh để đối chiếu — vẫn đăng", flush=True)
             progress.step("Tải video lên + điền mô tả" + (" + hẹn giờ" if sched else ""))
             if dry_run:     # đi hết các bước nhưng không bấm Post
                 tu._post_video = lambda p: print("[dry_run] dừng trước nút Post", flush=True)

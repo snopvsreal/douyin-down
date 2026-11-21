@@ -12,8 +12,14 @@ Write-Host "dytool $ver"
 # 1) launcher dytool.exe: csc.exe co san trong .NET Framework 4 cua Windows
 $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 New-Item -ItemType Directory -Force -Path build | Out-Null
+# phien ban cua dytool.exe (Properties > Details) lay theo pyproject.toml, khong ghi cung trong launcher.cs
+$v4 = (($ver -split '[^0-9]+' | Where-Object { $_ -ne '' } | Select-Object -First 3) + @('0', '0', '0', '0'))[0..3] -join '.'
+Set-Content -Path build\version.cs -Encoding ASCII -Value @(
+    "[assembly: System.Reflection.AssemblyVersion(`"$v4`")]",
+    "[assembly: System.Reflection.AssemblyFileVersion(`"$v4`")]",
+    "[assembly: System.Reflection.AssemblyInformationalVersion(`"$ver`")]")
 & $csc /nologo /codepage:65001 /target:winexe /optimize+ /win32icon:installer\dytool.ico `
-    /reference:System.Windows.Forms.dll /out:build\dytool.exe installer\launcher.cs
+    /reference:System.Windows.Forms.dll /out:build\dytool.exe installer\launcher.cs build\version.cs
 if ($LASTEXITCODE -ne 0) { throw "Build dytool.exe that bai" }
 Write-Host "[OK] build\dytool.exe"
 

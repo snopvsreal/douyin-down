@@ -199,7 +199,11 @@ def publish(data_dir: Path, video: Path, caption: str, cfg: dict, dry_run: bool 
             page.goto(COMPOSER.format(asset_id=asset_id), wait_until="domcontentloaded")
             page.get_by_role("button", name="Thêm video").first.wait_for(timeout=60000)
             page.wait_for_timeout(2000)
-            # an toàn: phải đúng Page trong ô "Đăng lên"
+            # an toàn: Business Suite phải vẫn ở đúng Page (asset_id trên địa chỉ — tài khoản không quản lý Page đó thì
+            # Business Suite tự chuyển sang Page khác) VÀ có tên Page trên trang
+            if f"asset_id={asset_id}" not in page.url:
+                raise FBError(f"Business Suite đã chuyển sang Page khác (không còn asset_id {asset_id}) — dừng để "
+                              f"tránh đăng nhầm. Tài khoản này còn quản lý Page '{page_name}' không?")
             if page.get_by_text(page_name, exact=True).count() == 0:
                 raise FBError(f"Ô 'Đăng lên' không phải Page '{page_name}' — dừng để tránh đăng nhầm")
 
@@ -256,23 +260,29 @@ def publish(data_dir: Path, video: Path, caption: str, cfg: dict, dry_run: bool 
                 verdict = "copyright_issue"
             page.screenshot(path=str(log_dir / f"{stamp}_{video.stem}_share.png"))
             if verdict == "copyright_issue" and not cfg.get("post_on_copyright_issue", False):
-                raise FBError("Facebook báo có thể vi phạm bản quyền — không đăng")
+                raise FBError("Sau 2 phút Facebook chưa báo 'an toàn để đăng' (có thể vướng bản quyền, hoặc kiểm tra "
+                              "lâu) — chưa đăng; xem ảnh *_share.png trong data/fb_logs rồi duyệt lại nếu ổn")
             if dry_run:
                 return {"status": "dry_run", "copyright": verdict, **group_info}
 
             final = "Lên lịch" if schedule_at else "Chia sẻ"
             progress.step("Xác nhận " + ("lên lịch" if schedule_at else "đăng"))
+            before = page.inner_text("body").lower()
             page.get_by_role("button", name=final, exact=True).last.click()
-            # thành công khi rời trang composer hoặc hiện thông báo đã đăng
+            # thành công = HIỆN RA câu báo đã đăng / đã lên lịch mà trước khi bấm chưa có trên trang.
+            # Không còn coi "rời trang composer" là thành công: bị đá sang trang đăng nhập / checkpoint cũng rời trang
+            done_phrases = ("đang xử lý thước phim", "đã được chia sẻ", "đã lên lịch")
             ok = False
             for _ in range(90):
                 page.wait_for_timeout(2000)
                 body = page.inner_text("body").lower()
                 # "Đang xử lý thước phim — Khi xử lý xong, hệ thống sẽ đăng thước phim..." = đã gửi đăng thành công
-                if ("reels_composer" not in page.url or "đang xử lý thước phim" in body or "đã được chia sẻ" in body
-                        or "đã lên lịch" in body):
+                if any(p in body and p not in before for p in done_phrases):
                     ok = True
                     break
+                if any(w in page.url for w in ("/login", "checkpoint")):
+                    raise FBError("Facebook chuyển sang trang đăng nhập / kiểm tra bảo mật sau khi bấm "
+                                  f"{final} — chưa chắc đã đăng, xem ảnh trong data/fb_logs")
             page.screenshot(path=str(log_dir / f"{stamp}_{video.stem}_done.png"))
             if ok and page.get_by_role("button", name="Xong").count():
                 page.get_by_role("button", name="Xong").first.click()

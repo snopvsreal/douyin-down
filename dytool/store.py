@@ -111,6 +111,38 @@ DEFAULT_PAGE_SETTINGS = {
 }
 
 
+# Giờ Việt Nam cố định UTC+7 (không có giờ mùa hè). Mọi lịch đăng tính theo giờ này, KHÔNG theo múi giờ của máy:
+# máy đặt múi giờ khác thì lịch gửi lên Facebook / TikTok vẫn đúng giờ VN (Page / TikTok đều hiểu là giờ VN).
+import datetime as _dt
+VN_TZ = _dt.timezone(_dt.timedelta(hours=7))
+
+
+def vn_time(ts: float) -> _dt.datetime:
+    """unix ts -> datetime giờ VN (naive, để gõ vào Facebook / TikTok và hiển thị)."""
+    return _dt.datetime.fromtimestamp(ts, VN_TZ).replace(tzinfo=None)
+
+
+def vn_ts(d: _dt.datetime) -> int:
+    """datetime giờ VN (naive) -> unix ts."""
+    return int(d.replace(tzinfo=VN_TZ).timestamp())
+
+
+def vn_fmt(ts, fmt: str = "%H:%M %d/%m") -> str:
+    return vn_time(ts).strftime(fmt) if ts else ""
+
+
+def parse_number(v, default):
+    """Giá trị ô số -> int/float theo kiểu mặc định; ô mặc định là số nguyên vẫn nhận số lẻ (vd Nghiêng 1.5 độ).
+    Rỗng / không phải số -> ValueError."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        f = float(v)
+    else:
+        f = float(str(v).strip().replace(",", "."))      # rỗng -> ValueError
+    if f != f or f in (float("inf"), float("-inf")):
+        raise ValueError(v)
+    return int(f) if isinstance(default, int) and f.is_integer() else f
+
+
 class Store:
     def __init__(self, path: Path):
         self.path = path
@@ -148,7 +180,15 @@ class Store:
         return d
 
     def page_settings(self, page) -> dict:
-        return {**DEFAULT_PAGE_SETTINGS, **json.loads(page["settings"] or "{}")}
+        s = {**DEFAULT_PAGE_SETTINGS, **json.loads(page["settings"] or "{}")}
+        for k, default in DEFAULT_PAGE_SETTINGS.items():
+            # ô số lỡ lưu rỗng / sai (bản cũ) -> dùng mặc định, không làm sập trang Duyệt / worker
+            if isinstance(default, (int, float)) and not isinstance(default, bool):
+                try:
+                    s[k] = parse_number(s[k], default)
+                except ValueError:
+                    s[k] = default
+        return s
 
     def save_page_settings(self, page_id: int, settings: dict) -> None:
         self.x("UPDATE pages SET settings=? WHERE id=?", (json.dumps(settings, ensure_ascii=False), page_id))
@@ -195,6 +235,18 @@ class Store:
         cols = ", ".join(f"{k}=?" for k in fields)
         self.x(f"UPDATE videos SET {cols} WHERE id=? AND page_id=?", (*fields.values(), vid, page_id))
 
+    def set_video_if(self, vid: str, page_id: int, expect: tuple[str, ...], **fields) -> bool:
+        """Chỉ đổi khi video còn ở 1 trong các trạng thái `expect` (nguyên tử). False = trạng thái đã bị đổi
+        (người dùng vừa bấm Bỏ / Huỷ lịch, hoặc worker vừa đăng) -> bỏ thao tác, không ghi đè."""
+        fields["updated_at"] = int(time.time())
+        cols = ", ".join(f"{k}=?" for k in fields)
+        marks = ",".join("?" * len(expect))
+        with self.lock:
+            cur = self.conn.execute(f"UPDATE videos SET {cols} WHERE id=? AND page_id=? AND status IN ({marks})",
+                                    (*fields.values(), vid, page_id, *expect))
+            self.conn.commit()
+            return cur.rowcount > 0
+
     def counts(self, page_id: int | None = None) -> dict:
         sql = "SELECT status, COUNT(*) n FROM videos" + (" WHERE page_id=?" if page_id else "") + " GROUP BY status"
         return {r["status"]: r["n"] for r in self.q(sql, (page_id,) if page_id else ())}
@@ -219,17 +271,20 @@ class Store:
         taken = [r["scheduled_at"] for r in self.q(
             "SELECT scheduled_at FROM videos WHERE page_id=? AND status IN ('schedule_pending','scheduled') "
             "AND scheduled_at IS NOT NULL", (page_id,))]
+        # bài đã đăng ngay trong ngày cũng chiếm hạn mức ngày đó (trước chỉ đếm bài hẹn giờ -> vượt max_posts_per_day)
+        taken += [r["uploaded_at"] for r in self.q(
+            "SELECT uploaded_at FROM videos WHERE page_id=? AND uploaded_at>=?", (page_id, int(time.time()) - 86400))]
         taken_set = set(taken)
-        today = dt.date.today()
+        today = vn_time(time.time()).date()
         earliest = time.time() + min_lead
         for d in range(31):
             day = today + dt.timedelta(days=d)
-            day_start = int(dt.datetime.combine(day, dt.time()).timestamp())
+            day_start = vn_ts(dt.datetime.combine(day, dt.time()))
             used_today = sum(1 for t in taken if day_start <= t < day_start + 86400)
             for h, m in hm:
                 if used_today >= per_day:
                     break
-                ts = int(dt.datetime.combine(day, dt.time(h, m)).timestamp())
+                ts = vn_ts(dt.datetime.combine(day, dt.time(h, m)))
                 if ts >= earliest and ts not in taken_set:
                     return ts
         return None

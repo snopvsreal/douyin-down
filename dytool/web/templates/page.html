@@ -16,6 +16,15 @@
   <form method="post" action="/pages/{{ page.id }}/scan"><button class="btn">Quét nguồn ngay</button></form>
 </div>
 {% if request.query_params.get('saved') %}<div class="notice" role="status">Đã lưu cài đặt.</div>{% endif %}
+{% if request.query_params.get('bad') %}
+  {% set names = {'max_posts_per_day': 'Số bài tối đa / ngày', 'min_gap_minutes': 'Khoảng cách tối thiểu (phút)',
+                  'poll_minutes': 'Quét lại sau (phút)', 'min_likes': 'Lượt thích tối thiểu', 'min_duration': 'Độ dài tối thiểu',
+                  'max_duration': 'Độ dài tối đa', 'tint_opacity': 'Độ đậm màu phủ', 'rotate_deg': 'Nghiêng (độ)',
+                  'voice_seed': 'Seed giọng', 'tiktok_mirror': 'Đăng kèm TikTok'} %}
+  <div class="notice warn" role="alert">Chưa lưu — ô sau không phải số:
+    {% for k in request.query_params.get('bad').split(',') %}<b>{{ names.get(k, k) }}</b>{{ ', ' if not loop.last }}{% endfor %}.
+    Sửa lại rồi bấm Lưu.</div>
+{% endif %}
 
 <nav class="flow f4" aria-label="Video của kênh này">
   <a href="/review?page={{ page.id }}" class="{{ 'is-hot' if stats.get('review') }}"><span class="n">{{ stats.get('review', 0) }}</span><span class="l">Chờ duyệt</span></a>
@@ -83,7 +92,7 @@
             <form method="post" action="/sources/{{ src.id }}/toggle" style="display:inline">
               <button class="btn sm ghost">{{ 'Tạm tắt' if src.enabled else 'Bật lại' }}</button></form>
             <form method="post" action="/sources/{{ src.id }}/delete" style="display:inline"
-                  onsubmit="return confirm('Xoá nguồn {{ src.value }}?')"><button class="btn sm ghost danger">Xoá</button></form>
+                  hx-confirm="Xoá nguồn {{ src.value }}?"><button class="btn sm ghost danger">Xoá</button></form>
           </td>
         </tr>
         {% endfor %}
@@ -144,7 +153,7 @@
           <tr class="small">
             <td style="padding-left:0"><a href="https://www.douyin.com/video/{{ c.video_id }}" target="_blank" rel="noopener">{{ c.video_id }}</a>
               <span class="muted">→ {{ c.dst_name }}</span></td>
-            <td class="num">{% if c.scheduled_at %}{{ time.strftime('%H:%M %d/%m', time.localtime(c.scheduled_at)) }}{% else %}đăng ngay{% endif %}</td>
+            <td class="num">{% if c.scheduled_at %}{{ vnt(c.scheduled_at, '%H:%M %d/%m') }}{% else %}đăng ngay{% endif %}</td>
             <td>{% set cls = {'uploaded':'ok','scheduled':'ok','failed':'err','pending':'info'}[c.status] %}
               <span class="pill {{ cls }}">{{ {'pending':'Chờ đăng','scheduled':'Đã hẹn giờ','uploaded':'Đã đăng','failed':'Lỗi'}[c.status] }}</span>
               {% if c.error %}<div style="color:var(--err)">{{ c.error[:160] }}</div>{% endif %}</td>

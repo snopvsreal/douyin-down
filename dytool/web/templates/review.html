@@ -61,15 +61,15 @@
     <tr><th>Giờ đăng</th><th>Kênh</th><th>Caption</th><th>Trạng thái</th><th></th></tr>
     {% for v in sched %}
     <tr>
-      <td class="num" style="white-space:nowrap"><b>{{ time.strftime('%H:%M', time.localtime(v.scheduled_at)) }}</b>
-        <span class="small muted">{{ time.strftime('%d/%m', time.localtime(v.scheduled_at)) }}</span></td>
+      <td class="num" style="white-space:nowrap"><b>{{ vnt(v.scheduled_at, '%H:%M') }}</b>
+        <span class="small muted">{{ vnt(v.scheduled_at, '%d/%m') }}</span></td>
       <td class="small">{{ v.page_name }}{% if v.platform == 'tiktok' %} <span class="tag tt">TikTok</span>{% endif %}</td>
       <td class="small"><div class="trunc">{{ v.caption }}</div></td>
       <td><span class="pill {{ 'ok' if v.status == 'scheduled' else 'info' }}">{{ STATUS_VI[v.status] }}</span></td>
       <td style="white-space:nowrap; text-align:right">
         {% if v.status == 'schedule_pending' %}
           <button class="btn sm ghost danger" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/unschedule" hx-swap="outerHTML"
-                  hx-disabled-elt="this" hx-confirm="Huỷ lịch đăng lúc {{ time.strftime('%H:%M %d/%m', time.localtime(v.scheduled_at)) }}? Video quay lại mục Chờ duyệt.">Huỷ lịch</button>
+                  hx-disabled-elt="this" hx-confirm="Huỷ lịch đăng lúc {{ vnt(v.scheduled_at, '%H:%M %d/%m') }}? Video quay lại mục Chờ duyệt.">Huỷ lịch</button>
         {% elif v.platform == 'tiktok' %}
           <a class="btn sm ghost" target="_blank" rel="noopener" href="https://www.tiktok.com/tiktokstudio/content">TikTok Studio ↗</a>
         {% else %}

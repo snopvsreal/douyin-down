@@ -9,7 +9,7 @@ using System.Windows.Forms;
 [assembly: System.Reflection.AssemblyTitle("dytool")]
 [assembly: System.Reflection.AssemblyProduct("dytool")]
 [assembly: System.Reflection.AssemblyDescription("Douyin -> edit -> long tieng Viet -> Facebook / TikTok")]
-[assembly: System.Reflection.AssemblyVersion("0.2.0.0")]
+// AssemblyVersion / FileVersion: build.ps1 sinh build/version.cs theo pyproject.toml
 
 static class Launcher
 {

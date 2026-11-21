@@ -34,7 +34,13 @@ def _prepare_env() -> None:
     if not cfg.exists():                      # lần chạy đầu sau khi cài
         shutil.copy(ROOT / "config.example.yaml", cfg)
     if sys.stdout is None or "pythonw" in Path(sys.executable).name.lower():
-        log = open(ROOT / "data" / "app.log", "a", encoding="utf-8", buffering=1)
+        path = ROOT / "data" / "app.log"
+        try:                                  # xoay vòng: quá 5 MB -> đổi thành app.log.1 (giữ 1 bản cũ)
+            if path.stat().st_size > 5 * 1024 * 1024:
+                path.replace(path.with_suffix(".log.1"))
+        except OSError:
+            pass
+        log = open(path, "a", encoding="utf-8", buffering=1)
         sys.stdout = sys.stderr = log
         print(f"\n===== dytool mở lúc {time.strftime('%Y-%m-%d %H:%M:%S')} =====", flush=True)
 
@@ -45,6 +51,21 @@ def _alive() -> bool:
         return httpx.get(URL + "/partials/log", timeout=2).status_code == 200
     except httpx.HTTPError:
         return False
+
+
+_app_mutex = None
+
+
+def _first_instance() -> bool:
+    """Khoá theo tên của Windows: lần mở thứ 2 trở đi trả False (kể cả khi lần 1 chưa khởi động xong)."""
+    global _app_mutex
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    k32 = ctypes.windll.kernel32
+    k32.CreateMutexW.restype = ctypes.c_void_p
+    _app_mutex = k32.CreateMutexW(None, True, "Local\\dytool-desktop")
+    return not (_app_mutex and k32.GetLastError() == 183)     # 183 = ERROR_ALREADY_EXISTS
 
 
 def _message(text: str, title: str = TITLE) -> None:
@@ -58,11 +79,16 @@ def _message(text: str, title: str = TITLE) -> None:
 def _start_server():
     import uvicorn
     from .web.app import create_app
-    app = create_app("config.yaml", autostart=True)
+    # autostart=False: chỉ bật worker SAU KHI server đã chiếm được cổng. Bật trước thì lần mở thứ 2 (cổng đã bị
+    # lần 1 giữ) vẫn kịp chạy 1 worker trong ~30s chờ -> 2 worker cùng đăng 1 video
+    app = create_app("config.yaml", autostart=False)
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="warning"))
     threading.Thread(target=server.run, name="dytool-server", daemon=True).start()
     for _ in range(150):                      # chờ server lên (tối đa ~30s)
         if server.started:
+            from . import updates
+            app.state.worker.start()
+            updates.start_background_checks()
             return app, server
         time.sleep(0.2)
     raise RuntimeError(f"Không mở được server ở cổng {PORT} (cổng đang bị chương trình khác dùng?)")
@@ -79,6 +105,76 @@ def _windows_dark() -> bool:
             return winreg.QueryValueEx(k, "AppsUseLightTheme")[0] == 0
     except OSError:
         return False
+
+
+WEBVIEW2_KEY = r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+
+
+def _has_webview2() -> bool:
+    """Microsoft Edge WebView2 Runtime đã cài? (cửa sổ dytool cần nó). Windows 10 LTSC / Sandbox thường không có."""
+    if sys.platform != "win32":
+        return True
+    import winreg
+    for hive, key in ((winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\" + WEBVIEW2_KEY),
+                      (winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\" + WEBVIEW2_KEY),
+                      (winreg.HKEY_CURRENT_USER, "Software\\" + WEBVIEW2_KEY)):
+        try:
+            with winreg.OpenKey(hive, key) as k:
+                v = str(winreg.QueryValueEx(k, "pv")[0])
+                if v and v != "0.0.0.0":
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def _browser_mode(app, server, pystray, Image) -> None:
+    """Không có WebView2: không mở được cửa sổ riêng -> mở giao diện trong trình duyệt mặc định, giữ icon ở khay.
+    Trước: pywebview lỗi ngầm, tool chạy nhưng người dùng không thấy gì."""
+    import threading
+    import webbrowser
+
+    def open_ui(*_):
+        webbrowser.open(URL)
+
+    if app:
+        app.state.show_window = open_ui          # mở dytool.exe lần 2 -> mở lại tab giao diện
+    open_ui()
+    threading.Thread(target=_message, daemon=True, args=(
+        "Máy này chưa có Microsoft Edge WebView2 Runtime nên dytool mở giao diện trong trình duyệt.\n\n"
+        "Muốn dytool có cửa sổ riêng: cài WebView2 (miễn phí, của Microsoft) tại\n"
+        "https://developer.microsoft.com/microsoft-edge/webview2/  rồi mở lại dytool.",)).start()
+
+    def quit_app(icon, item):
+        w = app.state.worker if app else None
+        if w:
+            w.stop()
+        if server:
+            server.should_exit = True
+        icon.stop()
+
+    with Image.open(ICON) if ICON.exists() else Image.new("RGB", (64, 64), "#172030") as im:
+        im.load()
+        img = im.copy()
+    pystray.Icon("dytool", img, TITLE, menu=pystray.Menu(
+        pystray.MenuItem("Mở dytool (trình duyệt)", open_ui, default=True),
+        pystray.Menu.SEPARATOR, pystray.MenuItem("Thoát dytool", quit_app))).run()
+
+
+def _allow_close_on_shutdown(state: dict) -> None:
+    """Windows tắt máy / đăng xuất: cho cửa sổ đóng hẳn. Không có thì on_closing luôn huỷ (thu xuống khay) ->
+    Windows hiện 'dytool đang ngăn tắt máy'. Worker đang đăng dở -> lần mở sau trả về Chờ duyệt (không đăng lại)."""
+    if sys.platform != "win32":
+        return
+    try:
+        from Microsoft.Win32 import SessionEndingEventHandler, SystemEvents     # pythonnet (đi kèm pywebview)
+
+        def ending(sender, e):
+            state["quitting"] = True
+            print("Windows đang tắt máy / đăng xuất -> đóng dytool", flush=True)
+        SystemEvents.SessionEnding += SessionEndingEventHandler(ending)
+    except Exception as e:
+        print("Không theo dõi được sự kiện tắt máy:", e, flush=True)
 
 
 def _style_window(window) -> None:
@@ -109,6 +205,18 @@ def main() -> None:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("dytool.app")
 
     import httpx
+    if not _first_instance():
+        # đã có 1 dytool đang mở (có thể còn đang khởi động, import torch mất vài giây): chờ nó lên rồi đưa
+        # cửa sổ của nó ra trước — không tự bật server / worker thứ 2
+        for _ in range(60):
+            try:
+                if httpx.post(URL + "/app/show", timeout=3).status_code == 200:
+                    return
+            except httpx.HTTPError:
+                pass
+            time.sleep(1)
+        _message("dytool đang chạy (xem biểu tượng ở khay hệ thống cạnh đồng hồ).")
+        return
     if _alive():
         # dytool đang chạy: có cửa sổ (app desktop) -> đưa lên trước rồi thoát
         try:
@@ -125,10 +233,13 @@ def main() -> None:
             _message(f"dytool không khởi động được:\n{e}\n\nChi tiết: {ROOT / 'data' / 'app.log'}")
             return
 
-    import webview
     from PIL import Image
     import pystray
 
+    if not _has_webview2():
+        _browser_mode(app, server, pystray, Image)
+        return
+    import webview
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True     # link douyin / facebook mở bằng trình duyệt
     # cửa sổ vừa màn hình (màn nhỏ / taskbar cao thì 880px bị tràn, mất thanh trạng thái dưới đáy)
     width, height = 1360, 880
@@ -184,6 +295,7 @@ def main() -> None:
         app.state.show_window = show
     window.events.closing += on_closing
     window.events.shown += lambda: _style_window(window)
+    window.events.shown += lambda: _allow_close_on_shutdown(state)
 
     menu_items = [pystray.MenuItem("Mở dytool", lambda i, it: show(), default=True)]
     if app:

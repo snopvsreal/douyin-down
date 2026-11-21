@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -105,7 +106,8 @@ def cmd_ui(cfg, args):
     from .web.app import create_app
     host = "0.0.0.0" if args.lan else "127.0.0.1"
     con.print(f"Giao diện: http://127.0.0.1:{args.port}" + ("  (mở được từ máy khác cùng wifi)" if args.lan else ""))
-    uvicorn.run(create_app(args.config, autostart=args.autostart), host=host, port=args.port, log_level="warning")
+    uvicorn.run(create_app(args.config, autostart=args.autostart, lan=args.lan), host=host, port=args.port,
+                log_level="warning")
 
 
 def cmd_fb_login(cfg, args):
@@ -141,6 +143,19 @@ def cmd_fbcheck(cfg, args):
 
 
 def main():
+    # in ra file / pipe (log, script khác gọi) thì Windows dùng bảng mã cũ (cp1252) -> chữ Việt làm lỗi ngay ở --help
+    for stream in (sys.stdout, sys.stderr):
+        if stream and not stream.isatty() and (stream.encoding or "").lower().replace("-", "") != "utf8":
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, ValueError):
+                pass
+    # FFmpeg do trình cài tải về nằm ở tools\ffmpeg\bin (không thêm vào PATH của Windows) -> thêm cho lệnh dòng lệnh,
+    # giống app desktop. Trước: mọi lệnh `dytool …` trên máy cài bằng trình cài đều báo "Chưa cài ffmpeg"
+    root = Path(__file__).resolve().parent.parent
+    extra = [p for p in (root / "tools" / "ffmpeg" / "bin", Path.home() / ".local" / "bin") if p.exists()]
+    os.environ["PATH"] = os.pathsep.join(map(str, extra)) + os.pathsep + os.environ.get("PATH", "")
+    os.environ.setdefault("UV_PYTHON_INSTALL_DIR", str(root / ".python"))   # không tải Python vào AppData (bị chặn)
     if not shutil.which("ffmpeg"):
         sys.exit("Chưa cài ffmpeg")
     ap = argparse.ArgumentParser(prog="dytool", description="Douyin -> edit -> Facebook Page")

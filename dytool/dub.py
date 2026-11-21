@@ -19,8 +19,17 @@ def separate(video: Path, work: Path) -> tuple[Path, Path]:
     wav = work / f"{video.stem}_src.wav"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "2", "-ar", "44100",
                     str(wav)], check=True)
-    subprocess.run([sys.executable, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs",
-                    "-o", str(out_dir), str(wav)], check=True, capture_output=True)
+    base = [sys.executable, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs", "-o", str(out_dir)]
+    # Demucs tự dùng GPU nếu torch có CUDA (bản cài "gpu", máy có card NVIDIA). Lỗi phía GPU (hết VRAM — card 4 GB
+    # dùng chung với VoiceStudio, driver…) -> chạy lại bằng CPU thay vì làm hỏng cả video
+    r = subprocess.run(base + [str(wav)], capture_output=True)
+    if r.returncode != 0:
+        err = r.stderr.decode("utf-8", "replace")
+        if any(w in err for w in ("CUDA", "cuda", "cuDNN", "out of memory")):
+            print("Demucs lỗi trên GPU -> chạy lại bằng CPU", flush=True)
+            r = subprocess.run(base + ["-d", "cpu", str(wav)], capture_output=True)
+        if r.returncode != 0:
+            raise subprocess.CalledProcessError(r.returncode, r.args, r.stdout, r.stderr)
     stem_dir = out_dir / "htdemucs" / wav.stem
     wav.unlink(missing_ok=True)
     return stem_dir / "vocals.wav", stem_dir / "no_vocals.wav"
@@ -213,12 +222,19 @@ def dub_audio(video: Path, segments: list[dict], work: Path, cfg: dict,
         if not text.strip():
             continue
         start = max(u["start"], cursor)
+        if start >= total - 0.3:
+            # các câu trước đọc dài đẩy câu này ra sát / quá cuối video: bỏ câu (trước: atrim độ dài âm -> ffmpeg lỗi
+            # cả video)
+            progress.detail(f"bỏ câu {i + 1}: hết thời lượng video")
+            continue
         nxt = utts[i + 1]["start"] if i + 1 < len(utts) else total
         window = max(0.4, min(total, nxt + max_drift) - start - phrasing.COMMA_PAUSE * 0.5)
         clip = clip_dir / f"{i:03d}.wav"
         progress.detail(f"câu {i + 1}/{len(utts)}: {text[:60]}")
         text, d = make_line(vs, text, window, clip, cfg, sub_cfg, voice_names[genders[i]])
         d = min(d, total - start)
+        if d <= 0.05:
+            continue
         n = len(inputs) // 2
         inputs += ["-i", str(clip)]
         delay = int(start * 1000)

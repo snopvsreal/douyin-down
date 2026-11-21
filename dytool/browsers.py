@@ -59,13 +59,24 @@ def _mint_token(secret: str, ttl: int = 24 * 3600) -> str:
     return f"{head}.{body}.{b64(sig)}"
 
 
+def is_local_api(api: str) -> bool:
+    """Địa chỉ API đúng là máy này? So khớp CHÍNH XÁC tên máy sau khi tách URL — không so phần đầu chuỗi
+    (startswith cho qua 'http://localhost.evil.com' / 'http://127.0.0.1@evil.com' -> token tự ký bị gửi ra ngoài)."""
+    from urllib.parse import urlsplit
+    try:
+        u = urlsplit(api.strip())
+        return u.scheme == "http" and u.hostname in ("127.0.0.1", "localhost", "::1") and not u.username \
+            and u.path in ("", "/") and not u.query
+    except ValueError:
+        return False
+
+
 def shardx_settings() -> tuple[str, str]:
     """(địa chỉ API, token). Mặc định tự lấy từ ShardBrowser cài trên máy này — không cần dán token;
     config.yaml `browser:` chỉ dùng khi muốn chỉ định tay (ShardBrowser ở máy khác / cổng khác)."""
     c, ls = _cfg(), _launcher_settings()
     api = c.get("shardx_api") or (f"http://127.0.0.1:{ls['api_port']}" if ls.get("api_port") else DEFAULT_API)
-    local = api.startswith(("http://127.0.0.1", "http://localhost"))
-    if local and ls.get("api_secret"):
+    if is_local_api(api) and ls.get("api_secret"):
         token = _mint_token(ls["api_secret"])            # luôn mới, đúng secret hiện tại
     else:
         token = (c.get("shardx_token") or "").strip()
@@ -134,7 +145,7 @@ def _start_launcher(api: str) -> bool:
 def _api(method: str, path: str, _retry: bool = True, **kw):
     api, token = shardx_settings()
     if not token:
-        raise BrowserError("Chưa có token API của ShardBrowser — vào Tài khoản & kênh > Trình duyệt để nhập")
+        raise BrowserError("Chưa có token API của ShardBrowser — mở ShardBrowser 1 lần, hoặc xem Cài đặt > Trình duyệt")
     try:
         r = httpx.request(method, api + path, headers={"Authorization": f"Bearer {token}"}, timeout=60, **kw)
     except httpx.ConnectError as e:
@@ -151,10 +162,11 @@ def _api(method: str, path: str, _retry: bool = True, **kw):
     return r.json() if r.content else {}
 
 
-def list_profiles() -> list[dict]:
-    """Hồ sơ ShardBrowser để chọn trên giao diện: [{id, name, folder, running}]."""
+def list_profiles(start_launcher: bool = True) -> list[dict]:
+    """Hồ sơ ShardBrowser để chọn trên giao diện: [{id, name, folder, running}].
+    start_launcher=False: ShardBrowser đang tắt thì báo lỗi ngay, không tự mở rồi chờ ~45s (dùng khi vẽ trang)."""
     return [{"id": p.get("id"), "name": p.get("name") or p.get("id"), "folder": p.get("folder") or "",
-             "running": bool(p.get("running"))} for p in _api("GET", "/profiles")]
+             "running": bool(p.get("running"))} for p in _api("GET", "/profiles", _retry=start_launcher)]
 
 
 def get_choice(acc_dir: Path) -> dict:

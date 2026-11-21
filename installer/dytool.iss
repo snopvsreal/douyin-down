@@ -67,7 +67,9 @@ vi.Step5=Bộ tải video Douyin
 vi.Step6=Cấu hình và model AI (~1.5 GB)
 vi.Step7=VoiceStudio (lồng tiếng Việt)
 vi.Closing=Đang đóng dytool đang chạy…
-vi.NoWebView2=Máy này chưa có Microsoft Edge WebView2 Runtime — thành phần cửa sổ dytool dùng để hiện giao diện.%n%nSau khi cài dytool, hãy tải "Evergreen Bootstrapper" ở trang Microsoft rồi chạy (miễn phí, khoảng 2 MB).%n%nMở trang tải ngay?
+vi.NoWebView2=Máy này chưa có Microsoft Edge WebView2 Runtime — thành phần cửa sổ dytool dùng để hiện giao diện.%n%nCài luôn trong lúc cài dytool? (trình cài tải bản chính thức của Microsoft, miễn phí, khoảng 150 MB)%n%nChọn Không: dytool vẫn chạy, giao diện mở trong trình duyệt.
+vi.WebView2Installing=Đang cài Microsoft Edge WebView2 Runtime…
+vi.WebView2Fail=Chưa cài được WebView2 (%1). dytool vẫn chạy và mở giao diện trong trình duyệt.%nCài sau tại https://developer.microsoft.com/microsoft-edge/webview2/
 vi.LibDone=Đã cài xong thư viện
 vi.LibFail=Cài thư viện chưa xong (mã lỗi %1).%n%nKiểm tra mạng rồi chạy lại: Start Menu → dytool - Cài đặt lại thư viện.%nNhật ký: %2
 
@@ -265,14 +267,33 @@ begin
     (RegQueryStringValue(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', V) and (V <> '') and (V <> '0.0.0.0'));
 end;
 
+var
+  WantWebView2: Boolean;
+
 function InitializeSetup: Boolean;
+begin
+  Result := True;
+  WantWebView2 := (not HasWebView2) and (not WizardSilent) and
+                  (MsgBox(CustomMessage('NoWebView2'), mbInformation, MB_YESNO) = IDYES);
+end;
+
+// Tải WebView2 Evergreen Bootstrapper (Microsoft, có chữ ký số) rồi cài im lặng. Không có quyền admin thì nó tự cài
+// riêng cho người dùng. Lỗi -> chỉ báo, dytool vẫn chạy được (tự mở giao diện trong trình duyệt).
+procedure InstallWebView2;
 var
   RC: Integer;
 begin
-  Result := True;
-  if (not HasWebView2) and (not WizardSilent) then
-    if MsgBox(CustomMessage('NoWebView2'), mbInformation, MB_YESNO) = IDYES then
-      ShellExec('open', 'https://developer.microsoft.com/microsoft-edge/webview2/', '', '', SW_SHOWNORMAL, ewNoWait, RC);
+  WizardForm.StatusLabel.Caption := CustomMessage('WebView2Installing');
+  WizardForm.FilenameLabel.Caption := '';
+  try
+    DownloadTemporaryFile('https://go.microsoft.com/fwlink/p/?LinkId=2124703', 'MicrosoftEdgeWebview2Setup.exe', '', nil);
+    if not Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe'), '/silent /install', '', SW_HIDE,
+                ewWaitUntilTerminated, RC) or (RC <> 0) or (not HasWebView2) then
+      MsgBox(FmtMessage(CustomMessage('WebView2Fail'), [IntToStr(RC)]), mbInformation, MB_OK);
+  except
+    Log(GetExceptionMessage);
+    MsgBox(FmtMessage(CustomMessage('WebView2Fail'), [GetExceptionMessage]), mbInformation, MB_OK);
+  end;
 end;
 
 // /RELAUNCH: dytool tự cập nhật (updates.py chạy trình cài /SILENT /RELAUNCH) -> cài xong hết thì mở lại dytool
@@ -285,7 +306,10 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   RC: Integer;
 begin
-  if CurStep = ssPostInstall then RunLibSetup;
+  if CurStep = ssPostInstall then begin
+    if WantWebView2 then InstallWebView2;
+    RunLibSetup;
+  end;
   if (CurStep = ssDone) and IsRelaunch then
     ShellExec('', ExpandConstant('{app}\dytool.exe'), '', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, RC);
 end;

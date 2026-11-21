@@ -143,6 +143,13 @@ def cmd_fbcheck(cfg, args):
 
 
 def main():
+    # in ra file / pipe (log, script khác gọi) thì Windows dùng bảng mã cũ (cp1252) -> chữ Việt làm lỗi ngay ở --help
+    for stream in (sys.stdout, sys.stderr):
+        if stream and not stream.isatty() and (stream.encoding or "").lower().replace("-", "") != "utf8":
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, ValueError):
+                pass
     # FFmpeg do trình cài tải về nằm ở tools\ffmpeg\bin (không thêm vào PATH của Windows) -> thêm cho lệnh dòng lệnh,
     # giống app desktop. Trước: mọi lệnh `dytool …` trên máy cài bằng trình cài đều báo "Chưa cài ffmpeg"
     root = Path(__file__).resolve().parent.parent

@@ -107,6 +107,60 @@ def _windows_dark() -> bool:
         return False
 
 
+WEBVIEW2_KEY = r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+
+
+def _has_webview2() -> bool:
+    """Microsoft Edge WebView2 Runtime đã cài? (cửa sổ dytool cần nó). Windows 10 LTSC / Sandbox thường không có."""
+    if sys.platform != "win32":
+        return True
+    import winreg
+    for hive, key in ((winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\" + WEBVIEW2_KEY),
+                      (winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\" + WEBVIEW2_KEY),
+                      (winreg.HKEY_CURRENT_USER, "Software\\" + WEBVIEW2_KEY)):
+        try:
+            with winreg.OpenKey(hive, key) as k:
+                v = str(winreg.QueryValueEx(k, "pv")[0])
+                if v and v != "0.0.0.0":
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def _browser_mode(app, server, pystray, Image) -> None:
+    """Không có WebView2: không mở được cửa sổ riêng -> mở giao diện trong trình duyệt mặc định, giữ icon ở khay.
+    Trước: pywebview lỗi ngầm, tool chạy nhưng người dùng không thấy gì."""
+    import threading
+    import webbrowser
+
+    def open_ui(*_):
+        webbrowser.open(URL)
+
+    if app:
+        app.state.show_window = open_ui          # mở dytool.exe lần 2 -> mở lại tab giao diện
+    open_ui()
+    threading.Thread(target=_message, daemon=True, args=(
+        "Máy này chưa có Microsoft Edge WebView2 Runtime nên dytool mở giao diện trong trình duyệt.\n\n"
+        "Muốn dytool có cửa sổ riêng: cài WebView2 (miễn phí, của Microsoft) tại\n"
+        "https://developer.microsoft.com/microsoft-edge/webview2/  rồi mở lại dytool.",)).start()
+
+    def quit_app(icon, item):
+        w = app.state.worker if app else None
+        if w:
+            w.stop()
+        if server:
+            server.should_exit = True
+        icon.stop()
+
+    with Image.open(ICON) if ICON.exists() else Image.new("RGB", (64, 64), "#172030") as im:
+        im.load()
+        img = im.copy()
+    pystray.Icon("dytool", img, TITLE, menu=pystray.Menu(
+        pystray.MenuItem("Mở dytool (trình duyệt)", open_ui, default=True),
+        pystray.Menu.SEPARATOR, pystray.MenuItem("Thoát dytool", quit_app))).run()
+
+
 def _allow_close_on_shutdown(state: dict) -> None:
     """Windows tắt máy / đăng xuất: cho cửa sổ đóng hẳn. Không có thì on_closing luôn huỷ (thu xuống khay) ->
     Windows hiện 'dytool đang ngăn tắt máy'. Worker đang đăng dở -> lần mở sau trả về Chờ duyệt (không đăng lại)."""
@@ -179,10 +233,13 @@ def main() -> None:
             _message(f"dytool không khởi động được:\n{e}\n\nChi tiết: {ROOT / 'data' / 'app.log'}")
             return
 
-    import webview
     from PIL import Image
     import pystray
 
+    if not _has_webview2():
+        _browser_mode(app, server, pystray, Image)
+        return
+    import webview
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True     # link douyin / facebook mở bằng trình duyệt
     # cửa sổ vừa màn hình (màn nhỏ / taskbar cao thì 880px bị tràn, mất thanh trạng thái dưới đáy)
     width, height = 1360, 880

@@ -118,7 +118,7 @@ try {
 
     # ---------- 2. Python + thư viện ----------
     Say "2/7  Python 3.12 + thư viện (torch, whisper, demucs… ~3 GB, lâu nhất)"
-    & uv sync --frozen --python 3.12
+    & uv sync --frozen --python 3.12 2>&1 | ForEach-Object { "   $_" } | Out-Host     # in vào setup.log (Start-Transcript không bắt được chữ của lệnh ngoài)
     Done-Or-Fail "Cài thư viện Python"
     Ok "Thư viện Python xong"
 
@@ -187,7 +187,7 @@ try {
         # uv.lock của dự án này trỏ tới mirror Trung Quốc (bị chặn 403) -> giải lại với PyPI chính thức
         if (Test-Path "$vendor\uv.lock") { Move-Item "$vendor\uv.lock" "$vendor\uv.lock.mirror-bak" -Force -ErrorAction Stop }
         Push-Location $vendor -ErrorAction Stop       # lỗi thì dừng, không chạy uv sync nhầm trong thư mục dytool
-        & uv sync --python 3.12 --default-index https://pypi.org/simple
+        & uv sync --python 3.12 --default-index https://pypi.org/simple 2>&1 | ForEach-Object { "   $_" } | Out-Host     # in vào setup.log (Start-Transcript không bắt được chữ của lệnh ngoài)
         $rc = $LASTEXITCODE
         Pop-Location
         if ($rc -ne 0) { throw "Cài backend tải Douyin thất bại (mã lỗi $rc)" }
@@ -197,7 +197,7 @@ try {
     # ---------- 6. Cấu hình + model AI ----------
     Say "6/7  Cấu hình và model AI (~1.5 GB)"
     if (-not (Test-Path "$Root\config.yaml")) { Copy-Item "$Root\config.example.yaml" "$Root\config.yaml"; Ok "Đã tạo config.yaml" }
-    & uv run --frozen python "$Root\scripts\warm_models.py"
+    & uv run --frozen python "$Root\scripts\warm_models.py" 2>&1 | ForEach-Object { "   $_" } | Out-Host     # in vào setup.log (Start-Transcript không bắt được chữ của lệnh ngoài)
     if ($LASTEXITCODE -ne 0) { Warn "Một số model chưa tải xong — tool tự tải khi dùng lần đầu" } else { Ok "Model AI xong" }
 
     # ---------- 7. VoiceStudio (lồng tiếng) ----------

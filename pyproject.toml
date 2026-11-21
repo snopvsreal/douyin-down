@@ -1,6 +1,6 @@
 [project]
 name = "dytool"
-version = "0.2.0"
+version = "0.3.0"
 description = "Tải video Douyin theo từ khóa/kênh, edit bằng FFmpeg, đăng lên Facebook Fanpage"
 requires-python = ">=3.12,<3.13"
 dependencies = [

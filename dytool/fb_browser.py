@@ -1,16 +1,12 @@
 """Đăng Reels lên Facebook Page bằng trình duyệt (Playwright), không cần Graph API token.
-Đăng nhập 1 lần bằng tay (`dytool fb-login`), phiên được lưu trong data/fb_profile và dùng lại.
+Trình duyệt = hồ sơ ShardBrowser gắn với tài khoản (browsers.py); phiên đăng nhập nằm trong hồ sơ đó.
 Đăng qua Meta Business Suite (business.facebook.com) — giao diện ổn định nhất cho Page."""
 
-import sys
 import time
 from pathlib import Path
 
-PROFILE = "fb_profile"
-STATE = "fb_state.json"   # cookie phiên đăng nhập (nhạy cảm: chmod 600, nằm trong data/ đã .gitignore)
+STATE = "fb_state.json"   # bản sao cookie phiên sau khi đăng nhập (nhạy cảm, nằm trong data/ đã .gitignore)
 LOGIN_STATE = "login_state.json"   # bước đăng nhập hiện tại cho thanh tiến trình trên giao diện (loginstate.py)
-UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
 
 
 class FBError(RuntimeError):
@@ -18,19 +14,8 @@ class FBError(RuntimeError):
 
 
 def _context(pw, data_dir: Path, headless: bool):
-    # channel="chromium": dùng Chromium đầy đủ cả khi chạy ẩn (headless shell không đọc được cookie
-    # mà bản có cửa sổ đã mã hoá bằng Keychain -> mất phiên đăng nhập)
-    ctx = pw.chromium.launch_persistent_context(
-        str(data_dir / PROFILE), headless=headless, channel="chromium", user_agent=UA, locale="vi-VN",
-        viewport={"width": 1366, "height": 900},
-        args=["--disable-blink-features=AutomationControlled"]
-             + (["--use-mock-keychain", "--password-store=basic"] if sys.platform == "darwin" else []),
-    )
-    state = data_dir / STATE
-    if state.exists() and not logged_in(ctx):
-        import json
-        ctx.add_cookies(json.loads(state.read_text())["cookies"])
-    return ctx
+    from . import browsers
+    return browsers.attach(pw, data_dir, headless)
 
 
 def _save_state(ctx, data_dir: Path) -> None:
@@ -60,7 +45,11 @@ def login(data_dir: Path, timeout_min: int = 10) -> None:
 
     ls.write(st, steps, "Mở trình duyệt")
     with sync_playwright() as pw:
-        ctx = _context(pw, data_dir, headless=False)
+        from . import browsers
+        try:
+            ctx = _context(pw, data_dir, headless=False)
+        except browsers.BrowserError as e:     # ShardBrowser chưa mở / sai token / chưa chọn hồ sơ
+            fail(str(e))
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         ls.write(st, steps, "Tải facebook.com", wait_sec=90)
         try:   # mạng chậm: không chờ "load", hết giờ vẫn giữ cửa sổ cho người dùng đăng nhập

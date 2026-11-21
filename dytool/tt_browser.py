@@ -1,19 +1,18 @@
 """Đăng video lên TikTok bằng trình duyệt (Playwright) qua TikTok Studio, không cần API.
 
 Phần điền form đăng dùng thư viện wkaisertexas/tiktok-uploader (MIT, cũng chạy Playwright): truyền vào trang của
-Chromium riêng của tool (profile data/accounts/<id>/tt_profile) để dùng lại phiên đăng nhập.
+hồ sơ ShardBrowser gắn với tài khoản (browsers.py) để dùng lại phiên đăng nhập.
 Đăng nhập luôn do người dùng tự làm trong cửa sổ mở ra (tool không đọc mật khẩu).
+Lưu ý: bộ chọn của tiktok-uploader viết theo giao diện tiếng Anh -> để hồ sơ ShardBrowser của TikTok ở tiếng Anh.
 """
 
 import datetime as dt
 import json
-import sys
 import time
 from pathlib import Path
 
-PROFILE = "tt_profile"
 LOGIN_STATE = "login_state.json"
-TZ = "Asia/Ho_Chi_Minh"
+TZ = "Asia/Ho_Chi_Minh"     # giờ dytool tính lịch; ô hẹn giờ TikTok dùng múi giờ của hồ sơ trình duyệt
 
 
 class TTError(RuntimeError):
@@ -21,13 +20,8 @@ class TTError(RuntimeError):
 
 
 def _context(pw, acc_dir: Path, headless: bool):
-    # locale en-US: bộ chọn của tiktok-uploader viết theo giao diện tiếng Anh;
-    # timezone cố định giờ VN để ô hẹn giờ của TikTok khớp giờ dytool tính
-    return pw.chromium.launch_persistent_context(
-        str(acc_dir / PROFILE), headless=headless, channel="chromium", locale="en-US", timezone_id=TZ,
-        viewport={"width": 1366, "height": 900},
-        args=["--disable-blink-features=AutomationControlled"]
-             + (["--use-mock-keychain", "--password-store=basic"] if sys.platform == "darwin" else []))
+    from . import browsers
+    return browsers.attach(pw, acc_dir, headless)
 
 
 def logged_in(ctx) -> bool:
@@ -60,7 +54,11 @@ def login(acc_dir: Path, timeout_min: int = 10) -> dict:
 
     ls.write(st, steps, "Mở trình duyệt")
     with sync_playwright() as pw:
-        ctx = _context(pw, acc_dir, headless=False)
+        from . import browsers
+        try:
+            ctx = _context(pw, acc_dir, headless=False)
+        except browsers.BrowserError as e:     # ShardBrowser chưa mở / sai token / chưa chọn hồ sơ
+            fail(str(e))
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         ls.write(st, steps, "Tải tiktok.com", wait_sec=90)
         try:   # mạng chậm: không chờ "load", hết giờ vẫn giữ cửa sổ cho người dùng đăng nhập

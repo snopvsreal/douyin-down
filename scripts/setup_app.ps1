@@ -1,66 +1,99 @@
-# dytool - buoc cai thu vien sau khi chep file (file cai dytool-Setup.exe goi script nay).
-# Chay lai bat cu luc nao de sua / cap nhat: Start Menu > dytool > "Cai dat lai thu vien".
-# Giu file nay CHI ASCII + CRLF: Windows PowerShell 5.1 doc file theo bang ma ANSI.
+﻿# dytool - bước cài thư viện sau khi chép file (file cài dytool-Setup.exe gọi script này).
+# Chạy lại bất cứ lúc nào để sửa / cập nhật: Start Menu > dytool > "Cài đặt lại thư viện".
+# File lưu UTF-8 CÓ BOM + CRLF: Windows PowerShell 5.1 chỉ đọc đúng chữ có dấu khi có BOM.
 #
-# Moi thu nam trong thu muc cai (o C:): Python (.python), thu vien (.venv), Chromium (ms-playwright),
-# FFmpeg (tools\ffmpeg), backend tai Douyin (vendor). Khong dung AppData vi co may Windows chan chay exe o do.
+# Trình duyệt dùng ShardBrowser (cài riêng, bước 4). Còn lại nằm trong thư mục cài (ổ C:): Python (.python), thư viện (.venv),
+# FFmpeg (tools\ffmpeg), backend tải Douyin (vendor). Không dùng AppData vì có máy Windows chặn chạy exe ở đó.
 param(
-    [switch]$Launch,     # cai xong thi mo dytool
-    [switch]$NoPrompt    # khong hoi gi (cai VoiceStudio thi bo qua)
+    [switch]$Launch,     # cài xong thì mở dytool
+    [switch]$NoPrompt    # không hỏi gì (cài VoiceStudio thì bỏ qua)
 )
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# ---------- cửa sổ hiển thị đúng tiếng Việt ----------
+# Cửa sổ PowerShell mặc định dùng bảng mã 437 (chữ có dấu từ Python / uv thành ký tự lạ) và font Lucida Console
+# (thiếu chữ ạ ả ế ộ…). Chỉ đổi cho CỬA SỔ NÀY: UTF-8 + font Consolas. Không đụng cài đặt chung của máy.
+try { chcp 65001 > $null } catch {}
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$OutputEncoding = [Text.Encoding]::UTF8
+try {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class DyConsoleFont {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct FontInfo {
+        public uint cbSize; public uint nFont; public short X; public short Y;
+        public int FontFamily; public int FontWeight;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string FaceName;
+    }
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr GetStdHandle(int n);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern bool SetCurrentConsoleFontEx(IntPtr h, bool max, ref FontInfo f);
+    public static bool Use(string face, short size) {
+        FontInfo f = new FontInfo();
+        f.cbSize = (uint)Marshal.SizeOf(f); f.FaceName = face; f.Y = size; f.FontFamily = 54; f.FontWeight = 400;
+        return SetCurrentConsoleFontEx(GetStdHandle(-11), false, ref f);
+    }
+}
+"@ -ErrorAction Stop
+    [DyConsoleFont]::Use("Consolas", 16) | Out-Null
+} catch {}
+
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 New-Item -ItemType Directory -Force -Path "$Root\data" | Out-Null
 try { Start-Transcript -Path "$Root\data\setup.log" -Append | Out-Null } catch {}
-try { $Host.UI.RawUI.WindowTitle = "dytool - cai dat thu vien" } catch {}
+try { $Host.UI.RawUI.WindowTitle = "dytool – cài đặt thư viện" } catch {}
 
-function Say($m) { Write-Host ""; Write-Host ">> $m" -ForegroundColor Cyan }
-function Ok($m) { Write-Host "   [OK] $m" -ForegroundColor Green }
-function Warn($m) { Write-Host "   [!] $m" -ForegroundColor Yellow }
-function Done-Or-Fail($what) { if ($LASTEXITCODE -ne 0) { throw "$what that bai (ma loi $LASTEXITCODE)" } }
+function Say($m) { Write-Host ""; Write-Host "▸ $m" -ForegroundColor Cyan }
+function Ok($m) { Write-Host "   √ $m" -ForegroundColor Green }
+function Warn($m) { Write-Host "   ! $m" -ForegroundColor Yellow }
+function Done-Or-Fail($what) { if ($LASTEXITCODE -ne 0) { throw "$what thất bại (mã lỗi $LASTEXITCODE)" } }
 
 $env:UV_PYTHON_INSTALL_DIR = "$Root\.python"
 $env:UV_PYTHON_INSTALL_BIN = "0"
 $env:PYTHONIOENCODING = "utf-8"
-if (Get-ChildItem "C:\ms-playwright\chromium-*" -ErrorAction SilentlyContinue) { $env:PLAYWRIGHT_BROWSERS_PATH = "C:\ms-playwright" }
-else { $env:PLAYWRIGHT_BROWSERS_PATH = "$Root\ms-playwright" }
+$env:PYTHONUTF8 = "1"
+$env:HF_HUB_VERBOSITY = "error"           # ẩn cảnh báo tiếng Anh "unauthenticated requests to the HF Hub" khi tải model
+$env:HF_HUB_DISABLE_PROGRESS_BARS = "1"
 function Refresh-Path {
     $env:Path = "$env:USERPROFILE\.local\bin;$Root\tools\ffmpeg\bin;" +
         [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
 }
 Refresh-Path
 
-Write-Host "============================================================"
-Write-Host "  dytool - cai thu vien (lan dau 15-30 phut, can mang)"
-Write-Host "  Thu muc: $Root"
-Write-Host "============================================================"
+Write-Host ""
+Write-Host "  dytool – cài đặt thư viện" -ForegroundColor White
+Write-Host "  ──────────────────────────────────────────────" -ForegroundColor DarkCyan
+Write-Host "  Lần đầu mất 15–30 phút và cần mạng. Đừng đóng cửa sổ này."
+Write-Host "  Thư mục: $Root" -ForegroundColor DarkGray
 
 try {
-    # ---------- 1. uv (quan ly Python) ----------
-    Say "1/7 uv (quan ly Python)"
+    # ---------- 1. uv (quản lý Python) ----------
+    Say "1/7  uv (quản lý Python)"
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
         Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
         Refresh-Path
-        if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw "Khong cai duoc uv" }
+        if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw "Không cài được uv" }
     }
     Ok (& uv --version)
 
-    # ---------- 2. Python + thu vien ----------
-    Say "2/7 Python 3.12 + thu vien (torch, whisper, demucs... ~3 GB, lau nhat)"
+    # ---------- 2. Python + thư viện ----------
+    Say "2/7  Python 3.12 + thư viện (torch, whisper, demucs… ~3 GB, lâu nhất)"
     & uv sync --frozen --python 3.12
-    Done-Or-Fail "Cai thu vien Python"
-    Ok "Thu vien Python xong"
+    Done-Or-Fail "Cài thư viện Python"
+    Ok "Thư viện Python xong"
 
-    # ---------- 3. FFmpeg ban day du (co bo loc phu de) ----------
-    Say "3/7 FFmpeg"
+    # ---------- 3. FFmpeg bản đầy đủ (có bộ lọc phụ đề) ----------
+    Say "3/7  FFmpeg"
     $ff = Get-Command ffmpeg -ErrorAction SilentlyContinue
     $hasSubs = $false
     if ($ff) { $hasSubs = ((& ffmpeg -hide_banner -filters 2>&1 | Out-String) -match " subtitles ") }
     if (-not $hasSubs) {
+        Write-Host "   Đang tải FFmpeg (~200 MB)…"
         $zip = "$env:TEMP\dytool-ffmpeg.zip"
         Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile $zip -UseBasicParsing
         $tmp = "$Root\tools\ffmpeg-tmp"
@@ -75,14 +108,35 @@ try {
     }
     Ok ((& ffmpeg -hide_banner -version | Select-Object -First 1) -replace "Copyright.*", "")
 
-    # ---------- 4. Chromium cho Playwright (dang nhap / dang bai) ----------
-    Say "4/7 Trinh duyet Chromium ($env:PLAYWRIGHT_BROWSERS_PATH)"
-    & uv run --frozen playwright install chromium
-    Done-Or-Fail "Cai Chromium"
-    Ok "Chromium xong"
+    # ---------- 4. ShardBrowser (trình duyệt dùng để đăng nhập / đăng bài) ----------
+    Say "4/7  Trình duyệt ShardBrowser"
+    $sb = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -match 'ShardBrowser' } | Select-Object -First 1
+    if ($sb) { Ok "ShardBrowser đã cài ($($sb.DisplayVersion))" }
+    elseif ($NoPrompt) { Warn "Chưa có ShardBrowser — cài tại https://github.com/ProxyShard/ShardBrowser/releases" }
+    else {
+        $a = Read-Host "   Tải bản ShardBrowser mới nhất từ GitHub chính thức rồi mở trình cài? (C/K)"
+        if ($a -match '^[CcYy]') {
+            $rel = Invoke-RestMethod "https://api.github.com/repos/ProxyShard/ShardBrowser/releases/latest" -Headers @{ "User-Agent" = "dytool-setup" }
+            $asset = $rel.assets | Where-Object { $_.name -match '_x64-setup\.exe$' } | Select-Object -First 1
+            if (-not $asset) { throw "Không thấy file cài Windows trong bản phát hành $($rel.tag_name) của ShardBrowser" }
+            $exe = "$env:TEMP\$($asset.name)"
+            Write-Host "   Đang tải $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB, bản $($rel.tag_name))…"
+            Invoke-WebRequest $asset.browser_download_url -OutFile $exe -UseBasicParsing
+            Warn "File cài ShardBrowser chưa ký số: Windows có thể hỏi lại — bấm 'More info > Run anyway' nếu bạn đồng ý cài"
+            Start-Process $exe -ArgumentList "/S" -Wait
+            Remove-Item $exe -ErrorAction SilentlyContinue
+            Ok "Đã cài ShardBrowser"
+            $sb = $true
+        } else { Warn "Bỏ qua — dytool cần ShardBrowser để đăng nhập / đăng bài" }
+    }
+    if ($sb) {
+        Ok "Không cần tạo hồ sơ hay copy token: dytool tự kết nối ShardBrowser và tự tạo hồ sơ khi bấm Đăng nhập"
+        Write-Host "   Lần đầu ShardBrowser mở sẽ tự tải nhân trình duyệt (~200 MB)."
+    }
 
-    # ---------- 5. Backend tai Douyin (TikTokDownloader) ----------
-    Say "5/7 Backend tai Douyin (TikTokDownloader)"
+    # ---------- 5. Backend tải Douyin (TikTokDownloader) ----------
+    Say "5/7  Backend tải Douyin (TikTokDownloader)"
     $vendor = "$Root\vendor\TikTokDownloader"
     if (-not (Test-Path "$vendor\main.py")) {
         New-Item -ItemType Directory -Force -Path "$Root\vendor" | Out-Null
@@ -94,48 +148,49 @@ try {
         Rename-Item "$Root\vendor\TikTokDownloader-master" "TikTokDownloader"
     }
     if (-not (Test-Path "$vendor\.venv")) {
-        # uv.lock cua du an nay tro toi mirror Trung Quoc (bi chan 403) -> giai lai voi PyPI chinh thuc
+        # uv.lock của dự án này trỏ tới mirror Trung Quốc (bị chặn 403) -> giải lại với PyPI chính thức
         if (Test-Path "$vendor\uv.lock") { Move-Item "$vendor\uv.lock" "$vendor\uv.lock.mirror-bak" -Force }
         Push-Location $vendor
         & uv sync --python 3.12 --default-index https://pypi.org/simple
         $rc = $LASTEXITCODE
         Pop-Location
-        if ($rc -ne 0) { throw "Cai backend tai Douyin that bai (ma loi $rc)" }
+        if ($rc -ne 0) { throw "Cài backend tải Douyin thất bại (mã lỗi $rc)" }
     }
-    Ok "Backend tai Douyin xong"
+    Ok "Backend tải Douyin xong"
 
-    # ---------- 6. Cau hinh + model AI ----------
-    Say "6/7 Cau hinh va model AI (~1.5 GB)"
-    if (-not (Test-Path "$Root\config.yaml")) { Copy-Item "$Root\config.example.yaml" "$Root\config.yaml"; Ok "Da tao config.yaml" }
+    # ---------- 6. Cấu hình + model AI ----------
+    Say "6/7  Cấu hình và model AI (~1.5 GB)"
+    if (-not (Test-Path "$Root\config.yaml")) { Copy-Item "$Root\config.example.yaml" "$Root\config.yaml"; Ok "Đã tạo config.yaml" }
     & uv run --frozen python "$Root\scripts\warm_models.py"
-    if ($LASTEXITCODE -ne 0) { Warn "Mot so model chua tai xong - tool tu tai khi dung lan dau" } else { Ok "Model AI xong" }
+    if ($LASTEXITCODE -ne 0) { Warn "Một số model chưa tải xong — tool tự tải khi dùng lần đầu" } else { Ok "Model AI xong" }
 
-    # ---------- 7. VoiceStudio (long tieng) ----------
-    Say "7/7 VoiceStudio (app long tieng Viet)"
+    # ---------- 7. VoiceStudio (lồng tiếng) ----------
+    Say "7/7  VoiceStudio (app lồng tiếng Việt)"
     $vs = @("$env:LOCALAPPDATA\Programs\VoiceStudio\VoiceStudio.exe", "$env:ProgramFiles\VoiceStudio\VoiceStudio.exe") | Where-Object { Test-Path $_ }
-    if ($vs) { Ok "VoiceStudio da cai" }
-    elseif ($NoPrompt) { Warn "Chua co VoiceStudio - cai sau tai https://github.com/debpalash/VoiceStudio/releases" }
+    if ($vs) { Ok "VoiceStudio đã cài" }
+    elseif ($NoPrompt) { Warn "Chưa có VoiceStudio — cài sau tại https://github.com/debpalash/VoiceStudio/releases" }
     else {
-        $a = Read-Host "   Cai VoiceStudio bang trinh cai chinh thuc (voicestudio.sh)? (Y/N)"
-        if ($a -match '^[YyCc]') {
+        $a = Read-Host "   Cài VoiceStudio bằng trình cài chính thức (voicestudio.sh)? (C/K)"
+        if ($a -match '^[CcYy]') {
             Invoke-RestMethod https://voicestudio.sh/install.ps1 | Invoke-Expression
-            Warn "Mo VoiceStudio > Model Catalogue > chap nhan license OmniVoice + higgs-audio-v2-tokenizer"
-            Warn "Neu VoiceStudio bao loi tai Python: bam 'Thay doi...' va chon thu muc runtime o o C:, vd C:\VoiceStudio\runtime"
-        } else { Warn "Bo qua - long tieng can VoiceStudio, cai sau tai https://github.com/debpalash/VoiceStudio/releases" }
+            Warn "Mở VoiceStudio > Model Catalogue > chấp nhận license OmniVoice và higgs-audio-v2-tokenizer"
+            Warn "Nếu VoiceStudio báo lỗi tải Python: bấm 'Thay đổi…' và chọn thư mục runtime ở ổ C:, vd C:\VoiceStudio\runtime"
+        } else { Warn "Bỏ qua — lồng tiếng cần VoiceStudio, cài sau tại https://github.com/debpalash/VoiceStudio/releases" }
     }
 
-    Say "CAI DAT XONG"
-    Write-Host "   Mo dytool: bieu tuong dytool tren Desktop hoac Start Menu." -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  √ CÀI ĐẶT XONG" -ForegroundColor Green
+    Write-Host "    Mở dytool: biểu tượng dytool trên Desktop hoặc Start Menu." -ForegroundColor Green
     if ($Launch) { Start-Process "$Root\dytool.exe" -WorkingDirectory $Root }
     $code = 0
 }
 catch {
     Write-Host ""
-    Write-Host "LOI: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "Kiem tra mang roi chay lai: Start Menu > dytool > Cai dat lai thu vien." -ForegroundColor Yellow
-    Write-Host "Nhat ky: $Root\data\setup.log" -ForegroundColor Yellow
+    Write-Host "  × LỖI: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "    Kiểm tra mạng rồi chạy lại: Start Menu > dytool > Cài đặt lại thư viện." -ForegroundColor Yellow
+    Write-Host "    Nhật ký: $Root\data\setup.log" -ForegroundColor Yellow
     $code = 1
 }
 try { Stop-Transcript | Out-Null } catch {}
-if (-not $NoPrompt) { Write-Host ""; Read-Host "Nhan Enter de dong cua so nay" | Out-Null }
+if (-not $NoPrompt) { Write-Host ""; Read-Host "Nhấn Enter để đóng cửa sổ này" | Out-Null }
 exit $code

@@ -3,10 +3,63 @@
 {% block body %}
 <div class="head">
   <div><h1>Tài khoản & kênh</h1>
-    <p class="sub">Đăng nhập từng tài khoản trong cửa sổ Chromium của tool, rồi bấm Cài đặt ở Page / kênh để thêm nguồn
-      video và bật.</p></div>
+    <p class="sub">Bấm <b>Đăng nhập</b> ở tài khoản: lần đầu dytool tự tạo 1 hồ sơ ShardBrowser riêng cho tài khoản đó rồi mở ra
+      để bạn đăng nhập. Không cần tạo hay liên kết hồ sơ bằng tay.</p></div>
 </div>
 {% if logging_in %}<div hx-get="/partials/accounts" hx-trigger="every 3s" hx-swap="none"></div>{% endif %}
+
+{% macro shard_form() %}
+<form method="post" action="/settings/shardx" class="grid g2" style="gap:0 12px; margin-top:4px">
+  <div><label for="sx-token">Token API{% if shard.has_token %} (để trống = giữ token cũ){% endif %}</label>
+    <input type="password" id="sx-token" name="token" autocomplete="off" spellcheck="false"
+           placeholder="{{ 'đã lưu' if shard.has_token else 'dán token…' }}"></div>
+  <div><label for="sx-api">Địa chỉ API</label>
+    <input type="text" id="sx-api" name="api" value="{{ shard.api }}" autocomplete="off" spellcheck="false"></div>
+  <div class="row" style="grid-column:1/-1; margin-top:12px"><button class="btn primary">Lưu và kiểm tra kết nối</button></div>
+</form>
+{% endmacro %}
+
+{% if not shard.has_token or shard.error %}
+<div class="card" role="region" aria-labelledby="h-setup" style="margin-bottom:16px; border-color:var(--accent)">
+  <h3 id="h-setup">Kết nối ShardBrowser (làm 1 lần)</h3>
+  {% if not shard.installed %}
+    <p class="hint" role="alert" style="color:var(--warn)">Chưa thấy ShardBrowser trên máy —
+      <a href="{{ shard.download }}" target="_blank" rel="noopener">tải bản cài Windows (file _x64-setup.exe)</a>, cài và mở 1 lần.</p>
+  {% elif shard.error %}
+    <p class="hint" role="alert" style="color:var(--err)">{{ shard.error }}</p>
+  {% endif %}
+  {% if not shard.auto %}
+    <p class="hint">Cài xong ShardBrowser và mở nó 1 lần là dytool tự kết nối. ShardBrowser ở máy khác: mở
+      <b>Settings</b> → <b>Automation API</b> → copy token → dán vào ô dưới.</p>
+    {{ shard_form() }}
+  {% else %}
+    <p class="hint">dytool tự kết nối với ShardBrowser trên máy này — mở ShardBrowser rồi tải lại trang. Nếu vẫn lỗi,
+      kiểm tra ShardBrowser > Settings > Automation API đang bật.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{# hồ sơ ShardBrowser của 1 tài khoản / của đăng nhập Douyin: hiện tên, "Đổi" để chọn hồ sơ khác hoặc tạo mới #}
+{% macro profile_line(action, new_action, ch, fid, later) %}
+<details class="small" style="margin-top:10px">
+  <summary class="muted" style="cursor:pointer">Hồ sơ ShardBrowser:
+    {% if ch.profile_id %}<b>{{ ch.profile_name or ch.profile_id }}</b>{% else %}{{ later }}{% endif %} · Đổi</summary>
+  <div class="row" style="margin-top:8px; flex-wrap:wrap; gap:8px">
+    {% if shard.profiles %}
+    <form method="post" action="{{ action }}" class="row" style="flex-wrap:nowrap; gap:6px">
+      <label for="{{ fid }}" class="sr-only">Chọn hồ sơ có sẵn</label>
+      <select id="{{ fid }}" name="choice" style="min-height:28px; padding:2px 8px; font-size:13px">
+        {% for pf in shard.profiles %}
+          <option value="{{ pf.id }}|{{ pf.name }}" {{ 'selected' if ch.profile_id == pf.id }}>{{ pf.name }}{{ ' (' ~ pf.folder ~ ')' if pf.folder }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn sm">Dùng hồ sơ này</button>
+    </form>
+    {% endif %}
+    {% if new_action %}<form method="post" action="{{ new_action }}"><button class="btn sm ghost">Tạo hồ sơ mới</button></form>{% endif %}
+  </div>
+</details>
+{% endmacro %}
 
 {% macro account_card(a, platform) %}
 {% set tt = platform == 'tiktok' %}
@@ -38,6 +91,8 @@
   </div>
   <div hx-get="/partials/login/fb/{{ a.id }}" hx-trigger="load, every 1s" hx-swap="innerHTML"
        class="lp-slot" style="margin-top:12px"></div>
+  {{ profile_line('/accounts/' ~ a.id ~ '/browser', '/accounts/' ~ a.id ~ '/browser/new', choices.get(a.id, {}),
+                  'br-' ~ a.id, 'tự tạo khi bấm Đăng nhập') }}
   {% set mine = pages|selectattr('account_id', 'equalto', a.id)|list %}
   {% if mine %}
   <table>
@@ -60,29 +115,52 @@
 </div>
 {% endmacro %}
 
+{% set plus = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>' %}
 <div class="platforms">
   <section class="platform" aria-labelledby="h-fb">
-    <div class="row"><h2 id="h-fb">Facebook</h2></div>
-    <form method="post" action="/accounts" class="inline-add" style="margin-bottom:14px">
+    <div class="platform-head">
+      <h2 id="h-fb">Facebook</h2>
+      <p class="hint">Đăng nhập 1 lần, tool tự tìm các Page tài khoản đó quản lý.</p>
+    </div>
+    <form method="post" action="/accounts" class="add-bar">
       <input type="hidden" name="platform" value="facebook">
       <input type="text" name="name" autocomplete="off" placeholder="Tên gợi nhớ, vd: Tài khoản chính" required aria-label="Tên tài khoản Facebook mới">
-      <button class="btn">Thêm tài khoản</button>
+      <button class="btn primary">{{ plus|safe }}Thêm tài khoản</button>
     </form>
     {% for a in accounts if a.platform != 'tiktok' %}{{ account_card(a, 'facebook') }}
     {% else %}<p class="empty">Chưa có tài khoản Facebook. Nhập tên gợi nhớ rồi bấm Thêm tài khoản.</p>{% endfor %}
   </section>
 
   <section class="platform" id="tiktok" aria-labelledby="h-tt">
-    <div class="row"><h2 id="h-tt">TikTok</h2></div>
-    <form method="post" action="/accounts" class="inline-add" style="margin-bottom:6px">
+    <div class="platform-head">
+      <h2 id="h-tt">TikTok</h2>
+      <p class="hint">Mỗi tài khoản là 1 kênh: đăng riêng, hoặc đăng kèm trong cài đặt 1 Page Facebook.</p>
+    </div>
+    <form method="post" action="/accounts" class="add-bar">
       <input type="hidden" name="platform" value="tiktok">
       <input type="text" name="name" autocomplete="off" placeholder="Tên gợi nhớ, vd: TikTok mèo" required aria-label="Tên tài khoản TikTok mới">
-      <button class="btn">Thêm tài khoản</button>
+      <button class="btn primary">{{ plus|safe }}Thêm tài khoản</button>
     </form>
-    <p class="hint" style="margin-bottom:14px">Mỗi tài khoản là 1 kênh. Dùng làm kênh riêng (có nguồn, duyệt riêng) hoặc
-      chọn để đăng kèm trong cài đặt của 1 Page Facebook.</p>
     {% for a in accounts if a.platform == 'tiktok' %}{{ account_card(a, 'tiktok') }}
     {% else %}<p class="empty">Chưa có tài khoản TikTok.</p>{% endfor %}
   </section>
 </div>
+
+<section class="section" id="trinh-duyet" aria-labelledby="h-br">
+  <h2 id="h-br">Trình duyệt</h2>
+  <div class="card">
+    <p class="sub" style="margin-bottom:6px">dytool dùng <a href="https://github.com/ProxyShard/ShardBrowser" target="_blank"
+      rel="noopener">ShardBrowser</a> để đăng nhập và đăng bài: mỗi tài khoản 1 hồ sơ riêng (tự tạo, nằm trong thư mục
+      <b>dytool</b> của ShardBrowser). ShardBrowser chưa mở thì dytool tự mở.</p>
+    {% if request.query_params.get('browser_saved') %}<div class="notice" role="status">Đã lưu cài đặt ShardBrowser.</div>{% endif %}
+    {% if shard.has_token and not shard.error %}
+      <p class="hint" style="color:var(--ok)">Đã kết nối ShardBrowser — {{ shard.profiles|length }} hồ sơ.</p>
+      {% if not shard.auto %}<details class="small"><summary class="muted" style="cursor:pointer">Đổi token / địa chỉ API</summary>{{ shard_form() }}</details>{% endif %}
+    {% endif %}
+    <h3 style="margin-top:20px">Đăng nhập Douyin</h3>
+    <p class="hint" style="margin:0">Hồ sơ dùng để quét mã QR đăng nhập douyin.com (lấy cookie tải video).</p>
+    {{ profile_line('/settings/douyin-browser', '/settings/douyin-browser/new', shard.douyin, 'br-douyin',
+                    'tự tạo khi bấm Đăng nhập Douyin') }}
+  </div>
+</section>
 {% endblock %}

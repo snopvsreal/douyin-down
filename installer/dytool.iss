@@ -2,7 +2,7 @@
 ; Chỉ chép mã nguồn + dytool.exe (~1 MB); thư viện (~4 GB) tải ở bước scripts\setup_app.ps1 lúc cài.
 
 #ifndef AppVer
-  #define AppVer "0.2.0"
+  #define AppVer "0.3.0"
 #endif
 
 [Setup]

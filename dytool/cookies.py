@@ -51,9 +51,8 @@ def cookie_status(header: str) -> dict:
 
 
 def douyin_login(data_dir: Path, config_path: Path, timeout_min: int = 10) -> int:
-    """Đa nền tảng (Windows/macOS/Linux, không cần quyền admin): mở Chromium riêng của tool để BẠN tự đăng nhập
-    douyin.com (quét QR bằng app Douyin), rồi lưu cookie vào config.yaml. Trả về số cookie đã lưu."""
-    import sys
+    """Mở hồ sơ ShardBrowser dành cho Douyin (data/browser.json) để BẠN tự đăng nhập douyin.com (quét QR bằng app
+    Douyin), rồi lưu cookie vào config.yaml. Trả về số cookie đã lưu."""
     import time
     from playwright.sync_api import sync_playwright
     from . import loginstate as ls
@@ -64,13 +63,13 @@ def douyin_login(data_dir: Path, config_path: Path, timeout_min: int = 10) -> in
         ls.fail(st, msg)
         raise SystemExit(msg)
 
+    from . import browsers
     ls.write(st, steps, "Mở trình duyệt")
     with sync_playwright() as pw:
-        ctx = pw.chromium.launch_persistent_context(
-            str(data_dir / "douyin_profile"), headless=False, channel="chromium", locale="zh-CN",
-            viewport={"width": 1280, "height": 860},
-            args=["--disable-blink-features=AutomationControlled"]
-                 + (["--use-mock-keychain", "--password-store=basic"] if sys.platform == "darwin" else []))
+        try:   # hồ sơ ShardBrowser dành cho Douyin (data/browser.json)
+            ctx = browsers.attach(pw, data_dir, headless=False)
+        except browsers.BrowserError as e:
+            fail(str(e))
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         ls.write(st, steps, "Tải douyin.com", wait_sec=90)
         try:   # douyin.com tải rất lâu (mạng VN): không chờ "load", hết giờ vẫn giữ cửa sổ cho người dùng đăng nhập

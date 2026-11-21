@@ -4,8 +4,7 @@ REM Muon tu chay khi dang nhap Windows: tao shortcut file nay trong thu muc shel
 cd /d "%~dp0.."
 chcp 65001 >nul
 set PYTHONIOENCODING=utf-8
-REM Mot so may Windows chan chay chrome.exe trong AppData (loi side-by-side) -> Chromium de o C:\ms-playwright
-if exist "C:\ms-playwright" set PLAYWRIGHT_BROWSERS_PATH=C:\ms-playwright
+REM Trinh duyet dang nhap / dang bai = ShardBrowser (dytool tu mo neu chua chay)
 start "" http://127.0.0.1:8000
 uv run dytool ui --autostart
 pause

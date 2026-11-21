@@ -85,6 +85,10 @@ edit:
     max_long_edge: 1920       # thu nhỏ video 2K/4K về 1080p
     preset: medium
 
+browser:                      # ShardBrowser — trình duyệt dùng cho đăng nhập / đăng bài (mỗi tài khoản 1 hồ sơ, tự tạo)
+  shardx_api: "http://127.0.0.1:40325"   # API cục bộ của ShardBrowser (mặc định)
+  shardx_token: ""            # để trống: dytool tự lấy token từ ShardBrowser trên máy này. Chỉ điền khi API ở máy khác
+
 facebook:
   # mode: browser = đăng qua trình duyệt (Meta Business Suite), cần `uv run dytool fb-login` 1 lần
   #       reels / video = đăng qua Graph API (cần page_id + page_token)

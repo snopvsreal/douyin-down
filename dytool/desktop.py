@@ -24,15 +24,10 @@ TITLE = "dytool"
 
 
 def _prepare_env() -> None:
-    """Môi trường giống run_ui.bat: PATH có ffmpeg/uv, Chromium ngoài AppData, ghi log khi chạy bằng pythonw."""
+    """Môi trường giống run_ui.bat: PATH có ffmpeg/uv, ghi log khi chạy bằng pythonw. Trình duyệt = ShardBrowser."""
     os.chdir(ROOT)
     extra = [ROOT / "tools" / "ffmpeg" / "bin", Path.home() / ".local" / "bin"]   # bản cài kèm / bản đã chép
     os.environ["PATH"] = os.pathsep.join(str(p) for p in extra if p.exists()) + os.pathsep + os.environ.get("PATH", "")
-    if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
-        for p in (ROOT / "ms-playwright", Path(r"C:\ms-playwright")):
-            if p.exists():
-                os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(p)
-                break
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
     (ROOT / "data").mkdir(exist_ok=True)
     cfg = ROOT / "config.yaml"
@@ -73,17 +68,38 @@ def _start_server():
     raise RuntimeError(f"Không mở được server ở cổng {PORT} (cổng đang bị chương trình khác dùng?)")
 
 
-def _set_window_icon(window) -> None:
-    """WinForms lấy icon của pythonw.exe -> đổi sang icon dytool cho thanh tiêu đề và taskbar."""
-    if sys.platform != "win32" or not ICON.exists():
+def _windows_dark() -> bool:
+    """Windows đang ở chế độ tối cho app (Settings > Personalization > Colors)?"""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+            return winreg.QueryValueEx(k, "AppsUseLightTheme")[0] == 0
+    except OSError:
+        return False
+
+
+def _style_window(window) -> None:
+    """Cho cửa sổ giống app Windows: icon dytool (thay icon pythonw) + thanh tiêu đề tối khi Windows đang tối."""
+    if sys.platform != "win32":
         return
     try:
+        import ctypes
         from System import Action                     # pythonnet (đi kèm pywebview trên Windows)
         from System.Drawing import Icon
         form = window.native
-        form.Invoke(Action(lambda: setattr(form, "Icon", Icon(str(ICON)))))
+
+        def apply():
+            if ICON.exists():
+                form.Icon = Icon(str(ICON))
+            if _windows_dark():                       # DWMWA_USE_IMMERSIVE_DARK_MODE = 20 (Windows 10 20H1+)
+                hwnd = ctypes.c_void_p(int(form.Handle.ToInt64()))
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(ctypes.c_int(1)), 4)
+        form.Invoke(Action(apply))
     except Exception as e:                            # chỉ là trang trí, không được làm hỏng app
-        print("Không đặt được icon cửa sổ:", e, flush=True)
+        print("Không chỉnh được kiểu cửa sổ:", e, flush=True)
 
 
 def main() -> None:
@@ -114,8 +130,16 @@ def main() -> None:
     import pystray
 
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True     # link douyin / facebook mở bằng trình duyệt
-    window = webview.create_window(TITLE, URL, width=1360, height=880, min_size=(900, 620),
-                                   background_color="#0f141b", text_select=True)
+    # cửa sổ vừa màn hình (màn nhỏ / taskbar cao thì 880px bị tràn, mất thanh trạng thái dưới đáy)
+    width, height = 1360, 880
+    try:
+        scr = webview.screens[0]
+        width, height = min(width, int(scr.width * 0.9)), min(height, int(scr.height * 0.85))
+    except Exception:
+        pass
+    # màu nền lúc trang chưa vẽ = màu khung app (app.css --base) để không nháy màu khi mở
+    window = webview.create_window(TITLE, URL, width=width, height=height, min_size=(720, 520),
+                                   background_color="#202020" if _windows_dark() else "#f3f3f3", text_select=True)
     state = {"quitting": False, "hinted": False}
 
     def show():
@@ -159,7 +183,7 @@ def main() -> None:
     if app:
         app.state.show_window = show
     window.events.closing += on_closing
-    window.events.shown += lambda: _set_window_icon(window)
+    window.events.shown += lambda: _style_window(window)
 
     menu_items = [pystray.MenuItem("Mở dytool", lambda i, it: show(), default=True)]
     if app:

@@ -104,7 +104,7 @@
       <section class="card group" id="chay">
         <h2>Bật & lịch đăng</h2>
         <div class="switch-row">
-          <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if page.enabled }}>
+          <label class="check"><input type="checkbox" class="switch" role="switch" name="enabled" {{ 'checked' if page.enabled }}>
             {{ 'Bật kênh riêng này' if tt else 'Bật Page này' }}</label>
           <span class="small muted">Tool sẽ tự quét nguồn, edit, lồng tiếng và đăng.</span>
         </div>
@@ -226,15 +226,26 @@
   </div>
 </div>
 <script>
-  // Có thay đổi chưa lưu: báo ở thanh Lưu và hỏi lại trước khi rời trang
+  // Có thay đổi chưa lưu: báo ở thanh Lưu và hỏi lại trước khi rời trang — cả khi đóng / tải lại (beforeunload)
+  // lẫn khi bấm menu (chuyển trang kiểu htmx boost không gây beforeunload).
   (() => {
     const form = document.getElementById('settings'), note = document.getElementById('save-note');
-    let dirty = false;
-    const mark = () => { if (!dirty) { dirty = true; note.textContent = 'Có thay đổi chưa lưu.'; note.style.color = 'var(--warn)'; } };
+    window.__dyDirty = false;
+    const mark = () => { if (!window.__dyDirty) { window.__dyDirty = true; note.textContent = 'Có thay đổi chưa lưu.'; note.style.color = 'var(--warn)'; } };
     form.addEventListener('input', mark);
     form.addEventListener('change', mark);
-    form.addEventListener('submit', () => { dirty = false; });
-    addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+    form.addEventListener('submit', () => { window.__dyDirty = false; });
+    if (!window.__dyDirtyGuard) {
+      window.__dyDirtyGuard = true;
+      addEventListener('beforeunload', (e) => { if (window.__dyDirty && document.getElementById('settings')) { e.preventDefault(); e.returnValue = ''; } });
+      document.addEventListener('htmx:beforeRequest', (e) => {
+        const leaving = e.detail.boosted && e.detail.elt.tagName === 'A';
+        if (leaving && window.__dyDirty && document.getElementById('settings')) {
+          if (confirm('Có thay đổi chưa lưu ở Cài đặt kênh. Rời trang và bỏ thay đổi?')) window.__dyDirty = false;
+          else e.preventDefault();
+        }
+      });
+    }
   })();
 </script>
 {% endblock %}

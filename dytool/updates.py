@@ -273,11 +273,17 @@ def _install_shardbrowser(exe: Path) -> None:
 
 def _install_dytool(exe: Path) -> None:
     _set("dytool", "installing", "Đang mở trình cài — dytool sẽ tự đóng rồi mở lại khi cài xong")
-    # tiến trình tách riêng: trình cài đóng dytool (PrepareToInstall) mà vẫn chạy tiếp, xong thì mở lại (/RELAUNCH)
-    flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
-    subprocess.Popen([str(exe), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/RELAUNCH",
-                      f"/LOG={ROOT / 'data' / 'updates' / 'dytool-update.log'}"],
-                     creationflags=flags, close_fds=True)
+    # Trình cài đóng dytool (PrepareToInstall, `taskkill /T` = cả cây tiến trình con) rồi mở lại khi xong (/RELAUNCH).
+    # Mở qua `cmd /c start`: cmd thoát ngay -> trình cài KHÔNG còn là con của app, không bị đóng theo cây của app
+    # (trước: trình cài tự đóng chính nó, app biến mất mà không cập nhật)
+    args = [str(exe), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/RELAUNCH",
+            f"/LOG={ROOT / 'data' / 'updates' / 'dytool-update.log'}"]
+    if sys.platform == "win32":
+        subprocess.Popen(["cmd.exe", "/c", "start", "", *args],
+                         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                         close_fds=True)
+    else:
+        subprocess.Popen(args, close_fds=True)
 
 
 def start(app: str) -> str | None:

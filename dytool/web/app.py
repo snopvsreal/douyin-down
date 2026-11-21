@@ -104,16 +104,27 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         store.log("Đang cài lại thư viện — dytool sẽ tự đóng rồi mở lại khi xong")
         return HTMLResponse('<div class="done">Đã mở cửa sổ cài lại thư viện</div>')
 
+    health_cache: dict = {"at": 0.0, "v": {}}
+
     def health() -> dict:
+        """Backend tải + VoiceStudio có đang chạy. 2 kiểm tra chạy song song, chờ kết nối 0.3 s, nhớ 3 s
+        (thanh trạng thái hỏi mỗi 5 s trên mọi trang — trước mất ~4 s / lần khi 2 dịch vụ đang tắt)."""
+        if time.time() - health_cache["at"] < 3:
+            return health_cache["v"]
+        from concurrent.futures import ThreadPoolExecutor
+        from ..services import LOCAL_TIMEOUT
+
         def ok(url):
             try:
-                return httpx.get(url, timeout=2).status_code < 500
+                return httpx.get(url, timeout=LOCAL_TIMEOUT).status_code < 500
             except httpx.HTTPError:
                 return False
-        return {
-            "tdl": ok(cfg["douyin"]["api"].rstrip("/") + "/docs"),
-            "voicestudio": ok(cfg["edit"].get("dub", {}).get("api", "http://127.0.0.1:3900") + "/health"),
-        }
+        urls = {"tdl": cfg["douyin"]["api"].rstrip("/") + "/docs",
+                "voicestudio": cfg["edit"].get("dub", {}).get("api", "http://127.0.0.1:3900") + "/health"}
+        with ThreadPoolExecutor(2) as ex:
+            v = dict(zip(urls, ex.map(ok, urls.values())))
+        health_cache.update(at=time.time(), v=v)
+        return v
 
     def _sub_cfg() -> dict:
         return cfg["edit"].setdefault("subtitles", {})
@@ -362,22 +373,29 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         from ..cookies import cookie_status
         key = _sub_cfg().get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY") or ""
         # tăng tốc AI: đọc phiên bản torch (bản "+cu…" = có CUDA), không import torch (không khởi động CUDA / tốn VRAM)
-        accel = {"gpu": False, "torch": "", "card": ""}
+        return render(request, "settings.html", shard=_shard_info(),
+                      key_tail=key[-4:] if key else "", key_env=bool(not _sub_cfg().get("anthropic_api_key") and key),
+                      douyin=cookie_status(cfg["douyin"].get("cookie", "")), dy_logging_in=_alive("douyin"),
+                      version=updates.installed("dytool"), root=str(ROOT), data_dir=str(data),
+                      config_file=str(ROOT / config_path), accel=accel)
+
+    # tăng tốc AI: phiên bản torch (bản "+cu…" = có CUDA; không import torch -> không khởi động CUDA / tốn VRAM) và
+    # tên card NVIDIA. nvidia-smi mất ~1.2 s -> đọc 1 lần ở luồng nền lúc mở app, trang Cài đặt chỉ đọc kết quả
+    accel = {"gpu": False, "torch": "", "card": ""}
+
+    def _read_accel():
         try:
             from importlib.metadata import version as _v
             accel["torch"] = _v("torch")
             accel["gpu"] = "+cu" in accel["torch"]
             if accel["gpu"]:
                 q = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], capture_output=True,
-                                   text=True, timeout=5)
+                                   text=True, timeout=10)
                 accel["card"] = q.stdout.strip().splitlines()[0] if q.returncode == 0 and q.stdout.strip() else ""
         except Exception:
             pass
-        return render(request, "settings.html", shard=_shard_info(),
-                      key_tail=key[-4:] if key else "", key_env=bool(not _sub_cfg().get("anthropic_api_key") and key),
-                      douyin=cookie_status(cfg["douyin"].get("cookie", "")), dy_logging_in=_alive("douyin"),
-                      version=updates.installed("dytool"), root=str(ROOT), data_dir=str(data),
-                      config_file=str(ROOT / config_path), accel=accel)
+    import threading as _th
+    _th.Thread(target=_read_accel, daemon=True).start()
 
     # ---------------- Trình duyệt (Chromium / ShardBrowser) ----------------
     @app.post("/settings/shardx")

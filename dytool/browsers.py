@@ -147,7 +147,10 @@ def _api(method: str, path: str, _retry: bool = True, **kw):
     if not token:
         raise BrowserError("Chưa có token API của ShardBrowser — mở ShardBrowser 1 lần, hoặc xem Cài đặt > Trình duyệt")
     try:
-        r = httpx.request(method, api + path, headers={"Authorization": f"Bearer {token}"}, timeout=60, **kw)
+        # ShardBrowser trên máy này: chờ KẾT NỐI tối đa 1 s (Windows không từ chối ngay cổng đang đóng -> trước treo tới
+        # 60 s khi launcher tắt); chờ TRẢ LỜI vẫn 60 s (mở hồ sơ lâu)
+        to = httpx.Timeout(60.0, connect=1.0) if is_local_api(api) else 60
+        r = httpx.request(method, api + path, headers={"Authorization": f"Bearer {token}"}, timeout=to, **kw)
     except httpx.ConnectError as e:
         if _retry and _start_launcher(api):          # tự mở ShardBrowser rồi thử lại 1 lần
             return _api(method, path, _retry=False, **kw)

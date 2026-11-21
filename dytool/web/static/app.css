@@ -116,6 +116,14 @@ main { padding: 28px 36px 56px; max-width: 1320px; }
 .card + .card { margin-top: 12px; }
 :is(.split, .grid, .videos) > .card + .card { margin-top: 0; }
 .section { margin-top: 24px; }
+/* khung Cập nhật (Tổng quan) + mục báo trên thanh trạng thái */
+.card.updates { margin-top: 24px; }
+.upd-table { margin-top: 8px; }
+.upd-table td { padding-left: 0; vertical-align: middle; }
+.upd-progress { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.upd-progress progress { width: 200px; height: 6px; accent-color: var(--accent); }
+a.sb-update { color: var(--warn); font-weight: 600; text-decoration: none; }
+a.sb-update:hover { text-decoration: underline; }
 .section > h2 { margin-bottom: 10px; }
 .grid { display: grid; gap: 12px; }
 .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -11,6 +11,10 @@
 </div>
 
 <div class="sb-group right">
+  {% if n_updates %}
+    <a class="sb-item sb-update" href="/#cap-nhat" title="Có bản mới — bấm để xem và cập nhật">
+      <span class="dot warn"></span>Có {{ n_updates }} bản cập nhật</a>
+  {% endif %}
   {% if dy_logging_in %}
     <span class="sb-item"><span class="dot warn"></span>Douyin: đang đăng nhập…</span>
   {% elif douyin.logged_in %}

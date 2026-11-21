@@ -2,7 +2,7 @@
 ; Chỉ chép mã nguồn + dytool.exe (~1 MB); thư viện (~4 GB) tải ở bước scripts\setup_app.ps1 lúc cài.
 
 #ifndef AppVer
-  #define AppVer "0.3.1"
+  #define AppVer "0.3.2"
 #endif
 
 [Setup]
@@ -227,7 +227,17 @@ begin
        '', SW_HIDE, ewWaitUntilTerminated, RC);
 end;
 
+// /RELAUNCH: dytool tự cập nhật (updates.py chạy trình cài /SILENT /RELAUNCH) -> cài xong hết thì mở lại dytool
+function IsRelaunch: Boolean;
+begin
+  Result := Pos('/RELAUNCH', UpperCase(GetCmdTail)) > 0;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  RC: Integer;
 begin
   if CurStep = ssPostInstall then RunLibSetup;
+  if (CurStep = ssDone) and IsRelaunch then
+    ShellExec('', ExpandConstant('{app}\dytool.exe'), '', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, RC);
 end;

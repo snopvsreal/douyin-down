@@ -38,6 +38,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
     app.state.show_window = None       # desktop.py gán hàm đưa cửa sổ lên trước (khi mở dytool.exe lần 2)
     if autostart:
         worker.start()          # tự bật chạy tự động khi mở giao diện
+        from .. import updates
+        updates.start_background_checks()   # hỏi GitHub có bản mới của dytool / VoiceStudio / ShardBrowser (6 giờ / lần)
     app.mount("/media", StaticFiles(directory=str(data)), name="media")
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
     tpl = Jinja2Templates(directory=str(HERE / "templates"))
@@ -120,11 +122,39 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
 
     @app.get("/partials/services", response_class=HTMLResponse)
     def services_partial(request: Request):
-        from .. import progress
+        from .. import progress, updates
         from ..cookies import cookie_status
         return render(request, "_services.html", health=health(), vs_installed=bool(voicestudio_exe()),
-                      task=progress.snapshot(),
+                      task=progress.snapshot(), n_updates=updates.pending(),
                       douyin=cookie_status(cfg["douyin"].get("cookie", "")), dy_logging_in=_alive("douyin"))
+
+    # ---------------- Cập nhật (dytool / VoiceStudio / ShardBrowser) ----------------
+    @app.get("/partials/updates", response_class=HTMLResponse)
+    def updates_partial(request: Request, msg: str = ""):
+        from .. import updates
+        updates.check_soon()
+        rows = updates.status()
+        return render(request, "_updates.html", rows=rows, msg=msg, checked_at=updates.checked_at(),
+                      check_error=updates.check_error(),
+                      busy=not updates.checked_at() or
+                      any(r["job"] and r["job"]["state"] in ("downloading", "installing") for r in rows))
+
+    @app.post("/updates/check", response_class=HTMLResponse)
+    def updates_check(request: Request):
+        from .. import updates
+        updates.check(force=True)
+        return updates_partial(request)
+
+    @app.post("/updates/{name}", response_class=HTMLResponse)
+    def updates_start(request: Request, name: str):
+        from .. import updates
+        why = updates.start(name)
+        label = updates.APPS.get(name, {}).get("name", name)
+        if why:
+            store.log(f"Chưa cập nhật {label}: {why}", "error")
+        else:
+            store.log(f"Đang cập nhật {label}…")
+        return updates_partial(request, msg=f"{label}: {why}" if why else "")
 
     @app.get("/partials/log", response_class=HTMLResponse)
     def log_partial(request: Request):

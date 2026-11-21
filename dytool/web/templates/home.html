@@ -73,6 +73,9 @@
   </div>
 </div>
 
+{# khung Cập nhật: tải sau khi trang hiện (hỏi registry / GitHub không làm chậm trang) #}
+<div class="section" hx-get="/partials/updates" hx-trigger="load" hx-swap="outerHTML"></div>
+
 <details class="card fold section">
   <summary>Nhật ký <span class="small muted" style="font-weight:400">— mọi việc tool đã làm, mới nhất ở trên</span></summary>
   {# chỉ tải khi mở mục Nhật ký, và chỉ làm mới mỗi 5s khi đang mở #}

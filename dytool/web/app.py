@@ -482,7 +482,12 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
 
     @app.post("/accounts/{aid}/delete")
     def delete_account(aid: int):
+        acc = store.one("SELECT * FROM accounts WHERE id=?", (aid,))
         store.x("DELETE FROM accounts WHERE id=?", (aid,))
+        if acc:     # ghi lại để biết đã xoá gì (thư mục data/accounts/<id> + hồ sơ ShardBrowser vẫn giữ)
+            plat = "TikTok" if acc["platform"] == "tiktok" else "Facebook"
+            store.log(f"Đã xoá tài khoản {plat} #{aid} '{acc['name']}' khỏi tool "
+                      f"(dữ liệu đăng nhập vẫn giữ ở data/accounts/{aid})")
         return RedirectResponse("/accounts", 303)
 
     # ---------------- Cài đặt Page ----------------

@@ -19,8 +19,17 @@ def separate(video: Path, work: Path) -> tuple[Path, Path]:
     wav = work / f"{video.stem}_src.wav"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "2", "-ar", "44100",
                     str(wav)], check=True)
-    subprocess.run([sys.executable, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs",
-                    "-o", str(out_dir), str(wav)], check=True, capture_output=True)
+    base = [sys.executable, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs", "-o", str(out_dir)]
+    # Demucs tự dùng GPU nếu torch có CUDA (bản cài "gpu", máy có card NVIDIA). Lỗi phía GPU (hết VRAM — card 4 GB
+    # dùng chung với VoiceStudio, driver…) -> chạy lại bằng CPU thay vì làm hỏng cả video
+    r = subprocess.run(base + [str(wav)], capture_output=True)
+    if r.returncode != 0:
+        err = r.stderr.decode("utf-8", "replace")
+        if any(w in err for w in ("CUDA", "cuda", "cuDNN", "out of memory")):
+            print("Demucs lỗi trên GPU -> chạy lại bằng CPU", flush=True)
+            r = subprocess.run(base + ["-d", "cpu", str(wav)], capture_output=True)
+        if r.returncode != 0:
+            raise subprocess.CalledProcessError(r.returncode, r.args, r.stdout, r.stderr)
     stem_dir = out_dir / "htdemucs" / wav.stem
     wav.unlink(missing_ok=True)
     return stem_dir / "vocals.wav", stem_dir / "no_vocals.wav"

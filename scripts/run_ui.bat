@@ -9,5 +9,6 @@ REM Python cua uv nam trong thu muc du an (may chan chay exe trong AppData)
 set UV_PYTHON_INSTALL_DIR=%~dp0..\.python
 REM Trinh duyet dang nhap / dang bai = ShardBrowser (dytool tu mo neu chua chay)
 start "" http://127.0.0.1:8000
-uv run dytool ui --autostart
+REM --no-sync: khong dong bo lai moi truong (giu ban torch GPU neu da cai)
+uv run --no-sync dytool ui --autostart
 pause

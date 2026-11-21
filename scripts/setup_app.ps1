@@ -118,9 +118,24 @@ try {
 
     # ---------- 2. Python + thư viện ----------
     Say "2/7  Python 3.12 + thư viện (torch, whisper, demucs… ~3 GB, lâu nhất)"
-    & uv sync --frozen --python 3.12 2>&1 | ForEach-Object { "   $_" } | Out-Host     # in vào setup.log (Start-Transcript không bắt được chữ của lệnh ngoài)
+    # Card NVIDIA (CUDA, kiến trúc >= 5.0) -> torch bản GPU (pyproject: extra "gpu" = torch 2.14 cu126, bản cuối còn
+    # chạy card GTX 10xx). Tách giọng Demucs nhanh ~3 lần. Chọn tay: biến môi trường DYTOOL_TORCH=cpu | gpu
+    $variant = "cpu"
+    $gpuName = ""
+    if ($env:DYTOOL_TORCH -in @("cpu", "gpu")) { $variant = $env:DYTOOL_TORCH }
+    elseif (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+        $q = & nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader 2>$null | Select-Object -First 1
+        if ($q -match '^\s*(.+?),\s*(\d+\.\d+)\s*$' -and [double]$Matches[2] -ge 5.0) { $variant = "gpu"; $gpuName = $Matches[1] }
+    }
+    if ($variant -eq "gpu") { Write-Host "   Có card NVIDIA $gpuName -> cài bản tăng tốc GPU (tải thêm ~2.5 GB)" }
+    & uv sync --frozen --python 3.12 --extra $variant 2>&1 | ForEach-Object { "   $_" } | Out-Host     # in vào setup.log (Start-Transcript không bắt được chữ của lệnh ngoài)
+    if ($LASTEXITCODE -ne 0 -and $variant -eq "gpu") {
+        Warn "Cài bản GPU chưa được (mã $LASTEXITCODE) — dùng bản CPU"
+        $variant = "cpu"
+        & uv sync --frozen --python 3.12 --extra cpu 2>&1 | ForEach-Object { "   $_" } | Out-Host
+    }
     Done-Or-Fail "Cài thư viện Python"
-    Ok "Thư viện Python xong"
+    Ok ("Thư viện Python xong (" + $(if ($variant -eq "gpu") { "AI chạy bằng GPU" } else { "AI chạy bằng CPU" }) + ")")
 
     # ---------- 3. FFmpeg bản đầy đủ (có bộ lọc phụ đề) ----------
     Say "3/7  FFmpeg"
@@ -197,7 +212,8 @@ try {
     # ---------- 6. Cấu hình + model AI ----------
     Say "6/7  Cấu hình và model AI (~1.5 GB)"
     if (-not (Test-Path "$Root\config.yaml")) { Copy-Item "$Root\config.example.yaml" "$Root\config.yaml"; Ok "Đã tạo config.yaml" }
-    & uv run --frozen python "$Root\scripts\warm_models.py" 2>&1 | ForEach-Object { "   $_" } | Out-Host     # in vào setup.log (Start-Transcript không bắt được chữ của lệnh ngoài)
+    # --no-sync: uv run mặc định đồng bộ lại môi trường về bản không tuỳ chọn -> gỡ mất torch GPU vừa cài
+    & uv run --no-sync python "$Root\scripts\warm_models.py" 2>&1 | ForEach-Object { "   $_" } | Out-Host     # in vào setup.log (Start-Transcript không bắt được chữ của lệnh ngoài)
     if ($LASTEXITCODE -ne 0) { Warn "Một số model chưa tải xong — tool tự tải khi dùng lần đầu" } else { Ok "Model AI xong" }
 
     # ---------- 7. VoiceStudio (lồng tiếng) ----------

@@ -120,6 +120,19 @@
       <div>dytool {{ version or '?' }} · <a href="https://github.com/snopvsreal/douyin-down/releases" target="_blank" rel="noopener">Các bản phát hành</a></div>
     </div>
     <div class="set-row">
+      <div class="set-label"><b>Tăng tốc AI</b>
+        <p class="hint">Tách giọng (Demucs) chạy trên card NVIDIA nhanh khoảng 3 lần so với CPU.</p></div>
+      <div>
+        {% if accel.gpu %}
+          <span class="pill ok">GPU</span> <span class="small">{{ accel.card or 'card NVIDIA' }}</span>
+          <span class="small muted">· torch {{ accel.torch }}</span>
+        {% else %}
+          <span class="pill">CPU</span> <span class="small muted">torch {{ accel.torch or '?' }}</span>
+          <p class="hint">Máy có card NVIDIA: bấm Cài lại thư viện (Start Menu › dytool - Cài đặt lại thư viện) để cài bản GPU.</p>
+        {% endif %}
+      </div>
+    </div>
+    <div class="set-row">
       <div class="set-label"><b>Dữ liệu</b>
         <p class="hint">Tài khoản, cookie, video, nhật ký. Cài bản mới hay gỡ cài đặt đều giữ nguyên.</p></div>
       <div><code class="path">{{ data_dir }}</code>

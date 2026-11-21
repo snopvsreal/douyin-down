@@ -361,11 +361,23 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         from .. import updates
         from ..cookies import cookie_status
         key = _sub_cfg().get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY") or ""
+        # tăng tốc AI: đọc phiên bản torch (bản "+cu…" = có CUDA), không import torch (không khởi động CUDA / tốn VRAM)
+        accel = {"gpu": False, "torch": "", "card": ""}
+        try:
+            from importlib.metadata import version as _v
+            accel["torch"] = _v("torch")
+            accel["gpu"] = "+cu" in accel["torch"]
+            if accel["gpu"]:
+                q = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], capture_output=True,
+                                   text=True, timeout=5)
+                accel["card"] = q.stdout.strip().splitlines()[0] if q.returncode == 0 and q.stdout.strip() else ""
+        except Exception:
+            pass
         return render(request, "settings.html", shard=_shard_info(),
                       key_tail=key[-4:] if key else "", key_env=bool(not _sub_cfg().get("anthropic_api_key") and key),
                       douyin=cookie_status(cfg["douyin"].get("cookie", "")), dy_logging_in=_alive("douyin"),
                       version=updates.installed("dytool"), root=str(ROOT), data_dir=str(data),
-                      config_file=str(ROOT / config_path))
+                      config_file=str(ROOT / config_path), accel=accel)
 
     # ---------------- Trình duyệt (Chromium / ShardBrowser) ----------------
     @app.post("/settings/shardx")

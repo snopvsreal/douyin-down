@@ -114,7 +114,12 @@ Luồng 1 video: `new` → tải → `downloaded` → edit → `review` (hoặc 
 
 - Chưa từng chạy thử trên Windows: lần đầu hãy chạy `uv run dytool edit-file` với 1 video, rồi `dry_run` đăng FB.
 - FFmpeg phải là bản **full** (Gyan.FFmpeg) để có `subtitles`/libass; font mặc định Arial.
-- torch trên Windows từ PyPI là bản CPU (Demucs/Whisper chậm hơn). Có GPU NVIDIA thì cài torch CUDA theo pytorch.org.
+- **torch CPU / GPU**: pyproject có 2 extra loại trừ nhau — `cpu` (torch mới nhất từ PyPI) và `gpu` (torch **2.14** cu126
+  từ download.pytorch.org: bản cuối còn chạy card Pascal GTX 10xx; torch 2.15 bỏ Maxwell / Pascal / Volta).
+  `setup_app.ps1` tự chọn: `nvidia-smi` thấy card kiến trúc ≥ 5.0 → `--extra gpu` (lỗi thì lùi `cpu`); chọn tay bằng
+  `DYTOOL_TORCH`. **Mọi `uv run` phải `--no-sync`** (warm_models, run_ui.bat) — không thì uv đồng bộ về bản không
+  extra và gỡ mất torch GPU. Demucs tự dùng CUDA; lỗi GPU (hết VRAM, card 4 GB chung VoiceStudio) → `dub.separate` chạy
+  lại `-d cpu`. Đo GTX 1050 Ti: 30 giây âm thanh 18 s (GPU) vs 60 s (CPU i5-8300H). Whisper (CTranslate2) vẫn CPU.
 - Chống ngủ máy: worker tự gọi `SetThreadExecutionState` khi chạy.
 - Máy Windows của người dùng (10 LTSC, không có winget) **chặn chạy exe/junction trong `AppData`**: chrome.exe báo lỗi
   side-by-side, `uv python install` báo "Missing expected target directory for Python minor version link". Cùng file

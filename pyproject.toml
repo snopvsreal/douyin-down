@@ -27,6 +27,13 @@ dependencies = [
     "pystray>=0.19",
 ]
 
+[project.optional-dependencies]
+# Chọn 1 trong 2 khi cài (setup_app.ps1 tự chọn): máy có card NVIDIA -> gpu, còn lại -> cpu.
+# gpu = torch 2.14 bản CUDA 12.6: bản CUOI còn hỗ trợ card đời Pascal (GTX 10xx) — torch 2.15 bỏ Maxwell / Pascal /
+# Volta. Demucs (tách giọng) nhanh ~3.3 lần trên GTX 1050 Ti so với CPU i5-8300H. Tải ~2.5 GB (bản cpu ~200 MB).
+cpu = ["torch>=2.5"]
+gpu = ["torch==2.14.*"]
+
 [project.scripts]
 dytool = "dytool.cli:main"
 
@@ -40,3 +47,12 @@ environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sys_platform == 'win32' and platform_machine == 'AMD64'",
 ]
+conflicts = [[{ extra = "cpu" }, { extra = "gpu" }]]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126", extra = "gpu", marker = "sys_platform == 'win32'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true

@@ -13,6 +13,10 @@ class FBError(RuntimeError):
     pass
 
 
+def _noop(pct: int, text: str) -> None:
+    pass
+
+
 def _context(pw, data_dir: Path, headless: bool):
     from . import browsers
     return browsers.attach(pw, data_dir, headless)
@@ -284,37 +288,63 @@ def publish(data_dir: Path, video: Path, caption: str, cfg: dict, dry_run: bool 
             ctx.close()
 
 
-def discover_pages(acc_dir: Path) -> dict:
+def _page_links(page) -> dict[str, str]:
+    import re
+    found: dict[str, str] = {}
+    for a in page.query_selector_all('a[href*="facebook.com/"]'):
+        name = (a.inner_text() or "").strip()
+        href = a.get_attribute("href") or ""
+        m = re.search(r"profile\.php\?id=(\d+)|facebook\.com/([A-Za-z0-9.]{5,})/?$", href)
+        if not name or "\n" in name or len(name) > 80 or not m or name == "Meta Business Suite":
+            continue
+        found.setdefault(name, m.group(1) or m.group(2))
+    return found
+
+
+def discover_pages(acc_dir: Path, on_step=_noop) -> dict:
     """Quét các Page mà tài khoản quản lý. Trả về {"fb_user": tên, "pages": [{name, profile_id, asset_id}]}.
     asset_id (Page ID trong Business Suite) đọc từ trường delegate_page_id trong trang Page."""
     import re
     from playwright.sync_api import sync_playwright
+    on_step(40, "Mở danh sách Page bạn quản lý")
     with sync_playwright() as pw:
         ctx = _context(pw, acc_dir, headless=True)
         try:
             if not logged_in(ctx):
                 raise FBError("Tài khoản chưa đăng nhập")
             page = ctx.new_page()
-            page.goto("https://www.facebook.com/pages/?category=your_pages", wait_until="domcontentloaded")
-            page.wait_for_timeout(7000)
             found: dict[str, str] = {}
-            for a in page.query_selector_all('a[href*="facebook.com/"]'):
-                name = (a.inner_text() or "").strip()
-                href = a.get_attribute("href") or ""
-                m = re.search(r"profile\.php\?id=(\d+)|facebook\.com/([A-Za-z0-9.]{5,})/?$", href)
-                if not name or "\n" in name or len(name) > 80 or not m or name == "Meta Business Suite":
-                    continue
-                found.setdefault(name, m.group(1) or m.group(2))
+            # ngay sau khi đăng nhập, danh sách Page tải chậm -> chờ tới khi số Page đứng yên (tối đa ~30s, thử 2 lần)
+            for attempt in range(2):
+                page.goto("https://www.facebook.com/pages/?category=your_pages", wait_until="domcontentloaded")
+                prev, stable = -1, 0
+                for _ in range(15):
+                    page.wait_for_timeout(2000)
+                    found = _page_links(page)
+                    on_step(45, f"Đang đọc danh sách Page… thấy {len(found)}")
+                    stable = stable + 1 if len(found) == prev and found else 0
+                    prev = len(found)
+                    if stable >= 2:
+                        break
+                if found:
+                    break
             pages = []
-            for name, pid in found.items():
+            total = len(found)
+            for i, (name, pid) in enumerate(found.items()):
+                on_step(50 + 45 * i // max(total, 1), f"Lấy mã Page {i + 1}/{total}: {name}")
                 url = (f"https://www.facebook.com/profile.php?id={pid}" if pid.isdigit()
                        else f"https://www.facebook.com/{pid}")
                 page.goto(url, wait_until="domcontentloaded")
-                page.wait_for_timeout(5000)
-                m = re.search(r'"delegate_page_id":"(\d+)"', page.content())
+                m = None
+                for _ in range(5):          # chờ tối đa ~10s cho tới khi có delegate_page_id
+                    page.wait_for_timeout(2000)
+                    m = re.search(r'"delegate_page_id":"(\d+)"', page.content())
+                    if m:
+                        break
                 if m:
                     pages.append({"name": name, "profile_id": pid, "asset_id": m.group(1)})
             user = next((c["value"] for c in ctx.cookies("https://www.facebook.com") if c["name"] == "c_user"), "")
+            on_step(100, f"Xong — tìm thấy {len(pages)} Page")
             return {"fb_user": user, "pages": pages}
         finally:
             ctx.close()

@@ -12,19 +12,9 @@
   {% endif %}
 </div>
 
-{% if request.query_params.get('key_saved') %}<div class="notice" role="status">Đã lưu Anthropic API key — tool dùng ngay.</div>{% endif %}
 {% if need_key %}
-<form method="post" action="/settings/api-key" class="card setup-card" style="margin-bottom:16px">
-  <h2 style="margin-bottom:4px">Cần Anthropic API key để dịch và lồng tiếng</h2>
-  <p class="hint" style="margin:0 0 10px">Lấy key ở <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>
-    (bắt đầu bằng <code>sk-ant-</code>). Key chỉ lưu trong file config.yaml trên máy này.</p>
-  <div class="inline-add">
-    <input type="password" name="key" required autocomplete="off" spellcheck="false" placeholder="sk-ant-…"
-           aria-label="Anthropic API key" {% if request.query_params.get('key_error') %}aria-invalid="true"{% endif %}>
-    <button class="btn primary">Lưu key</button>
-  </div>
-  {% if request.query_params.get('key_error') %}<p class="hint" role="alert" style="color:var(--err)">Key phải bắt đầu bằng sk-ant- — dán lại key từ console.anthropic.com.</p>{% endif %}
-</form>
+<div class="notice warn" role="alert">Chưa có Anthropic API key — chưa dịch / lồng tiếng được.
+  <a href="/settings#api-key">Nhập key ở Cài đặt</a></div>
 {% endif %}
 
 {# thanh tiến trình đăng nhập Douyin; câu đọc to cho trình đọc màn hình đi qua #sr-live (base.html) #}
@@ -72,9 +62,6 @@
     {% endif %}
   </div>
 </div>
-
-{# khung Cập nhật: tải sau khi trang hiện (hỏi registry / GitHub không làm chậm trang) #}
-<div class="section" hx-get="/partials/updates" hx-trigger="load" hx-swap="outerHTML"></div>
 
 <details class="card fold section">
   <summary>Nhật ký <span class="small muted" style="font-weight:400">— mọi việc tool đã làm, mới nhất ở trên</span></summary>

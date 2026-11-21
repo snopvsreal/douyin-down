@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% from "_macros.html" import profile_line, shard_form with context %}
+{% block title %}Cài đặt{% endblock %}
+{% block body %}
+<div class="settings-page">
+<div class="head">
+  <div><h1>Cài đặt</h1>
+    <p class="sub">Cài đặt chung của dytool. Cài đặt riêng từng Page / kênh (nguồn, mẫu edit, giọng, lịch đăng) nằm ở
+      <a href="/accounts">Tài khoản & kênh</a> → <b>Cài đặt</b> cạnh mỗi kênh.</p></div>
+</div>
+
+{# 1. Cập nhật — khung tự làm mới (_updates.html) #}
+<div hx-get="/partials/updates" hx-trigger="load" hx-swap="outerHTML" class="card updates" style="margin-top:0">
+  <h2 style="margin:0">Cập nhật</h2><p class="hint">Đang kiểm tra…</p></div>
+
+{# 2. Dịch & lồng tiếng #}
+<section class="section" id="api-key" aria-labelledby="h-ai">
+  <h2 id="h-ai">Dịch & lồng tiếng</h2>
+  <div class="card">
+    {% if request.query_params.get('key_saved') %}<div class="notice" role="status">Đã lưu Anthropic API key — tool dùng ngay.</div>{% endif %}
+    <div class="set-row">
+      <div class="set-label"><b>Anthropic API key</b>
+        <p class="hint">Dùng để dịch phụ đề và viết lời lồng tiếng. Lấy ở
+          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.</p></div>
+      <div>
+        {% if key_tail %}
+          <p class="small" style="margin:0 0 8px"><span class="pill ok">Đã có key</span>
+            <span class="muted">kết thúc bằng …{{ key_tail }}{% if key_env %} (lấy từ biến môi trường){% endif %}</span></p>
+        {% else %}
+          <p class="small" style="margin:0 0 8px"><span class="pill err">Chưa có key</span>
+            <span class="muted">chưa dịch / lồng tiếng được</span></p>
+        {% endif %}
+        <form method="post" action="/settings/api-key" class="inline-add">
+          <input type="password" name="key" required autocomplete="off" spellcheck="false" placeholder="sk-ant-…"
+                 aria-label="Anthropic API key {{ 'mới' if key_tail }}" {% if request.query_params.get('key_error') %}aria-invalid="true"{% endif %}>
+          <button class="btn {{ '' if key_tail else 'primary' }}">{{ 'Đổi key' if key_tail else 'Lưu key' }}</button>
+        </form>
+        {% if request.query_params.get('key_error') %}<p class="hint" role="alert" style="color:var(--err)">Key phải bắt đầu bằng sk-ant- — dán lại key từ console.anthropic.com.</p>{% endif %}
+        <p class="hint">Key chỉ lưu trong file config.yaml trên máy này.</p>
+      </div>
+    </div>
+    <div class="set-row">
+      <div class="set-label"><b>VoiceStudio</b>
+        <p class="hint">App đọc lời lồng tiếng Việt. Phải đang mở thì các Page bật lồng tiếng mới edit được.</p></div>
+      <div><button class="btn" hx-post="/services/voicestudio" hx-swap="none" hx-disabled-elt="this">Mở VoiceStudio</button>
+        <p class="hint">Trạng thái xem ở thanh dưới đáy cửa sổ. Lần đầu: Model Catalogue → chấp nhận license OmniVoice.</p></div>
+    </div>
+  </div>
+</section>
+
+{# 3. Trình duyệt ShardBrowser #}
+<section class="section" id="trinh-duyet" aria-labelledby="h-br">
+  <h2 id="h-br">Trình duyệt</h2>
+  <div class="card">
+    {% if request.query_params.get('browser_saved') %}<div class="notice" role="status">Đã lưu cài đặt ShardBrowser.</div>{% endif %}
+    <div class="set-row">
+      <div class="set-label"><b>ShardBrowser</b>
+        <p class="hint">Trình duyệt để đăng nhập và đăng bài. Mỗi tài khoản 1 hồ sơ riêng, dytool tự tạo
+          (thư mục <b>dytool</b> trong ShardBrowser) và tự mở ShardBrowser khi cần.</p></div>
+      <div>
+        {% if not shard.installed %}
+          <p class="small" style="margin:0 0 6px"><span class="pill err">Chưa cài</span></p>
+          <p class="hint" role="alert"><a href="{{ shard.download }}" target="_blank" rel="noopener">Tải bản cài Windows (file _x64-setup.exe)</a>,
+            cài và mở 1 lần — hoặc chạy lại trình cài dytool và tick ShardBrowser.</p>
+        {% elif shard.error %}
+          <p class="small" style="margin:0 0 6px"><span class="pill err">Chưa kết nối</span></p>
+          <p class="hint" role="alert" style="color:var(--err)">{{ shard.error }}</p>
+          <p class="hint">Mở ShardBrowser rồi tải lại trang. Vẫn lỗi: kiểm tra ShardBrowser › Settings › Automation API đang bật.</p>
+        {% elif shard.has_token %}
+          <p class="small" style="margin:0"><span class="pill ok">Đã kết nối</span>
+            <span class="muted">{{ shard.profiles|length }} hồ sơ · tự kết nối{{ '' if shard.auto else ' bằng token' }}</span></p>
+        {% endif %}
+        {% if not shard.auto %}
+          <details class="small" {{ 'open' if not shard.has_token }} style="margin-top:8px">
+            <summary class="muted" style="cursor:pointer">ShardBrowser ở máy khác: nhập token / địa chỉ API</summary>
+            {{ shard_form() }}</details>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+
+{# 4. Douyin #}
+<section class="section" id="douyin" aria-labelledby="h-dy">
+  <h2 id="h-dy">Douyin</h2>
+  <div class="card">
+    <div class="lp-slot" hx-get="/partials/login/douyin" hx-trigger="load, every 1s" hx-swap="innerHTML"
+         style="margin-bottom:8px"></div>
+    <div class="set-row">
+      <div class="set-label"><b>Đăng nhập Douyin</b>
+        <p class="hint">Cookie đăng nhập douyin.com để tìm và tải video. Hết hạn thì đăng nhập lại (quét mã QR).</p></div>
+      <div>
+        {% if dy_logging_in %}
+          <p class="small" style="margin:0 0 8px"><span class="pill warn">Đang đăng nhập…</span></p>
+        {% elif douyin.logged_in %}
+          <p class="small" style="margin:0 0 8px"><span class="pill {{ 'warn' if douyin.days_left is not none and douyin.days_left < 7 else 'ok' }}">Đã đăng nhập</span>
+            {% if douyin.days_left is not none %}<span class="muted">còn {{ douyin.days_left }} ngày{% if douyin.expires %}
+              (hết hạn {{ time.strftime('%d/%m/%Y', time.localtime(douyin.expires)) }}){% endif %}</span>{% endif %}</p>
+        {% else %}
+          <p class="small" style="margin:0 0 8px"><span class="pill err">{{ 'Hết hạn' if douyin.expired else 'Chưa đăng nhập' }}</span></p>
+        {% endif %}
+        <form method="post" action="/services/douyin-login">
+          <button class="btn {{ '' if douyin.logged_in else 'primary' }}" {{ 'disabled' if dy_logging_in }}>
+            {{ 'Đăng nhập lại' if douyin.logged_in else 'Đăng nhập Douyin' }}</button></form>
+        {{ profile_line('/settings/douyin-browser', '/settings/douyin-browser/new', shard.douyin, 'br-douyin',
+                        'tự tạo khi bấm Đăng nhập Douyin') }}
+      </div>
+    </div>
+  </div>
+</section>
+
+{# 5. Thông tin #}
+<section class="section" id="thong-tin" aria-labelledby="h-info">
+  <h2 id="h-info">Thông tin</h2>
+  <div class="card">
+    <div class="set-row">
+      <div class="set-label"><b>Phiên bản</b></div>
+      <div>dytool {{ version or '?' }} · <a href="https://github.com/snopvsreal/douyin-down/releases" target="_blank" rel="noopener">Các bản phát hành</a></div>
+    </div>
+    <div class="set-row">
+      <div class="set-label"><b>Dữ liệu</b>
+        <p class="hint">Tài khoản, cookie, video, nhật ký. Cài bản mới hay gỡ cài đặt đều giữ nguyên.</p></div>
+      <div><code class="path">{{ data_dir }}</code>
+        <form method="post" action="/settings/open-folder" style="margin-top:8px">
+          <button class="btn sm" name="which" value="data">Mở thư mục dữ liệu</button>
+          <button class="btn sm ghost" name="which" value="root">Mở thư mục cài đặt</button></form></div>
+    </div>
+    <div class="set-row">
+      <div class="set-label"><b>File cấu hình</b></div>
+      <div><code class="path">{{ config_file }}</code></div>
+    </div>
+  </div>
+</section>
+</div>
+{% endblock %}

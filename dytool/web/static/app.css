@@ -82,7 +82,8 @@ nav.side { grid-row: 1; padding: 10px 6px 10px 6px; display: flex; flex-directio
   font-size: 11px; font-weight: 600; background: var(--accent); color: var(--accent-text); font-variant-numeric: tabular-nums; }
 .badge.err { background: var(--err); color: #fff; }
 @media (prefers-color-scheme: dark) { .badge.err { color: #2a0d0f; } }
-.nav-hint { margin-top: auto; padding: 8px 12px; font-size: 12px; color: var(--text-3); }
+.nav-item.nav-bottom { margin-top: auto; }
+.nav-hint { padding: 8px 12px; font-size: 12px; color: var(--text-3); }
 .nav-hint kbd { font: 11px var(--font); border: 1px solid var(--ctl-stroke); border-bottom-color: var(--ctl-stroke-2);
   border-radius: 3px; padding: 0 4px; background: var(--ctl); }
 
@@ -195,7 +196,21 @@ a.sb-update:hover { text-decoration: underline; }
   background: var(--ok-weak); color: var(--text); border: 1px solid var(--stroke); margin-bottom: 16px; }
 .notice::before { content: "✓"; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%;
   background: var(--ok); color: var(--card); font-size: 11px; font-weight: 700; flex: none; }
+.notice.warn { background: var(--warn-weak); flex-wrap: wrap; }
+.notice.warn::before { content: "!"; background: var(--warn); }
 .setup-card { background: var(--accent-weak); border-color: var(--stroke); }
+/* trang Cài đặt: các mục xếp dọc, nhãn trái - nội dung phải */
+.settings-page { max-width: 880px; }
+.settings-page .card + .card { margin-top: 0; }
+.settings-page > .card.updates:first-of-type, .settings-page .head + .card.updates { margin-top: 0; }
+.set-row { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: 4px 24px; padding: 12px 0;
+  border-top: 1px solid var(--divider); align-items: start; }
+.set-row:first-of-type { border-top: 0; padding-top: 4px; }
+.set-row > .set-label > b { display: block; }
+.set-row > .set-label .hint { margin: 2px 0 0; }
+.set-row .inline-add { margin: 0; }
+code.path { font-size: 12px; word-break: break-all; }
+@media (max-width: 760px) { .set-row { grid-template-columns: minmax(0, 1fr); } }
 .done { padding: 6px 10px; border-radius: var(--r-ctl); background: var(--ok-weak); color: var(--ok); font-size: 13px; }
 
 /* ---------- bảng ---------- */

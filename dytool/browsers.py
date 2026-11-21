@@ -134,7 +134,7 @@ def _start_launcher(api: str) -> bool:
 def _api(method: str, path: str, _retry: bool = True, **kw):
     api, token = shardx_settings()
     if not token:
-        raise BrowserError("Chưa có token API của ShardBrowser — vào Tài khoản & kênh > Trình duyệt để nhập")
+        raise BrowserError("Chưa có token API của ShardBrowser — mở ShardBrowser 1 lần, hoặc xem Cài đặt > Trình duyệt")
     try:
         r = httpx.request(method, api + path, headers={"Authorization": f"Bearer {token}"}, timeout=60, **kw)
     except httpx.ConnectError as e:

@@ -99,7 +99,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
         import re
         key = key.strip()
         if not key.startswith("sk-ant-"):
-            return RedirectResponse("/?key_error=1", 303)
+            return RedirectResponse("/settings?key_error=1#api-key", 303)
         path = ROOT / config_path
         text = path.read_text(encoding="utf-8")
         safe = key.replace('"', "")
@@ -108,7 +108,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
             path.write_text(text, encoding="utf-8")
         _sub_cfg()["anthropic_api_key"] = key      # dùng ngay, không cần khởi động lại
         store.log("Đã lưu Anthropic API key")
-        return RedirectResponse("/?key_saved=1", 303)
+        return RedirectResponse("/settings?key_saved=1#api-key", 303)
 
     # ---------------- Tổng quan ----------------
     @app.get("/", response_class=HTMLResponse)
@@ -172,11 +172,20 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
         worker.start() if action == "start" else worker.stop()
         return RedirectResponse("/", 303)
 
+    @app.post("/settings/open-folder")
+    def open_folder(which: str = Form("data")):
+        """Mở thư mục dữ liệu / thư mục cài đặt trong File Explorer (chỉ 2 thư mục cố định này)."""
+        import os
+        folder = data if which == "data" else ROOT
+        if hasattr(os, "startfile"):
+            os.startfile(str(folder))
+        return RedirectResponse("/settings#thong-tin", 303)
+
     @app.post("/services/douyin-login")
-    def douyin_login():
+    def douyin_login(request: Request):
         """Mở hồ sơ ShardBrowser dành cho Douyin để đăng nhập douyin.com, lưu cookie vào config."""
         if not _auto_profile(data, "dytool · Douyin", "Đăng nhập Douyin"):
-            return RedirectResponse("/accounts#trinh-duyet", 303)
+            return RedirectResponse("/settings#trinh-duyet", 303)
         p = procs.get("douyin")
         if not p or p.poll() is not None:
             from .. import loginstate
@@ -201,7 +210,9 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
                     store.log(f"Đăng nhập Douyin lỗi: {err} (chi tiết: data/douyin_login.log)", "error")
             import threading
             threading.Thread(target=report, daemon=True).start()
-        return RedirectResponse("/", 303)
+        # bấm từ trang Cài đặt -> quay lại mục Douyin (có thanh tiến trình đăng nhập ở đó); nơi khác -> Tổng quan
+        back = "/settings#douyin" if "/settings" in (request.headers.get("referer") or "") else "/"
+        return RedirectResponse(back, 303)
 
     def _alive(key: str) -> bool:
         p = procs.get(key)
@@ -267,6 +278,14 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
             if p["platform"] != "tiktok" and dst:
                 mirrors.setdefault(dst, []).append(p["name"])
         from .. import browsers
+        choices = {a["id"]: browsers.get_choice(store.account_dir(data, a["id"])) for a in accs}
+        return render(request, "accounts.html", accounts=accs, pages=pages, mirrors=mirrors, shard=_shard_info(),
+                      choices=choices,
+                      logging_in={int(k[5:]) for k, p in procs.items() if k.startswith("login") and p.poll() is None})
+
+    def _shard_info() -> dict:
+        """Trạng thái ShardBrowser cho trang Tài khoản (ô đổi hồ sơ) và trang Cài đặt (kết nối, hồ sơ Douyin)."""
+        from .. import browsers
         api, token = browsers.shardx_settings()
         shard = {"api": api, "has_token": bool(token), "profiles": [], "error": None,
                  "installed": browsers.launcher_exe() is not None, "download": browsers.DOWNLOAD,
@@ -276,10 +295,20 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
                 shard["profiles"] = browsers.list_profiles()
             except browsers.BrowserError as e:
                 shard["error"] = str(e)
-        choices = {a["id"]: browsers.get_choice(store.account_dir(data, a["id"])) for a in accs}
-        return render(request, "accounts.html", accounts=accs, pages=pages, mirrors=mirrors, shard=shard,
-                      choices=choices,
-                      logging_in={int(k[5:]) for k, p in procs.items() if k.startswith("login") and p.poll() is None})
+        return shard
+
+    # ---------------- Cài đặt chung (cập nhật, API key, trình duyệt, Douyin, thông tin) ----------------
+    @app.get("/settings", response_class=HTMLResponse)
+    def settings_page(request: Request):
+        import os
+        from .. import updates
+        from ..cookies import cookie_status
+        key = _sub_cfg().get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY") or ""
+        return render(request, "settings.html", shard=_shard_info(),
+                      key_tail=key[-4:] if key else "", key_env=bool(not _sub_cfg().get("anthropic_api_key") and key),
+                      douyin=cookie_status(cfg["douyin"].get("cookie", "")), dy_logging_in=_alive("douyin"),
+                      version=updates.installed("dytool"), root=str(ROOT), data_dir=str(data),
+                      config_file=str(ROOT / config_path))
 
     # ---------------- Trình duyệt (Chromium / ShardBrowser) ----------------
     @app.post("/settings/shardx")
@@ -301,7 +330,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
             text = text.rstrip("\n") + f'\n\nbrowser:\n  shardx_api: "{api}"\n  shardx_token: "{token}"\n'
         path.write_text(text, encoding="utf-8")
         store.log("Đã lưu cài đặt ShardBrowser")
-        return RedirectResponse("/accounts?browser_saved=1#trinh-duyet", 303)
+        return RedirectResponse("/settings?browser_saved=1#trinh-duyet", 303)
 
     def _auto_profile(target: Path, name: str, who: str, quiet: bool = False) -> bool:
         """Chưa gắn hồ sơ -> tự tạo hồ sơ ShardBrowser mới và gắn luôn (người dùng không phải liên kết tay)."""
@@ -349,7 +378,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
     @app.post("/settings/douyin-browser")
     def set_douyin_browser(choice: str = Form("")):
         _set_profile(data, choice, "Đăng nhập Douyin")
-        return RedirectResponse("/accounts#trinh-duyet", 303)
+        return RedirectResponse("/settings#trinh-duyet", 303)
 
     @app.post("/settings/douyin-browser/new")
     def new_douyin_profile():
@@ -358,7 +387,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
         browsers.set_choice(data, "")
         if not _auto_profile(data, "dytool · Douyin", "Đăng nhập Douyin") and old:
             browsers.set_choice(data, old["profile_id"], old.get("profile_name", ""))
-        return RedirectResponse("/accounts#trinh-duyet", 303)
+        return RedirectResponse("/settings#trinh-duyet", 303)
 
     @app.post("/accounts")
     def add_account(name: str = Form(...), platform: str = Form("facebook")):
@@ -378,7 +407,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
         if not acc:
             return RedirectResponse("/accounts", 303)
         if not _auto_profile(acc_dir, _acc_profile_name(acc), f"Tài khoản #{aid}"):
-            return RedirectResponse("/accounts#trinh-duyet", 303)
+            return RedirectResponse("/settings#trinh-duyet", 303)
         from .. import loginstate
         if acc and acc["platform"] == "tiktok":
             code = ("import sys,json; from pathlib import Path; from dytool import tt_browser as t; "

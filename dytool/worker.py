@@ -14,6 +14,9 @@ from pathlib import Path
 
 from .store import Store
 
+TT_MAX_AHEAD = 10 * 86400 - 3600   # TikTok chỉ hẹn giờ trong 10 ngày tới (chừa 1 giờ)
+TT_MIN_AHEAD = 25 * 60             # TikTok cần >= 20 phút (chừa 5 phút cho thời gian tải lên)
+
 
 def _hex_to_ffmpeg(color: str) -> str:
     c = color.strip().lstrip("#")
@@ -123,13 +126,21 @@ class Worker:
                                                       "JOIN accounts a ON a.id=p.account_id")}
         # 0) Page bật "tự lên lịch": video đã duyệt -> xếp vào khung giờ trống tiếp theo
         self._auto_schedule(all_pages)
-        # 1) gửi lịch lên Facebook / đăng ngay / video đã duyệt (nếu Page còn hạn mức)
+        # 1) gửi lịch lên Facebook/TikTok / đăng ngay / video đã duyệt (nếu kênh còn hạn mức)
         for row in self.store.q("SELECT * FROM videos WHERE status IN ('schedule_pending','publish_now','approved') "
                                 "ORDER BY status='schedule_pending' DESC, status='publish_now' DESC, updated_at"):
             page = all_pages.get(row["page_id"]) if row["status"] != "approved" else by_id.get(row["page_id"])
+            if page and page["platform"] == "tiktok" and row["status"] == "schedule_pending" \
+                    and (row["scheduled_at"] or 0) > time.time() + TT_MAX_AHEAD:
+                continue    # TikTok chỉ hẹn giờ tối đa 10 ngày -> chờ tới gần ngày rồi mới gửi lịch
             if page and (row["status"] != "approved" or self._can_post(page)):
                 self._upload(page, row)
                 return True
+        # 1b) đăng kèm lên TikTok các video Page Facebook đã đăng / đã lên lịch
+        cp = self._due_crosspost()
+        if cp:
+            self._crosspost(cp, all_pages)
+            return True
         # 2) edit
         for row in self.store.q("SELECT * FROM videos WHERE status='downloaded' ORDER BY likes DESC LIMIT 20"):
             if row["page_id"] in by_id:
@@ -158,10 +169,15 @@ class Worker:
             p = all_pages.get(r["page_id"])
             if not p or (r["status"] == "approved" and r["page_id"] not in pages):
                 continue
-            act = {"schedule_pending": "Gửi lịch lên Facebook", "publish_now": "Đăng ngay",
-                   "approved": "Đăng (khi tới lượt theo giới hạn)"}[r["status"]]
+            act = {"schedule_pending": "Gửi lịch lên " + ("TikTok" if p["platform"] == "tiktok" else "Facebook"),
+                   "publish_now": "Đăng ngay", "approved": "Đăng (khi tới lượt theo giới hạn)"}[r["status"]]
             out.append({"act": act, "page": p["name"], "video": r["id"], "desc": r["caption"] or r["desc"],
                         "when": r["scheduled_at"]})
+        for cp in self.store.q("SELECT * FROM crossposts WHERE status='pending' ORDER BY COALESCE(scheduled_at,0)"):
+            dst = all_pages.get(cp["dst_page_id"])
+            if dst:
+                out.append({"act": "Đăng kèm lên TikTok", "page": dst["name"], "video": cp["video_id"], "desc": "",
+                            "when": cp["scheduled_at"]})
         for st, act in (("downloaded", "Edit + lồng tiếng"), ("new", "Tải video")):
             for r in self.store.q(f"SELECT * FROM videos WHERE status='{st}' ORDER BY likes DESC LIMIT 20"):
                 if r["page_id"] in pages:
@@ -311,7 +327,6 @@ class Worker:
             traceback.print_exc()
 
     def _upload(self, page, row):
-        from . import fb_browser
         import datetime as dt
         when = (dt.datetime.fromtimestamp(row["scheduled_at"])
                 if row["status"] == "schedule_pending" and row["scheduled_at"] else None)
@@ -322,6 +337,83 @@ class Worker:
             self.store.log(f"[{page['name']}] Lịch {row['id']} lúc {when:%H:%M %d/%m} đã quá giờ -> trả về chờ duyệt",
                            "error", page["id"])
             return
+        if page["platform"] == "tiktok":
+            return self._upload_tiktok(page, row, when)
+        self._upload_fb(page, row, when)
+
+    def _tt_headless(self) -> bool:
+        # mặc định hiện cửa sổ: TikTok hay chặn trình duyệt chạy ẩn (đổi bằng tiktok.show_browser: false)
+        return not self.cfg.get("tiktok", {}).get("show_browser", True)
+
+    def _upload_tiktok(self, page, row, when):
+        """Kênh TikTok riêng: đăng / hẹn giờ video đã duyệt của chính kênh đó."""
+        from . import progress, tt_browser
+        self.current = (f"Hẹn giờ {row['id']} trên TikTok {page['name']} lúc {when:%H:%M %d/%m}" if when
+                        else f"Đăng {row['id']} lên TikTok {page['name']}")
+        progress.begin("upload", f"Hẹn giờ TikTok lúc {when:%H:%M %d/%m}" if when else "Đăng lên TikTok",
+                       page["name"], row["id"], row["caption"] or "")
+        video = self.data / "edited" / f"p{page['id']}_{row['id']}.mp4"
+        acc_dir = self.store.account_dir(self.data, page["account_id"])
+        try:
+            tt_browser.publish(acc_dir, video, row["caption"] or "", schedule_at=when, headless=self._tt_headless())
+            if when:
+                self.store.set_video(row["id"], page["id"], status="scheduled", error=None)
+                self.store.log(f"[{page['name']}] Đã hẹn giờ trên TikTok {row['id']} lúc {when:%H:%M %d/%m}",
+                               page_id=page["id"])
+            else:
+                self.store.set_video(row["id"], page["id"], status="uploaded", uploaded_at=int(time.time()), error=None)
+                self.store.log(f"[{page['name']}] Đã đăng lên TikTok {row['id']}", page_id=page["id"])
+        except Exception as e:
+            self.store.set_video(row["id"], page["id"], status="failed", error=f"đăng TikTok: {e}")
+            self.store.log(f"[{page['name']}] Lỗi đăng TikTok {row['id']}: {e}", "error", page["id"])
+
+    # ---------- đăng kèm TikTok theo Page Facebook ----------
+    def _queue_crosspost(self, page, row, when) -> None:
+        dst = int(self.store.page_settings(page).get("tiktok_mirror") or 0)
+        if not dst or not self.store.one("SELECT 1 FROM pages WHERE id=? AND platform='tiktok'", (dst,)):
+            return
+        self.store.add_crosspost(row["id"], page["id"], dst, int(when.timestamp()) if when else None)
+        self.store.log(f"[{page['name']}] Sẽ đăng kèm {row['id']} lên TikTok"
+                       + (f" lúc {when:%H:%M %d/%m}" if when else ""), page_id=page["id"])
+
+    def _due_crosspost(self):
+        """Lượt đăng kèm tới hạn: đăng ngay (không có giờ / đã tới giờ) hoặc hẹn giờ khi lịch nằm trong 10 ngày.
+        Lịch chỉ còn < 25 phút thì chờ tới đúng giờ rồi đăng ngay (TikTok không cho hẹn sát giờ)."""
+        now = time.time()
+        for cp in self.store.q("SELECT * FROM crossposts WHERE status='pending' ORDER BY COALESCE(scheduled_at,0)"):
+            t = cp["scheduled_at"]
+            if t is None or t <= now or TT_MIN_AHEAD <= t - now <= TT_MAX_AHEAD:
+                return cp
+        return None
+
+    def _crosspost(self, cp, pages: dict) -> None:
+        import datetime as dt
+        from . import progress, tt_browser
+        src, dst = pages.get(cp["src_page_id"]), pages.get(cp["dst_page_id"])
+        key = (cp["video_id"], cp["src_page_id"], cp["dst_page_id"])
+        if not src or not dst:
+            self.store.set_crosspost(*key, status="failed", error="Page hoặc kênh TikTok đã bị xoá")
+            return
+        row = self.store.one("SELECT * FROM videos WHERE id=? AND page_id=?", (cp["video_id"], src["id"]))
+        t = cp["scheduled_at"]
+        when = dt.datetime.fromtimestamp(t) if t and t - time.time() >= TT_MIN_AHEAD else None
+        caption = (row["caption"] if row else "") or ""
+        self.current = f"Đăng kèm {cp['video_id']} lên TikTok {dst['name']}"
+        progress.begin("upload", f"Đăng kèm TikTok — hẹn {when:%H:%M %d/%m}" if when else "Đăng kèm lên TikTok",
+                       f"{src['name']} → {dst['name']}", cp["video_id"], caption)
+        video = self.data / "edited" / f"p{src['id']}_{cp['video_id']}.mp4"
+        acc_dir = self.store.account_dir(self.data, dst["account_id"])
+        try:
+            tt_browser.publish(acc_dir, video, caption, schedule_at=when, headless=self._tt_headless())
+            self.store.set_crosspost(*key, status="scheduled" if when else "uploaded", error=None)
+            self.store.log(f"[{dst['name']}] Đăng kèm từ {src['name']}: {cp['video_id']} "
+                           + (f"hẹn giờ {when:%H:%M %d/%m}" if when else "đã đăng"), page_id=dst["id"])
+        except Exception as e:
+            self.store.set_crosspost(*key, status="failed", error=str(e)[:500])
+            self.store.log(f"[{dst['name']}] Lỗi đăng kèm {cp['video_id']} từ {src['name']}: {e}", "error", dst["id"])
+
+    def _upload_fb(self, page, row, when):
+        from . import fb_browser
         self.current = (f"Lên lịch {row['id']} trên {page['name']} lúc {when:%H:%M %d/%m}" if when
                         else f"Đăng {row['id']} lên {page['name']}")
         from . import progress
@@ -352,6 +444,7 @@ class Worker:
                 self.store.set_video(row["id"], page["id"], status="uploaded", uploaded_at=int(time.time()),
                                      fb_url=res.get("url"), error=note)
                 self.store.log(f"[{page['name']}] Đã đăng {row['id']}", page_id=page["id"])
+            self._queue_crosspost(page, row, when)
         except Exception as e:
             self.store.set_video(row["id"], page["id"], status="failed", error=f"đăng: {e}")
             self.store.log(f"[{page['name']}] Lỗi đăng {row['id']}: {e}", "error", page["id"])

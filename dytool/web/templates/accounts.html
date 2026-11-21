@@ -1,48 +1,88 @@
 {% extends "base.html" %}
-{% block title %}Tài khoản & Page{% endblock %}
+{% block title %}Tài khoản & kênh{% endblock %}
 {% block body %}
-<h1>Tài khoản & Page</h1>
-<p class="sub">Mỗi tài khoản Facebook có phiên đăng nhập riêng. Sau khi đăng nhập, tool tự tìm các Page bạn quản lý.</p>
+<div class="head">
+  <div><h1>Tài khoản & kênh</h1>
+    <p class="sub">Đăng nhập từng tài khoản trong cửa sổ Chromium của tool, rồi bấm Cài đặt ở Page / kênh để thêm nguồn
+      video và bật.</p></div>
+</div>
 {% if logging_in %}<div hx-get="/partials/accounts" hx-trigger="every 3s" hx-swap="none"></div>{% endif %}
 
-<div class="card" style="margin-bottom:16px">
-  <form method="post" action="/accounts" class="row">
-    <input type="text" name="name" placeholder="Tên gợi nhớ, vd: Tài khoản chính" required style="max-width:320px">
-    <button class="btn primary">+ Thêm tài khoản Facebook</button>
-  </form>
-</div>
-
-{% for a in accounts %}
-<div class="card" style="margin-bottom:16px">
+{% macro account_card(a, platform) %}
+{% set tt = platform == 'tiktok' %}
+<div class="card acc">
   <div class="row">
-    <h2 style="margin:0">{{ a.name }}</h2>
+    <h3>{{ a.name }}</h3>
     {% if a.id in logging_in %}
-      <span class="pill warn">Đang chờ đăng nhập — hoàn tất trong cửa sổ Chromium vừa mở</span>
+      <span class="pill warn">Đang chờ đăng nhập</span>
     {% elif a.status == 'da_dang_nhap' %}
       <span class="pill ok">Đã đăng nhập</span>
     {% else %}
       <span class="pill err">Chưa đăng nhập</span>
     {% endif %}
     <div class="spacer"></div>
-    <form method="post" action="/accounts/{{ a.id }}/login"><button class="btn sm">Đăng nhập Facebook</button></form>
-    <form method="post" action="/accounts/{{ a.id }}/discover"><button class="btn sm">Quét lại Page</button></form>
-    <form method="post" action="/accounts/{{ a.id }}/delete" onsubmit="return confirm('Xoá tài khoản {{ a.name }} và các Page của nó khỏi tool? (không ảnh hưởng Facebook)')">
-      <button class="btn sm danger">Xoá</button></form>
+    <div class="actions">
+      {% if a.status != 'da_dang_nhap' %}
+        <form method="post" action="/accounts/{{ a.id }}/login"><button class="btn sm primary"
+              aria-label="Đăng nhập {{ 'TikTok' if tt else 'Facebook' }} cho {{ a.name }}">Đăng nhập</button></form>
+      {% else %}
+        <form method="post" action="/accounts/{{ a.id }}/login"><button class="btn sm ghost">Đăng nhập lại</button></form>
+      {% endif %}
+      {% if not tt and a.status == 'da_dang_nhap' %}
+        <form method="post" action="/accounts/{{ a.id }}/discover"><button class="btn sm ghost" title="Tìm lại các Page tài khoản này quản lý">Quét lại Page</button></form>
+      {% endif %}
+      <form method="post" action="/accounts/{{ a.id }}/delete"
+            onsubmit="return confirm('Xoá tài khoản {{ a.name }} và các kênh của nó khỏi tool? Không ảnh hưởng gì trên {{ 'TikTok' if tt else 'Facebook' }}.')">
+        <button class="btn sm ghost danger" aria-label="Xoá tài khoản {{ a.name }}" title="Xoá khỏi tool">Xoá</button></form>
+    </div>
   </div>
-  <table style="margin-top:10px">
-    <tr><th>Page</th><th>Trạng thái</th><th></th></tr>
-    {% for p in pages if p.account_id == a.id %}
-      <tr>
-        <td><b>{{ p.name }}</b><div class="small muted">asset_id {{ p.asset_id }}</div></td>
-        <td>{% if p.enabled %}<span class="pill ok">Đang bật</span>{% else %}<span class="pill">Tắt</span>{% endif %}</td>
-        <td style="text-align:right"><a class="btn sm" href="/pages/{{ p.id }}">Cài đặt</a></td>
-      </tr>
-    {% else %}
-      <tr><td colspan="3" class="muted">Chưa có Page. Đăng nhập rồi bấm “Quét lại Page”.</td></tr>
+  <div hx-get="/partials/login/fb/{{ a.id }}" hx-trigger="load, every 1s" hx-swap="innerHTML"
+       class="lp-slot" style="margin-top:12px"></div>
+  {% set mine = pages|selectattr('account_id', 'equalto', a.id)|list %}
+  {% if mine %}
+  <table>
+    {% for p in mine %}
+    <tr>
+      <td><a href="/pages/{{ p.id }}"><b>{{ p.name }}</b></a>
+        {% if tt %}{% set used = mirrors.get(p.id, []) %}
+          <div class="small muted">{% if used %}Đăng kèm cho {{ used|join(', ') }}{% else %}Chưa Page nào đăng kèm vào kênh này{% endif %}</div>
+        {% endif %}</td>
+      <td style="text-align:right; white-space:nowrap">
+        {% if p.enabled %}<span class="pill ok">{{ 'Kênh riêng đang bật' if tt else 'Đang bật' }}</span>
+        {% else %}<span class="pill">{{ 'Kênh riêng tắt' if tt else 'Tắt' }}</span>{% endif %}
+        <a class="btn sm" href="/pages/{{ p.id }}" style="margin-left:6px">Cài đặt</a></td>
+    </tr>
     {% endfor %}
   </table>
+  {% elif a.status == 'da_dang_nhap' and not tt %}
+    <p class="empty small" style="margin-top:8px">Không thấy Page nào — bấm Quét lại Page.</p>
+  {% endif %}
 </div>
-{% else %}
-<p class="muted">Chưa có tài khoản nào.</p>
-{% endfor %}
+{% endmacro %}
+
+<div class="platforms">
+  <section class="platform" aria-labelledby="h-fb">
+    <div class="row"><h2 id="h-fb">Facebook</h2></div>
+    <form method="post" action="/accounts" class="inline-add" style="margin-bottom:14px">
+      <input type="hidden" name="platform" value="facebook">
+      <input type="text" name="name" autocomplete="off" placeholder="Tên gợi nhớ, vd: Tài khoản chính" required aria-label="Tên tài khoản Facebook mới">
+      <button class="btn">Thêm tài khoản</button>
+    </form>
+    {% for a in accounts if a.platform != 'tiktok' %}{{ account_card(a, 'facebook') }}
+    {% else %}<p class="empty">Chưa có tài khoản Facebook. Nhập tên gợi nhớ rồi bấm Thêm tài khoản.</p>{% endfor %}
+  </section>
+
+  <section class="platform" id="tiktok" aria-labelledby="h-tt">
+    <div class="row"><h2 id="h-tt">TikTok</h2></div>
+    <form method="post" action="/accounts" class="inline-add" style="margin-bottom:6px">
+      <input type="hidden" name="platform" value="tiktok">
+      <input type="text" name="name" autocomplete="off" placeholder="Tên gợi nhớ, vd: TikTok mèo" required aria-label="Tên tài khoản TikTok mới">
+      <button class="btn">Thêm tài khoản</button>
+    </form>
+    <p class="hint" style="margin-bottom:14px">Mỗi tài khoản là 1 kênh. Dùng làm kênh riêng (có nguồn, duyệt riêng) hoặc
+      chọn để đăng kèm trong cài đặt của 1 Page Facebook.</p>
+    {% for a in accounts if a.platform == 'tiktok' %}{{ account_card(a, 'tiktok') }}
+    {% else %}<p class="empty">Chưa có tài khoản TikTok.</p>{% endfor %}
+  </section>
+</div>
 {% endblock %}

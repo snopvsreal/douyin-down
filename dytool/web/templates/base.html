@@ -3,21 +3,35 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f2f4f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f141b" media="(prefers-color-scheme: dark)">
   <title>{% block title %}dytool{% endblock %} · dytool</title>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap">
+  <link rel="icon" type="image/png" href="/static/favicon.png">
+  <link rel="stylesheet" href="/static/app.css?v={{ css_v }}">
   <script src="/static/htmx.min.js"></script>
 </head>
 <body>
+<a class="skip" href="#main">Bỏ qua menu, tới nội dung chính</a>
 <div class="layout">
-  <nav class="side">
-    <div class="brand">dytool<small>Douyin → Facebook</small></div>
+  <nav class="side" aria-label="Menu chính">
+    <div class="brand" translate="no">dytool<small>Douyin → Facebook, TikTok</small></div>
     {% set p = request.url.path %}
-    <a href="/" class="{{ 'on' if p == '/' }}">Tổng quan</a>
-    <a href="/accounts" class="{{ 'on' if p.startswith('/accounts') or p.startswith('/pages') }}">Tài khoản & Page</a>
-    <a href="/review" class="{{ 'on' if p.startswith('/review') }}">Duyệt video</a>
-    <a href="/queue" class="{{ 'on' if p.startswith('/queue') }}">Tiến trình</a>
+    {% macro nav(href, label, on) %}<a href="{{ href }}" class="{{ 'on' if on }}" {{ 'aria-current=page' if on }}>{{ label }}{{ caller() if caller }}</a>{% endmacro %}
+    {{ nav('/', 'Tổng quan', p == '/') }}
+    {% call nav('/review', 'Duyệt video', p.startswith('/review')) %}{% if navc.get('review') %}<span class="badge">{{ navc.review }}<span class="sr-only"> video chờ duyệt</span></span>{% endif %}{% endcall %}
+    {% call nav('/queue', 'Tiến trình', p.startswith('/queue')) %}{% if navc.get('failed') %}<span class="badge err">{{ navc.failed }}<span class="sr-only"> video lỗi</span></span>{% endif %}{% endcall %}
+    {{ nav('/accounts', 'Tài khoản & kênh', p.startswith('/accounts') or p.startswith('/pages')) }}
+    <div class="side-foot" hx-get="/partials/services" hx-trigger="load, every 6s" hx-swap="innerHTML">
+      <p class="side-label">Dịch vụ</p>
+      <div class="svc"><span class="dot"></span><span class="what">Đang kiểm tra…</span></div>
+    </div>
   </nav>
-  <main>{% block body %}{% endblock %}</main>
+  <main id="main" tabindex="-1">{% block body %}{% endblock %}</main>
 </div>
+{# Vùng đọc to cho trình đọc màn hình: chỉ được cập nhật (hx-swap-oob) khi bước đăng nhập đổi, không theo từng giây #}
+<div id="sr-live" class="sr-only" aria-live="polite"></div>
 </body>
 </html>

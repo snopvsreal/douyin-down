@@ -8,6 +8,7 @@ from pathlib import Path
 
 PROFILE = "fb_profile"
 STATE = "fb_state.json"   # cookie phiên đăng nhập (nhạy cảm: chmod 600, nằm trong data/ đã .gitignore)
+LOGIN_STATE = "login_state.json"   # bước đăng nhập hiện tại cho thanh tiến trình trên giao diện (loginstate.py)
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
 
@@ -49,17 +50,41 @@ def logged_in(ctx) -> bool:
 def login(data_dir: Path, timeout_min: int = 10) -> None:
     """Mở Chromium để BẠN tự đăng nhập Facebook (kể cả 2FA). Tự đóng khi đăng nhập xong."""
     from playwright.sync_api import sync_playwright
+    from . import loginstate as ls
+    st = data_dir / LOGIN_STATE
+    steps = ls.FB_STEPS
+
+    def fail(msg: str):
+        ls.fail(st, msg)
+        raise FBError(msg)
+
+    ls.write(st, steps, "Mở trình duyệt")
     with sync_playwright() as pw:
         ctx = _context(pw, data_dir, headless=False)
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        page.goto("https://www.facebook.com/")
-        print("Hãy đăng nhập Facebook trong cửa sổ vừa mở (tool không đọc mật khẩu)...")
+        ls.write(st, steps, "Tải facebook.com", wait_sec=90)
+        try:   # mạng chậm: không chờ "load", hết giờ vẫn giữ cửa sổ cho người dùng đăng nhập
+            page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=90_000)
+        except Exception as e:
+            if not ctx.pages:
+                fail("Bạn đã đóng cửa sổ đăng nhập")
+            print(f"Trang facebook.com tải chậm ({type(e).__name__}) — cứ đăng nhập trong cửa sổ đang mở")
+        print("Hãy đăng nhập Facebook trong cửa sổ vừa mở (tool không đọc mật khẩu)...", flush=True)
+        ls.write(st, steps, "Chờ bạn đăng nhập", wait_sec=timeout_min * 60)
         deadline = time.time() + timeout_min * 60
-        while time.time() < deadline and not logged_in(ctx):
+        while time.time() < deadline:
+            try:
+                if not ctx.pages:
+                    raise RuntimeError("không còn tab nào")
+                if logged_in(ctx):
+                    break
+            except Exception:   # TargetClosedError: cửa sổ bị đóng (bởi người dùng hoặc Chromium tự tắt)
+                fail("Cửa sổ đăng nhập đã bị đóng trước khi đăng nhập xong — bấm Đăng nhập Facebook để thử lại")
             time.sleep(2)
         if not logged_in(ctx):
             ctx.close()
-            raise FBError("Hết thời gian chờ đăng nhập")
+            fail(f"Hết {timeout_min} phút chờ mà chưa đăng nhập Facebook — bấm Đăng nhập Facebook để thử lại")
+        ls.write(st, steps, "Lưu phiên")
         time.sleep(3)
         _save_state(ctx, data_dir)
         ctx.close()
@@ -304,3 +329,19 @@ def discover_pages(acc_dir: Path) -> dict:
             return {"fb_user": user, "pages": pages}
         finally:
             ctx.close()
+
+
+def login_and_discover(acc_dir: Path) -> dict:
+    """Giao diện gọi trong tiến trình riêng: đăng nhập rồi tìm Page, ghi từng bước cho thanh tiến trình."""
+    from . import loginstate as ls
+    st = acc_dir / LOGIN_STATE
+    login(acc_dir)
+    ls.write(st, ls.FB_STEPS, "Tìm các Page")
+    try:
+        res = discover_pages(acc_dir)
+    except Exception as e:
+        ls.fail(st, f"Đã đăng nhập nhưng không tìm được Page: {e}")
+        raise
+    ls.write(st, ls.FB_STEPS, "Tìm các Page", state="done",
+             msg=f"Đã đăng nhập Facebook, tìm thấy {len(res['pages'])} Page")
+    return res

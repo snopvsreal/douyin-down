@@ -4,7 +4,21 @@ Quét kênh / từ khóa Douyin → tải video → edit (che sub Trung, lật, 
 (VoiceStudio, tự chọn giọng nam/nữ) → duyệt trên giao diện web → đăng / **lên lịch** Reels lên nhiều Page, nhiều tài khoản.
 Ghi chú cho lập trình viên / Claude: xem [CLAUDE.md](CLAUDE.md).
 
-## Cài đặt trên Windows 10/11 — 1 file
+## Cài đặt trên Windows 10/11 — app dytool
+
+1. Chạy **`dytool-Setup-<phiên bản>.exe`** (không cần quyền admin, mặc định cài vào `C:\dytool`).
+   Bước cuối tự tải thư viện (~4 GB: Python, torch, Chromium, FFmpeg, backend Douyin, model AI) — lần đầu 15–30 phút,
+   xem tiến độ ở cửa sổ màu xanh. Windows SmartScreen có thể cảnh báo vì file chưa ký số: bấm *More info → Run anyway*.
+2. Mở **dytool** (Desktop / Start Menu): app có cửa sổ riêng, không cần trình duyệt. Lần đầu dán Anthropic API key
+   ngay trên trang Tổng quan. VoiceStudio mở bằng nút **Mở** ở thanh bên.
+3. **Đóng cửa sổ = thu xuống khay** (cạnh đồng hồ), tool vẫn chạy để edit / đăng theo lịch. Thoát hẳn: chuột phải
+   icon dytool ở khay → *Thoát dytool*.
+4. Lỗi thư viện / muốn cập nhật: Start Menu → **dytool - Cài đặt lại thư viện**. Cài bản mới: chạy file Setup mới
+   đè lên — dữ liệu (`data\`, `config.yaml`) được giữ. Gỡ cài đặt cũng giữ 2 mục này.
+
+Build file cài (lập trình viên): `powershell -ExecutionPolicy Bypass -File installer\build.ps1` → `dist\` (cần Inno Setup 7).
+
+### Cách cũ: chạy từ mã nguồn
 
 **Bấm đúp `install_windows.bat`.** File này tự làm hết: cài Git, uv (Python 3.12), FFmpeg bản full, thư viện Python,
 Chromium, backend tải Douyin, tải trước model AI (~1.5 GB), tạo `config.yaml` (hỏi Anthropic API key), cài VoiceStudio

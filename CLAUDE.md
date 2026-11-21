@@ -28,7 +28,9 @@ Dịch vụ ngoài phải đang chạy:
 
 | File | Vai trò |
 |---|---|
-| `web/app.py` + `web/templates/` | FastAPI + Jinja2 + HTMX (htmx vendored ở `web/static`). Trang: Tổng quan, Tài khoản & Page, Cài đặt Page, Duyệt video (lên lịch), Tiến trình |
+| `desktop.py` | **App desktop**: pywebview (Edge WebView2) bọc giao diện web trong cửa sổ riêng + icon khay (pystray). Server uvicorn chạy trong thread, worker tự bật. Đóng cửa sổ = ẩn xuống khay; Thoát ở menu khay (hỏi lại nếu worker đang làm). Mở lần 2 → `POST /app/show` đưa cửa sổ cũ lên. Chạy bằng pythonw → log ở `data/app.log`. Tự đặt PATH (`tools\ffmpeg\bin`, `~\.local\bin`) + `PLAYWRIGHT_BROWSERS_PATH` |
+| `installer/` | `launcher.cs` → `dytool.exe` (build bằng csc.exe có sẵn của .NET 4, `/codepage:65001`); `dytool.iss` (Inno Setup 7, tiếng Việt `Vietnamese.isl`, cài `C:\dytool`, `PrivilegesRequired=lowest`, gỡ cài giữ `data\` + `config.yaml`); `build.ps1` → `dist\dytool-Setup-<ver>.exe`. Bước tải thư viện: `scripts/setup_app.ps1` (ASCII + CRLF; Python vào `.python`, FFmpeg vào `tools\ffmpeg`, TikTokDownloader tải zip không cần git). Icon: `scripts/make_icon.py` |
+| `web/app.py` + `web/templates/` | FastAPI + Jinja2 + HTMX (htmx vendored ở `web/static`). Trang: Tổng quan (dải "dây chuyền" số video từng bước), Duyệt video, Tiến trình, Tài khoản & kênh (Facebook / TikTok 2 cột), Cài đặt kênh (mục lục + thanh Lưu dính). Thanh bên: huy hiệu Chờ duyệt / Lỗi + trạng thái dịch vụ (`_services.html`, poll 6s). Font Be Vietnam Pro (Google Fonts, không mạng thì Segoe UI). CSS: tránh tên class trùng `.done` chung; lưới dùng `minmax(0, 1fr)` để không tràn ngang; sửa template bằng PowerShell thì ghi UTF-8 **không BOM** (BOM làm trang vào quirks mode) |
 | `worker.py` | Thread nền, **tuần tự 1 việc nặng/lần** (VoiceStudio chỉ 1 GPU: chạy song song chậm 4-6×). Ưu tiên: gửi lịch / đăng ngay / đăng đã duyệt → edit → tải → quét |
 | `store.py` | SQLite `data/app.db`: accounts, pages(settings JSON = DEFAULT_PAGE_SETTINGS), sources, videos, logs. `next_free_slot` cho tự lên lịch |
 | `progress.py` | Trạng thái bước đang chạy cho bảng tiến trình (`progress.begin/step/detail/end`) |
@@ -40,8 +42,16 @@ Dịch vụ ngoài phải đang chạy:
 | `dub.py` | Demucs tách giọng → gom lượt nói → Claude dịch theo ngân sách âm tiết → VoiceStudio đọc **cả lượt 1 lần** với `duration` → xếp lịch tuần tự (không chồng giọng) → căn phụ đề theo Whisper nghe lại |
 | `gender.py` + `_ecapa_gender.py` | Nhận nam/nữ từng lượt (ECAPA, MIT, github.com/JaesungHuh/voice-gender-classifier) |
 | `fb_browser.py` | Playwright + Meta Business Suite reels composer: đăng / lên lịch / chia sẻ nhóm / quét Page (`delegate_page_id`) |
+| `tt_browser.py` | TikTok: `login` (người dùng tự đăng nhập, lấy @tên kênh), `publish` (tải lên + mô tả + hẹn giờ qua TikTok Studio, `dry_run` dừng trước nút Post). Điền form bằng thư viện **wkaisertexas/tiktok-uploader** (MIT, Playwright) với trang của profile riêng `data/accounts/<id>/tt_profile`; context `locale=en-US` (bộ chọn tiếng Anh) + `timezone_id=Asia/Ho_Chi_Minh`. Hẹn giờ: 20 phút – 10 ngày, phút chia hết cho 5. Thử: `uv run dytool tt-dryrun <id tài khoản> video.mp4` |
 | `cookies.py` | `douyin_login` (Playwright, mọi OS); `read_douyin_cookie` (pycookiecheat — **chỉ macOS/Linux**) |
+| `loginstate.py` + `web/templates/_login.html` | Thanh tiến trình đăng nhập Douyin / Facebook: tiến trình đăng nhập ghi bước hiện tại ra `data/douyin_login.json` / `data/accounts/<id>/login_state.json`, giao diện poll 1s. Xong → tự ẩn sau 5s; lỗi → giữ tới khi bấm ×. Trạng thái "Douyin: đã đăng nhập · còn N ngày" tính từ `sid_guard` (`cookies.cookie_status`); đăng nhập xong nạp cookie mới vào `cfg` đang chạy, không cần khởi động lại |
 | `pipeline.py`, `facebook.py` | Chế độ CLI cũ 1 Page (config.yaml) + Graph API — vẫn chạy được nhưng giao diện là đường chính |
+
+TikTok có 2 cách dùng (người dùng muốn cả hai): (1) **kênh riêng** — tài khoản TikTok (`accounts.platform='tiktok'`)
+có 1 dòng `pages` platform='tiktok', đi đúng luồng như Page (nguồn, edit, duyệt); worker `_upload` rẽ sang
+`_upload_tiktok`; lịch xa hơn 10 ngày nằm chờ ở `schedule_pending` tới khi vào cửa sổ 10 ngày. (2) **đăng kèm** —
+cài đặt Page Facebook `tiktok_mirror` = id kênh TikTok: đăng / lên lịch FB thành công → thêm dòng `crossposts`
+(cùng giờ) → worker bước 1b đăng/hẹn giờ lên TikTok (lịch < 25 phút thì chờ tới giờ rồi đăng ngay).
 
 Luồng 1 video: `new` → tải → `downloaded` → edit → `review` (hoặc `approved` nếu Page bật tự đăng) →
 `approved` (+ tự lên lịch → `schedule_pending`) → worker đẩy lên FB → `scheduled` / `uploaded`. Lỗi → `failed` (nút Thử lại).
@@ -64,8 +74,9 @@ Luồng 1 video: `new` → tải → `downloaded` → edit → `review` (hoặc 
 
 ## Quy tắc an toàn
 
-- **Không đăng / lên lịch thật lên Facebook khi chưa được người dùng đồng ý** cho lần đó. Thử nghiệm dùng
-  `fb_browser.publish(..., dry_run=True)` (đi hết các bước, dừng trước nút Chia sẻ / Lên lịch).
+- **Không đăng / lên lịch thật lên Facebook hay TikTok khi chưa được người dùng đồng ý** cho lần đó. Thử nghiệm dùng
+  `fb_browser.publish(..., dry_run=True)` (đi hết các bước, dừng trước nút Chia sẻ / Lên lịch) và
+  `tt_browser.publish(..., dry_run=True)` / `dytool tt-dryrun` (dừng trước nút Post).
 - Không tự nhập mật khẩu: đăng nhập FB/Douyin luôn do người dùng làm trong cửa sổ Chromium mở ra.
 - Không đẩy `config.yaml`, `data/` (cookie, `fb_state.json`, video) lên git. Page thật của người dùng: **Meow Meow**,
   **No1td Math**; **KC Crypto Lab** là Page crypto riêng — đừng đăng video Douyin lên đó.
@@ -76,4 +87,10 @@ Luồng 1 video: `new` → tải → `downloaded` → edit → `review` (hoặc 
 - FFmpeg phải là bản **full** (Gyan.FFmpeg) để có `subtitles`/libass; font mặc định Arial.
 - torch trên Windows từ PyPI là bản CPU (Demucs/Whisper chậm hơn). Có GPU NVIDIA thì cài torch CUDA theo pytorch.org.
 - Chống ngủ máy: worker tự gọi `SetThreadExecutionState` khi chạy.
+- Máy Windows của người dùng (10 LTSC, không có winget) **chặn chạy exe/junction trong `AppData`**: chrome.exe báo lỗi
+  side-by-side, `uv python install` báo "Missing expected target directory for Python minor version link". Cùng file
+  đặt ở `C:\` thì chạy được. Vì vậy Chromium ở `C:\ms-playwright` (`PLAYWRIGHT_BROWSERS_PATH`, run_ui.bat tự đặt),
+  runtime VoiceStudio ở `C:\VoiceStudio\runtime`; FFmpeg (bản BtbN, có libass) chép vào `~\.local\bin`.
+- `page.goto` douyin.com / facebook.com dùng `wait_until="domcontentloaded"` + timeout dài: chờ "load" bị quá 30s
+  trên mạng VN làm cửa sổ đăng nhập tự đóng.
 - Phiên Facebook / cookie Douyin **không mang từ Mac sang** — đăng nhập lại trên Windows (tránh FB nghi ngờ đăng nhập lạ).

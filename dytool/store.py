@@ -1,7 +1,9 @@
 """Dữ liệu cho chế độ nhiều tài khoản / nhiều Page (SQLite: data/app.db).
 
-accounts  : tài khoản Facebook, mỗi tài khoản có thư mục phiên riêng data/accounts/<id>/
-pages     : Fanpage thuộc 1 tài khoản; settings JSON = mẫu edit/giọng/caption/giới hạn đăng riêng của Page
+accounts  : tài khoản Facebook hoặc TikTok (cột platform), mỗi tài khoản có thư mục phiên riêng data/accounts/<id>/
+pages     : kênh đăng thuộc 1 tài khoản — Fanpage Facebook, hoặc chính kênh TikTok (platform='tiktok', 1 kênh/tài khoản);
+            settings JSON = mẫu edit/giọng/caption/giới hạn đăng riêng của kênh
+crossposts: video của Page Facebook được đăng kèm lên kênh TikTok (cài đặt tiktok_mirror của Page)
 sources   : nguồn video Douyin của 1 Page (kênh hoặc từ khóa)
 videos    : video theo từng Page: new -> downloaded -> review -> approved | scheduled -> uploaded
             (hoặc rejected / failed / skipped)
@@ -59,6 +61,17 @@ CREATE TABLE IF NOT EXISTS videos (
     uploaded_at INTEGER,
     PRIMARY KEY (id, page_id)
 );
+CREATE TABLE IF NOT EXISTS crossposts (
+    video_id TEXT NOT NULL,
+    src_page_id INTEGER NOT NULL,    -- Page Facebook đã đăng video
+    dst_page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,   -- kênh TikTok đăng kèm
+    status TEXT DEFAULT 'pending',   -- pending -> scheduled | uploaded | failed
+    scheduled_at INTEGER,            -- giờ đăng (giống lịch Facebook); NULL = đăng ngay
+    error TEXT,
+    created_at INTEGER,
+    updated_at INTEGER,
+    PRIMARY KEY (video_id, src_page_id, dst_page_id)
+);
 CREATE TABLE IF NOT EXISTS logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts INTEGER,
@@ -75,6 +88,7 @@ DEFAULT_PAGE_SETTINGS = {
     "schedule_slots": "07:00, 11:30, 19:30, 21:00",   # khung giờ đăng mỗi ngày (giờ Việt Nam)
     "share_groups": "",             # tên nhóm (tối đa 3, cách nhau bằng dấu phẩy) mà Page đã tham gia
     "group_text": "",               # lời đăng riêng cho bài trong nhóm (trống = dùng caption)
+    "tiktok_mirror": 0,             # Page Facebook: id kênh TikTok đăng kèm mỗi video (0 = không đăng kèm)
     "caption_template": "{desc_vi}\n\n#reels #xuhuong",
     "max_posts_per_day": 6,
     "min_gap_minutes": 90,
@@ -105,11 +119,13 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
-        # nâng cấp CSDL cũ: thêm cột giờ lên lịch
-        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(videos)")}
-        if "scheduled_at" not in cols:
-            self.conn.execute("ALTER TABLE videos ADD COLUMN scheduled_at INTEGER")
-            self.conn.commit()
+        # nâng cấp CSDL cũ: thêm cột còn thiếu
+        for table, col, decl in (("videos", "scheduled_at", "INTEGER"),
+                                 ("accounts", "platform", "TEXT DEFAULT 'facebook'"),   # facebook | tiktok
+                                 ("pages", "platform", "TEXT DEFAULT 'facebook'")):
+            if col not in {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        self.conn.commit()
 
     def q(self, sql: str, args: tuple = ()) -> list[sqlite3.Row]:
         with self.lock:
@@ -137,13 +153,31 @@ class Store:
     def save_page_settings(self, page_id: int, settings: dict) -> None:
         self.x("UPDATE pages SET settings=? WHERE id=?", (json.dumps(settings, ensure_ascii=False), page_id))
 
-    def upsert_page(self, account_id: int, name: str, profile_id: str, asset_id: str) -> None:
+    def upsert_page(self, account_id: int, name: str, profile_id: str, asset_id: str,
+                    platform: str = "facebook") -> None:
         row = self.one("SELECT id FROM pages WHERE account_id=? AND asset_id=?", (account_id, asset_id))
         if row:
             self.x("UPDATE pages SET name=?, profile_id=? WHERE id=?", (name, profile_id, row["id"]))
         else:
-            self.x("INSERT INTO pages(account_id, name, profile_id, asset_id) VALUES (?,?,?,?)",
-                   (account_id, name, profile_id, asset_id))
+            self.x("INSERT INTO pages(account_id, name, profile_id, asset_id, platform) VALUES (?,?,?,?,?)",
+                   (account_id, name, profile_id, asset_id, platform))
+
+    def tiktok_channels(self) -> list[sqlite3.Row]:
+        """Các kênh TikTok (mỗi tài khoản TikTok đã đăng nhập có 1 kênh) — để chọn 'đăng kèm' cho Page Facebook."""
+        return self.q("SELECT p.*, a.name acc_name FROM pages p JOIN accounts a ON a.id=p.account_id "
+                      "WHERE p.platform='tiktok' ORDER BY p.id")
+
+    # ---- đăng kèm TikTok ----
+    def add_crosspost(self, video_id: str, src_page_id: int, dst_page_id: int, scheduled_at: int | None) -> None:
+        now = int(time.time())
+        self.x("INSERT OR IGNORE INTO crossposts(video_id, src_page_id, dst_page_id, scheduled_at, created_at, "
+               "updated_at) VALUES (?,?,?,?,?,?)", (video_id, src_page_id, dst_page_id, scheduled_at, now, now))
+
+    def set_crosspost(self, video_id: str, src_page_id: int, dst_page_id: int, **fields) -> None:
+        fields["updated_at"] = int(time.time())
+        cols = ", ".join(f"{k}=?" for k in fields)
+        self.x(f"UPDATE crossposts SET {cols} WHERE video_id=? AND src_page_id=? AND dst_page_id=?",
+               (*fields.values(), video_id, src_page_id, dst_page_id))
 
     # ---- videos ----
     def add_video(self, page_id: int, v: dict, source: str) -> bool:

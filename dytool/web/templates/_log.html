@@ -1,0 +1,3 @@
+{% for l in logs %}
+  <div class="{{ l.level }}"><time>{{ time.strftime('%H:%M:%S', time.localtime(l.ts)) }}</time>{{ l.msg }}</div>
+{% else %}<div class="muted">Chưa có nhật ký.</div>{% endfor %}

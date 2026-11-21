@@ -78,6 +78,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "uv sync that bai" }
     Ok "Thu vien Python xong"
     Say "Cai trinh duyet Chromium cho Playwright (dang Facebook / dang nhap Douyin)"
+    # Mot so may chan chay chrome.exe trong AppData (loi side-by-side) -> cai ra C:\ms-playwright (run_ui.bat tu dung)
+    $env:PLAYWRIGHT_BROWSERS_PATH = "C:\ms-playwright"
+    [Environment]::SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", "C:\ms-playwright", "User")
     & uv run playwright install chromium
     if ($LASTEXITCODE -ne 0) { throw "Cai Chromium that bai" }
     Ok "Chromium xong"

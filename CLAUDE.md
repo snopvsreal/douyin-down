@@ -124,9 +124,12 @@ Luồng 1 video: `new` → tải → `downloaded` → edit → `review` (hoặc 
 - Máy Windows của người dùng (10 LTSC, không có winget) **chặn chạy exe/junction trong `AppData`**: chrome.exe báo lỗi
   side-by-side, `uv python install` báo "Missing expected target directory for Python minor version link". Cùng file
   đặt ở `C:\` thì chạy được. Vì vậy runtime VoiceStudio ở `C:\VoiceStudio\runtime`. ShardBrowser đặt nhân trình duyệt
-  ở `%APPDATA%\shardx-launcher\runtime\ShardX-Windows` → **bị chặn thật** (side-by-side). Cách chữa đang dùng: chép nhân
-  ra `C:\ShardX\ShardX-Windows` + đặt `browser_path` trong `%APPDATA%\shardx-launcher\settings.json` (tắt launcher
-  trước khi sửa); `browsers.sync_engine()` tự chép lại khi ShardBrowser cập nhật nhân. Token API = JWT HS256
+  ở `%APPDATA%\shardx-launcher\runtime\ShardX-Windows` → **bị chặn thật** (side-by-side). **Tự động** (`browsers.ensure_engine`,
+  gọi trong `attach`, 1 lần / lần chạy app): `engine_blocked` tạo tiến trình nhân ở trạng thái treo (CREATE_SUSPENDED —
+  lỗi SxS hiện ngay, không mở cửa sổ); bị chặn → `relocate_engine`: (không khi có hồ sơ đang mở) chép nhân ra
+  `C:\ShardX\ShardX-Windows`, tắt launcher, đặt `browser_path` trong `%APPDATA%\shardx-launcher\settings.json`, mở lại
+  launcher. Đã chuyển rồi → `sync_engine()` chép lại khi ShardBrowser cập nhật nhân. Người dùng tự đặt `browser_path`
+  khác → để nguyên. Token API = JWT HS256
   `{sub:"shardx-api", iat, exp}` ký bằng `api_secret` trong settings.json (giống `mint` ở src-tauri/src/api.rs) →
   `browsers.shardx_settings` tự tạo mỗi lần gọi, người dùng không phải dán (token trong config chỉ dùng cho API ở máy khác).
   Đã thử thật: hồ sơ tạm → start → CDP → example.com → stop OK; FFmpeg (bản BtbN, có libass) chép vào `~\.local\bin`.

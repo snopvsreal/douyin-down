@@ -36,13 +36,58 @@ class Worker:
         self._vs_warned = 0.0
 
     # ---------- điều khiển ----------
+    _mutex = None      # khoá toàn máy: chỉ 1 tiến trình dytool được chạy worker (mở app 2 lần, thêm run_ui.bat…)
+
+    @classmethod
+    def _claim_machine_lock(cls) -> bool:
+        import sys
+        if cls._mutex is not None or sys.platform != "win32":
+            return True
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        k32.CreateMutexW.restype = ctypes.c_void_p
+        h = k32.CreateMutexW(None, True, "Local\\dytool-worker")
+        if not h:
+            return True                     # không tạo được khoá -> không chặn
+        if k32.GetLastError() == 183:       # ERROR_ALREADY_EXISTS: tiến trình dytool khác đang giữ
+            k32.CloseHandle(ctypes.c_void_p(h))
+            return False
+        cls._mutex = h                      # giữ tới khi tiến trình thoát (Windows tự nhả)
+        return True
+
     def start(self):
         if self.running:
             return
+        if not self._claim_machine_lock():
+            self.store.log("Không bật chạy tự động: đang có 1 dytool khác chạy trên máy này "
+                           "(2 worker cùng lúc sẽ đăng trùng). Đóng bản kia rồi bật lại.", "error")
+            return
         self.running = True
+        if self._thread and self._thread.is_alive():
+            # vừa Tạm dừng khi đang làm 1 việc dài: vòng cũ chưa thoát -> dùng tiếp, KHÔNG tạo vòng thứ 2
+            self.store.log("Đã bật chạy tự động")
+            return
+        self._recover_uploading()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
         self.store.log("Đã bật chạy tự động")
+
+    UNSURE = ("dytool bị tắt / mất kết nối khi đang đăng — KIỂM TRA trên {where} xem bài đã lên chưa, "
+              "chưa có thì duyệt lại (tool không tự đăng lại để tránh đăng trùng)")
+
+    def _recover_uploading(self) -> None:
+        """Lần chạy trước bị tắt giữa lúc đăng (app đóng, cập nhật, mất điện): không biết bài đã lên chưa ->
+        trả về Chờ duyệt kèm lời nhắc, KHÔNG tự đăng lại."""
+        for v in self.store.q("SELECT v.id, v.page_id, p.platform, p.name FROM videos v "
+                              "JOIN pages p ON p.id=v.page_id WHERE v.status='uploading'"):
+            where = "TikTok" if v["platform"] == "tiktok" else "Facebook"
+            self.store.set_video(v["id"], v["page_id"], status="review", scheduled_at=None,
+                                 error=self.UNSURE.format(where=where))
+            self.store.log(f"[{v['name']}] {v['id']}: đang đăng thì dytool bị tắt -> trả về chờ duyệt, "
+                           f"hãy kiểm tra trên {where}", "error", v["page_id"])
+        for cp in self.store.q("SELECT * FROM crossposts WHERE status='uploading'"):
+            self.store.set_crosspost(cp["video_id"], cp["src_page_id"], cp["dst_page_id"], status="failed",
+                                     error=self.UNSURE.format(where="TikTok"))
 
     def stop(self):
         self.running = False
@@ -219,7 +264,9 @@ class Worker:
             if ts is None:
                 self.store.log(f"[{page['name']}] Không còn khung giờ trống trong 30 ngày tới", "error", page["id"])
                 continue
-            self.store.set_video(row["id"], page["id"], status="schedule_pending", scheduled_at=ts)
+            if not self.store.set_video_if(row["id"], page["id"], ("approved",), status="schedule_pending",
+                                           scheduled_at=ts):
+                continue
             self.store.log(f"[{page['name']}] Tự lên lịch {row['id']} lúc {dt.datetime.fromtimestamp(ts):%H:%M %d/%m}",
                            page_id=page["id"])
 
@@ -335,23 +382,27 @@ class Worker:
             desc_vi = subtitles.translate_desc(row["desc"] or "", ecfg.get("subtitles", {}))
             caption = s["caption_template"].format(desc_vi=desc_vi, desc=row["desc"] or "").strip()
             status = "approved" if s["auto_publish"] else "review"
-            self.store.set_video(row["id"], page["id"], status=status, caption=caption, error=None)
-            self.store.log(f"[{page['name']}] Edit xong {row['id']} -> {'chờ đăng' if s['auto_publish'] else 'chờ duyệt'}",
-                           page_id=page["id"])
+            # chỉ ghi khi video vẫn "Đã tải": người dùng bấm Bỏ trong lúc edit thì không được kéo nó về chờ đăng
+            if self.store.set_video_if(row["id"], page["id"], ("downloaded",), status=status, caption=caption,
+                                       error=None):
+                self.store.log(f"[{page['name']}] Edit xong {row['id']} -> "
+                               f"{'chờ đăng' if s['auto_publish'] else 'chờ duyệt'}", page_id=page["id"])
+            else:
+                self.store.log(f"[{page['name']}] {row['id']} đã bị đổi trạng thái trong lúc edit -> bỏ kết quả edit",
+                               page_id=page["id"])
         except Exception as e:
             if "SIGTERM" in str(e) or "SIGKILL" in str(e):
                 # bị ngắt do tắt/khởi động lại tool -> làm lại sau, không tính là lỗi
-                self.store.set_video(row["id"], page["id"], status="downloaded")
-                return
+                return                                  # vẫn đang "Đã tải"
             import httpx
             from .dub import DubError
             if isinstance(e, (httpx.ConnectError, DubError)) and not self._voicestudio_up():
-                # VoiceStudio bị tắt giữa chừng -> để video chờ, edit lại khi app mở lại
-                self.store.set_video(row["id"], page["id"], status="downloaded")
+                # VoiceStudio bị tắt giữa chừng -> để video chờ (vẫn "Đã tải"), edit lại khi app mở lại
                 self.store.log(f"[{page['name']}] VoiceStudio bị tắt khi đang lồng tiếng {row['id']} -> sẽ làm lại",
                                "error", page["id"])
                 return
-            self.store.set_video(row["id"], page["id"], status="failed", error=f"edit: {e}")
+            if not self.store.set_video_if(row["id"], page["id"], ("downloaded",), status="failed", error=f"edit: {e}"):
+                return
             self.store.log(f"[{page['name']}] Lỗi edit {row['id']}: {e}", "error", page["id"])
             traceback.print_exc()
 
@@ -361,10 +412,14 @@ class Worker:
                 if row["status"] == "schedule_pending" and row["scheduled_at"] else None)
         if when and row["scheduled_at"] < time.time() + 15 * 60:
             # lịch đã quá giờ (vd tool bị tắt lúc đó) -> không tự đăng, trả về chờ duyệt để chọn giờ mới
-            self.store.set_video(row["id"], page["id"], status="review", scheduled_at=None,
-                                 error=f"Lịch {when:%H:%M %d/%m} đã quá giờ khi tool chạy lại — hãy chọn giờ mới")
-            self.store.log(f"[{page['name']}] Lịch {row['id']} lúc {when:%H:%M %d/%m} đã quá giờ -> trả về chờ duyệt",
-                           "error", page["id"])
+            if self.store.set_video_if(row["id"], page["id"], (row["status"],), status="review", scheduled_at=None,
+                                       error=f"Lịch {when:%H:%M %d/%m} đã quá giờ khi tool chạy lại — hãy chọn giờ mới"):
+                self.store.log(f"[{page['name']}] Lịch {row['id']} lúc {when:%H:%M %d/%m} đã quá giờ -> trả về chờ duyệt",
+                               "error", page["id"])
+            return
+        # nhận việc nguyên tử: chuyển sang "Đang đăng" chỉ khi video còn đúng trạng thái lúc đọc (người dùng vừa
+        # bấm Huỷ lịch / Bỏ thì thôi). Bị tắt giữa chừng -> lần sau _recover_uploading trả về chờ duyệt
+        if not self.store.set_video_if(row["id"], page["id"], (row["status"],), status="uploading"):
             return
         if page["platform"] == "tiktok":
             return self._upload_tiktok(page, row, when)
@@ -393,8 +448,7 @@ class Worker:
                 self.store.set_video(row["id"], page["id"], status="uploaded", uploaded_at=int(time.time()), error=None)
                 self.store.log(f"[{page['name']}] Đã đăng lên TikTok {row['id']}", page_id=page["id"])
         except Exception as e:
-            self.store.set_video(row["id"], page["id"], status="failed", error=f"đăng TikTok: {e}")
-            self.store.log(f"[{page['name']}] Lỗi đăng TikTok {row['id']}: {e}", "error", page["id"])
+            self._upload_failed(page, row, e, "TikTok")
 
     # ---------- đăng kèm TikTok theo Page Facebook ----------
     def _queue_crosspost(self, page, row, when) -> None:
@@ -432,6 +486,7 @@ class Worker:
                        f"{src['name']} → {dst['name']}", cp["video_id"], caption)
         video = self.data / "edited" / f"p{src['id']}_{cp['video_id']}.mp4"
         acc_dir = self.store.account_dir(self.data, dst["account_id"])
+        self.store.set_crosspost(*key, status="uploading")    # bị tắt giữa chừng -> _recover_uploading, không đăng lại
         try:
             tt_browser.publish(acc_dir, video, caption, schedule_at=when, headless=self._tt_headless())
             self.store.set_crosspost(*key, status="scheduled" if when else "uploaded", error=None)
@@ -473,7 +528,20 @@ class Worker:
                 self.store.set_video(row["id"], page["id"], status="uploaded", uploaded_at=int(time.time()),
                                      fb_url=res.get("url"), error=note)
                 self.store.log(f"[{page['name']}] Đã đăng {row['id']}", page_id=page["id"])
+        except Exception as e:
+            self._upload_failed(page, row, e, "Facebook")
+            return
+        # ngoài try: lỗi xếp lượt đăng kèm TikTok không được biến bài Facebook ĐÃ ĐĂNG thành "lỗi" (dễ đăng lại)
+        try:
             self._queue_crosspost(page, row, when)
         except Exception as e:
-            self.store.set_video(row["id"], page["id"], status="failed", error=f"đăng: {e}")
-            self.store.log(f"[{page['name']}] Lỗi đăng {row['id']}: {e}", "error", page["id"])
+            self.store.log(f"[{page['name']}] Không xếp được lượt đăng kèm TikTok cho {row['id']}: {e}",
+                           "error", page["id"])
+
+    def _upload_failed(self, page, row, e: Exception, where: str) -> None:
+        """Đăng lỗi: có thể lỗi xảy ra SAU khi đã bấm Chia sẻ / Post (mạng chậm, không thấy xác nhận) -> không
+        đánh "Lỗi" để bấm Thử lại (edit lại + đăng lại = trùng) mà trả về Chờ duyệt kèm lời nhắc kiểm tra."""
+        self.store.set_video(row["id"], page["id"], status="review", scheduled_at=None,
+                             error=f"Đăng {where} chưa xong: {str(e)[:300]} — kiểm tra trên {where} xem bài đã lên "
+                                   f"chưa; chưa có thì sửa lỗi rồi duyệt lại")
+        self.store.log(f"[{page['name']}] Lỗi đăng {where} {row['id']}: {e}", "error", page["id"])

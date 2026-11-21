@@ -53,6 +53,8 @@
   <h2 id="h-br">Trình duyệt</h2>
   <div class="card">
     {% if request.query_params.get('browser_saved') %}<div class="notice" role="status">Đã lưu cài đặt ShardBrowser.</div>{% endif %}
+    {% if request.query_params.get('browser_error') %}<div class="notice warn" role="alert">Chưa lưu: địa chỉ API phải dạng
+      http://127.0.0.1:40325 và token chỉ gồm chữ, số, dấu chấm, gạch.</div>{% endif %}
     <div class="set-row">
       <div class="set-label"><b>ShardBrowser</b>
         <p class="hint">Trình duyệt để đăng nhập và đăng bài. Mỗi tài khoản 1 hồ sơ riêng, dytool tự tạo

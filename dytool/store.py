@@ -111,6 +111,18 @@ DEFAULT_PAGE_SETTINGS = {
 }
 
 
+def parse_number(v, default):
+    """Giá trị ô số -> int/float theo kiểu mặc định; ô mặc định là số nguyên vẫn nhận số lẻ (vd Nghiêng 1.5 độ).
+    Rỗng / không phải số -> ValueError."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        f = float(v)
+    else:
+        f = float(str(v).strip().replace(",", "."))      # rỗng -> ValueError
+    if f != f or f in (float("inf"), float("-inf")):
+        raise ValueError(v)
+    return int(f) if isinstance(default, int) and f.is_integer() else f
+
+
 class Store:
     def __init__(self, path: Path):
         self.path = path
@@ -148,7 +160,15 @@ class Store:
         return d
 
     def page_settings(self, page) -> dict:
-        return {**DEFAULT_PAGE_SETTINGS, **json.loads(page["settings"] or "{}")}
+        s = {**DEFAULT_PAGE_SETTINGS, **json.loads(page["settings"] or "{}")}
+        for k, default in DEFAULT_PAGE_SETTINGS.items():
+            # ô số lỡ lưu rỗng / sai (bản cũ) -> dùng mặc định, không làm sập trang Duyệt / worker
+            if isinstance(default, (int, float)) and not isinstance(default, bool):
+                try:
+                    s[k] = parse_number(s[k], default)
+                except ValueError:
+                    s[k] = default
+        return s
 
     def save_page_settings(self, page_id: int, settings: dict) -> None:
         self.x("UPDATE pages SET settings=? WHERE id=?", (json.dumps(settings, ensure_ascii=False), page_id))
@@ -194,6 +214,18 @@ class Store:
         fields["updated_at"] = int(time.time())
         cols = ", ".join(f"{k}=?" for k in fields)
         self.x(f"UPDATE videos SET {cols} WHERE id=? AND page_id=?", (*fields.values(), vid, page_id))
+
+    def set_video_if(self, vid: str, page_id: int, expect: tuple[str, ...], **fields) -> bool:
+        """Chỉ đổi khi video còn ở 1 trong các trạng thái `expect` (nguyên tử). False = trạng thái đã bị đổi
+        (người dùng vừa bấm Bỏ / Huỷ lịch, hoặc worker vừa đăng) -> bỏ thao tác, không ghi đè."""
+        fields["updated_at"] = int(time.time())
+        cols = ", ".join(f"{k}=?" for k in fields)
+        marks = ",".join("?" * len(expect))
+        with self.lock:
+            cur = self.conn.execute(f"UPDATE videos SET {cols} WHERE id=? AND page_id=? AND status IN ({marks})",
+                                    (*fields.values(), vid, page_id, *expect))
+            self.conn.commit()
+            return cur.rowcount > 0
 
     def counts(self, page_id: int | None = None) -> dict:
         sql = "SELECT status, COUNT(*) n FROM videos" + (" WHERE page_id=?" if page_id else "") + " GROUP BY status"

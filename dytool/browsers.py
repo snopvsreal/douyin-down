@@ -59,13 +59,24 @@ def _mint_token(secret: str, ttl: int = 24 * 3600) -> str:
     return f"{head}.{body}.{b64(sig)}"
 
 
+def is_local_api(api: str) -> bool:
+    """Địa chỉ API đúng là máy này? So khớp CHÍNH XÁC tên máy sau khi tách URL — không so phần đầu chuỗi
+    (startswith cho qua 'http://localhost.evil.com' / 'http://127.0.0.1@evil.com' -> token tự ký bị gửi ra ngoài)."""
+    from urllib.parse import urlsplit
+    try:
+        u = urlsplit(api.strip())
+        return u.scheme == "http" and u.hostname in ("127.0.0.1", "localhost", "::1") and not u.username \
+            and u.path in ("", "/") and not u.query
+    except ValueError:
+        return False
+
+
 def shardx_settings() -> tuple[str, str]:
     """(địa chỉ API, token). Mặc định tự lấy từ ShardBrowser cài trên máy này — không cần dán token;
     config.yaml `browser:` chỉ dùng khi muốn chỉ định tay (ShardBrowser ở máy khác / cổng khác)."""
     c, ls = _cfg(), _launcher_settings()
     api = c.get("shardx_api") or (f"http://127.0.0.1:{ls['api_port']}" if ls.get("api_port") else DEFAULT_API)
-    local = api.startswith(("http://127.0.0.1", "http://localhost"))
-    if local and ls.get("api_secret"):
+    if is_local_api(api) and ls.get("api_secret"):
         token = _mint_token(ls["api_secret"])            # luôn mới, đúng secret hiện tại
     else:
         token = (c.get("shardx_token") or "").strip()

@@ -67,6 +67,16 @@ Luồng 1 video: `new` → tải → `downloaded` → edit → `review` (hoặc 
 
 ## Bài học — đừng lặp lại
 
+- **Không bao giờ để 1 video bị đăng 2 lần.** Worker nhận việc bằng `store.set_video_if(... expect=(trạng thái lúc
+  đọc,), status="uploading")`; đăng lỗi / app bị tắt giữa lúc đăng → về `review` kèm lời nhắc kiểm tra trên nền tảng
+  (`_upload_failed`, `_recover_uploading`), **không** `failed` (Thử lại = edit + đăng lại = trùng). Nút trên web
+  (`video_action`) chỉ đổi từ trạng thái hợp lệ. Chỉ 1 worker / máy (`Local\dytool-worker` mutex) và 1 app desktop
+  (`Local\dytool-desktop`); `start()` khi luồng cũ còn sống thì dùng lại luồng đó.
+- **Server cục bộ không có đăng nhập**: `_request_guard` chặn Host lạ (DNS rebinding) và POST có Origin/Referer khác
+  dytool (CSRF). Test bằng `TestClient(..., base_url="http://127.0.0.1:8000")`. `/media/edited` là thư mục duy nhất
+  được phục vụ tĩnh — đừng mount cả `data/` (cookie FB, app.db). Ghi vào config.yaml: lọc giá trị bằng regex chặt.
+- `onsubmit="return confirm()"` vô tác dụng khi body có `hx-boost` → dùng `hx-confirm`.
+
 - **OmniVoice phải có giọng mẫu cố định** (voice profile): `voice: default` sinh giọng ngẫu nhiên mỗi lần gọi.
   Profile tạo tự động theo `instruct` + `seed` (tên `dy-nam-<md5>` — dùng md5, **không dùng `hash()`** vì đổi mỗi lần chạy).
 - **Luôn truyền `duration`** cho `/v1/audio/speech`: thiếu thì OmniVoice ước lượng ngắn cho tiếng Việt → cụt chữ cuối.

@@ -16,6 +16,15 @@
   <form method="post" action="/pages/{{ page.id }}/scan"><button class="btn">Quét nguồn ngay</button></form>
 </div>
 {% if request.query_params.get('saved') %}<div class="notice" role="status">Đã lưu cài đặt.</div>{% endif %}
+{% if request.query_params.get('bad') %}
+  {% set names = {'max_posts_per_day': 'Số bài tối đa / ngày', 'min_gap_minutes': 'Khoảng cách tối thiểu (phút)',
+                  'poll_minutes': 'Quét lại sau (phút)', 'min_likes': 'Lượt thích tối thiểu', 'min_duration': 'Độ dài tối thiểu',
+                  'max_duration': 'Độ dài tối đa', 'tint_opacity': 'Độ đậm màu phủ', 'rotate_deg': 'Nghiêng (độ)',
+                  'voice_seed': 'Seed giọng', 'tiktok_mirror': 'Đăng kèm TikTok'} %}
+  <div class="notice warn" role="alert">Chưa lưu — ô sau không phải số:
+    {% for k in request.query_params.get('bad').split(',') %}<b>{{ names.get(k, k) }}</b>{{ ', ' if not loop.last }}{% endfor %}.
+    Sửa lại rồi bấm Lưu.</div>
+{% endif %}
 
 <nav class="flow f4" aria-label="Video của kênh này">
   <a href="/review?page={{ page.id }}" class="{{ 'is-hot' if stats.get('review') }}"><span class="n">{{ stats.get('review', 0) }}</span><span class="l">Chờ duyệt</span></a>

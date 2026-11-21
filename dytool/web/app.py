@@ -22,10 +22,38 @@ HERE = Path(__file__).resolve().parent
 STATUS_VI = {
     "new": "Mới tìm thấy", "downloaded": "Đã tải", "review": "Chờ duyệt", "approved": "Chờ đăng",
     "publish_now": "Đăng ngay", "schedule_pending": "Chờ gửi lịch lên FB", "scheduled": "Đã lên lịch trên FB", "uploaded": "Đã đăng", "rejected": "Đã bỏ", "failed": "Lỗi", "skipped": "Bỏ qua (lọc)",
+    "uploading": "Đang đăng",
 }
 
 
-def create_app(config_path: str = "config.yaml", autostart: bool = False) -> FastAPI:
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _request_guard(lan: bool):
+    """Chặn 2 kiểu tấn công vào server cục bộ không có đăng nhập:
+    - DNS rebinding: tên miền lạ trỏ về 127.0.0.1 để đọc dữ liệu -> chỉ nhận Host là 127.0.0.1 / localhost
+      (chế độ --lan mở cho máy khác cùng mạng thì bỏ qua bước này).
+    - CSRF: trang web lạ đang mở trong trình duyệt tự gửi form POST tới 127.0.0.1:8000 (bật Page, tự đăng, xoá
+      tài khoản, chạy cập nhật…) -> thao tác ghi có Origin / Referer thì phải trùng chính dytool.
+      Không có cả 2 header (dytool.exe gọi /app/show, công cụ dòng lệnh) thì cho qua: trình duyệt luôn gửi Origin
+      khi một trang khác gửi form POST."""
+    from urllib.parse import urlsplit
+    from fastapi.responses import PlainTextResponse
+
+    async def guard(request: Request, call_next):
+        host = request.headers.get("host") or ""
+        if not lan and urlsplit("//" + host).hostname not in LOCAL_HOSTS:
+            return PlainTextResponse("dytool chỉ nhận truy cập từ 127.0.0.1 / localhost", status_code=400)
+        if request.method not in SAFE_METHODS:
+            src = request.headers.get("origin") or request.headers.get("referer")
+            if src is not None and (src == "null" or urlsplit(src).netloc.lower() != host.lower()):
+                return PlainTextResponse("Yêu cầu đến từ trang khác — đã chặn", status_code=403)
+        return await call_next(request)
+    return guard
+
+
+def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: bool = False) -> FastAPI:
     cfg = config.load(ROOT / config_path)
     data: Path = (ROOT / cfg["_data"]).resolve() if not Path(cfg["_data"]).is_absolute() else cfg["_data"]
     cfg["_data"] = data
@@ -34,13 +62,17 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
     procs: dict[str, subprocess.Popen] = {}
 
     app = FastAPI(title="dytool")
-    app.state.worker = worker          # app desktop (desktop.py) dùng để tạm dừng / bật từ icon khay
+    app.middleware("http")(_request_guard(lan))
+    app.state.worker = worker         # app desktop (desktop.py) dùng để tạm dừng / bật từ icon khay
     app.state.show_window = None       # desktop.py gán hàm đưa cửa sổ lên trước (khi mở dytool.exe lần 2)
     if autostart:
         worker.start()          # tự bật chạy tự động khi mở giao diện
         from .. import updates
         updates.start_background_checks()   # hỏi GitHub có bản mới của dytool / VoiceStudio / ShardBrowser (6 giờ / lần)
-    app.mount("/media", StaticFiles(directory=str(data)), name="media")
+    # chỉ phục vụ video đã edit (xem trước ở Duyệt video). KHÔNG mount cả data/: trong đó có app.db,
+    # cookie Facebook (accounts/<id>/fb_state.json), nhật ký đăng nhập
+    (data / "edited").mkdir(parents=True, exist_ok=True)
+    app.mount("/media/edited", StaticFiles(directory=str(data / "edited")), name="media")
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
     tpl = Jinja2Templates(directory=str(HERE / "templates"))
     # css_v(): đổi theo lần sửa app.css (đọc lại mỗi trang) để trình duyệt không dùng bản CSS cũ trong cache
@@ -98,13 +130,16 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
         """Lưu Anthropic API key (dịch phụ đề / lồng tiếng) vào config.yaml và cấu hình đang chạy."""
         import re
         key = key.strip()
-        if not key.startswith("sk-ant-"):
+        # chỉ chữ / số / - / _ : ký tự lạ (" \ xuống dòng) ghi vào config.yaml sẽ làm hỏng file -> app không mở được
+        if not re.fullmatch(r"sk-ant-[A-Za-z0-9_-]{10,300}", key):
             return RedirectResponse("/settings?key_error=1#api-key", 303)
         path = ROOT / config_path
         text = path.read_text(encoding="utf-8")
-        safe = key.replace('"', "")
-        text, n = re.subn(r'(?m)^(\s*anthropic_api_key:\s*)"[^"\n]*"', lambda m: f'{m.group(1)}"{safe}"', text, count=1)
-        if n:
+        text, n = re.subn(r'(?m)^(\s*anthropic_api_key:\s*)"[^"\n]*"', lambda m: f'{m.group(1)}"{key}"', text, count=1)
+        if not n:
+            store.log("Không ghi được API key vào config.yaml (không thấy dòng anthropic_api_key) — "
+                      "key chỉ dùng tới khi tắt app", "error")
+        else:
             path.write_text(text, encoding="utf-8")
         _sub_cfg()["anthropic_api_key"] = key      # dùng ngay, không cần khởi động lại
         store.log("Đã lưu Anthropic API key")
@@ -316,7 +351,12 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
         """Lưu API + token ShardBrowser vào config.yaml (mục browser:), giữ nguyên các dòng khác."""
         import re
         api = (api.strip() or "http://127.0.0.1:40325").rstrip("/")
-        token = token.strip().replace('"', "")
+        token = token.strip()
+        # địa chỉ chỉ gồm http(s)://tên-máy[:cổng]; token chỉ ký tự của JWT — chặn ký tự làm hỏng config.yaml
+        if not re.fullmatch(r"https?://[A-Za-z0-9.\-]+(:\d{1,5})?", api) or \
+                (token and not re.fullmatch(r"[A-Za-z0-9._\-]{10,4000}", token)):
+            store.log("Địa chỉ API / token ShardBrowser không hợp lệ — chưa lưu", "error")
+            return RedirectResponse("/settings?browser_error=1#trinh-duyet", 303)
         path = ROOT / config_path
         text = path.read_text(encoding="utf-8")
         if re.search(r"(?m)^browser:", text):
@@ -508,14 +548,31 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
 
     @app.post("/pages/{pid}/settings")
     async def page_save(request: Request, pid: int):
+        from ..store import parse_number
         form = await request.form()
-        s = store.page_settings(store.one("SELECT * FROM pages WHERE id=?", (pid,)))
+        page = store.one("SELECT * FROM pages WHERE id=?", (pid,))
+        if not page:
+            return RedirectResponse("/accounts", 303)
+        s = store.page_settings(page)
+        bad = []
         for k, default in DEFAULT_PAGE_SETTINGS.items():
             if isinstance(default, bool):
                 s[k] = form.get(k) == "on"
             elif k in form:
                 v = form.get(k)
-                s[k] = type(default)(v) if isinstance(default, (int, float)) and v != "" else v
+                if isinstance(default, (int, float)):
+                    if str(v).strip() == "":
+                        continue                      # ô số để trống -> giữ giá trị cũ
+                    try:
+                        s[k] = parse_number(v, default)
+                    except ValueError:
+                        bad.append(k)
+                else:
+                    s[k] = v
+        if bad:
+            # không lưu gì cả, báo đúng ô sai (trước đây: lỗi 500, người dùng không thấy gì và mất thay đổi)
+            from urllib.parse import quote
+            return RedirectResponse(f"/pages/{pid}?bad={quote(','.join(bad))}", 303)
         store.save_page_settings(pid, s)
         store.x("UPDATE pages SET enabled=? WHERE id=?", (1 if form.get("enabled") == "on" else 0, pid))
         store.log(f"Đã lưu cài đặt Page #{pid}", page_id=pid)
@@ -587,8 +644,6 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
     def schedule(pid: int, vid: str, when: str = Form(""), caption: str = Form(None)):
         # when mặc định "": ô giờ để trống -> báo lỗi rõ ràng thay vì 422 (htmx bỏ qua, người dùng không thấy gì)
         import datetime as dt
-        if caption is not None:
-            store.set_video(vid, pid, caption=caption)
         pg = store.one("SELECT platform FROM pages WHERE id=?", (pid,))
         where = "TikTok" if pg and pg["platform"] == "tiktok" else "Facebook"
 
@@ -602,7 +657,10 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
         if ts < time.time() + 20 * 60:
             earliest = dt.datetime.fromtimestamp(time.time() + 21 * 60)
             return err(f"{where} chỉ nhận lịch sau ít nhất 20 phút nữa — chọn từ {earliest:%H:%M} trở đi.")
-        store.set_video(vid, pid, status="schedule_pending", scheduled_at=ts, error=None)
+        fields = {"caption": caption} if caption is not None else {}
+        if not store.set_video_if(vid, pid, ("review", "approved", "schedule_pending"), status="schedule_pending",
+                                  scheduled_at=ts, error=None, **fields):
+            return err("Video không còn ở mục chờ duyệt (đã đăng / đang đăng / đã bỏ) — tải lại trang.")
         store.log(f"Lên lịch {vid} lúc {when.replace('T', ' ')}", page_id=pid)
         note = " (TikTok chỉ nhận lịch trong 10 ngày — tool sẽ gửi khi tới gần ngày)" \
             if where == "TikTok" and ts > time.time() + 10 * 86400 - 3600 else ""
@@ -610,12 +668,33 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
 
     @app.post("/videos/{pid}/{vid}/{action}")
     def video_action(pid: int, vid: str, action: str, caption: str = Form(None)):
-        if caption is not None:
-            store.set_video(vid, pid, caption=caption)
-        new = {"approve": "approved", "publish_now": "publish_now", "reject": "rejected",
-               "retry": "downloaded", "save": None, "unschedule": "review"}.get(action)
+        # mỗi thao tác chỉ hợp lệ từ vài trạng thái; đổi có điều kiện (nguyên tử) để trang mở lâu / bấm muộn không
+        # ghi đè việc worker vừa làm (vd đã gửi lịch lên FB rồi mới bấm Huỷ lịch -> bài vẫn nằm trên FB)
+        rules = {
+            "approve": ("approved", ("review",)),
+            "publish_now": ("publish_now", ("review", "approved")),
+            "reject": ("rejected", ("new", "downloaded", "review", "approved", "publish_now", "schedule_pending",
+                                    "failed")),
+            "retry": ("downloaded", ("failed",)),
+            "unschedule": ("review", ("schedule_pending",)),
+            "save": (None, ("new", "downloaded", "review", "approved", "publish_now", "schedule_pending", "failed")),
+        }
+        if action not in rules:
+            return HTMLResponse('<div class="done" style="color:var(--err)">Thao tác không hợp lệ</div>', status_code=400)
+        new, allowed = rules[action]
+        fields = {"caption": caption} if caption is not None else {}
         if new:
-            store.set_video(vid, pid, status=new, error=None)
+            fields.update(status=new, error=None)
+            if action == "unschedule":
+                fields["scheduled_at"] = None
+        ok = store.set_video_if(vid, pid, allowed, **fields) if fields else True
+        if not ok:
+            cur = store.one("SELECT status FROM videos WHERE id=? AND page_id=?", (vid, pid))
+            now = STATUS_VI.get(cur["status"], cur["status"]) if cur else "không còn"
+            hint = (" — lịch đã gửi lên nền tảng, hãy gỡ bài hẹn giờ ngay trên Facebook / TikTok"
+                    if cur and cur["status"] == "scheduled" else " — tải lại trang để xem trạng thái mới")
+            return HTMLResponse(f'<div class="done" style="color:var(--err)">Không làm được: video đang ở trạng thái '
+                                f'"{now}"{hint}</div>')
         return HTMLResponse(f'<div class="done">{STATUS_VI.get(new, "Đã lưu") if new else "Đã lưu caption"}</div>')
 
     # ---------------- Tiến trình ----------------

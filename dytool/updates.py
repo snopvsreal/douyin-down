@@ -109,6 +109,10 @@ def check(force: bool = False) -> None:
 
 
 def start_background_checks() -> None:
+    if _checked.get("loop"):
+        return
+    _checked["loop"] = True
+
     def loop():
         while True:
             try:
@@ -209,6 +213,8 @@ def busy_reason(app: str) -> str | None:
     task = progress.STATE.get("task")
     if app == "voicestudio" and task and task.get("kind") == "edit":
         return "đang edit / lồng tiếng 1 video — đợi xong rồi cập nhật"
+    if app == "dytool" and task and task.get("kind") == "upload":
+        return "đang đăng 1 video — cập nhật lúc này (đóng app) có thể làm bài bị đăng dở / đăng trùng, đợi xong"
     if app == "shardbrowser":
         try:
             from . import browsers

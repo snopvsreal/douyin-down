@@ -47,6 +47,21 @@ def _alive() -> bool:
         return False
 
 
+_app_mutex = None
+
+
+def _first_instance() -> bool:
+    """Khoá theo tên của Windows: lần mở thứ 2 trở đi trả False (kể cả khi lần 1 chưa khởi động xong)."""
+    global _app_mutex
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    k32 = ctypes.windll.kernel32
+    k32.CreateMutexW.restype = ctypes.c_void_p
+    _app_mutex = k32.CreateMutexW(None, True, "Local\\dytool-desktop")
+    return not (_app_mutex and k32.GetLastError() == 183)     # 183 = ERROR_ALREADY_EXISTS
+
+
 def _message(text: str, title: str = TITLE) -> None:
     if sys.platform == "win32":
         import ctypes
@@ -58,11 +73,16 @@ def _message(text: str, title: str = TITLE) -> None:
 def _start_server():
     import uvicorn
     from .web.app import create_app
-    app = create_app("config.yaml", autostart=True)
+    # autostart=False: chỉ bật worker SAU KHI server đã chiếm được cổng. Bật trước thì lần mở thứ 2 (cổng đã bị
+    # lần 1 giữ) vẫn kịp chạy 1 worker trong ~30s chờ -> 2 worker cùng đăng 1 video
+    app = create_app("config.yaml", autostart=False)
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="warning"))
     threading.Thread(target=server.run, name="dytool-server", daemon=True).start()
     for _ in range(150):                      # chờ server lên (tối đa ~30s)
         if server.started:
+            from . import updates
+            app.state.worker.start()
+            updates.start_background_checks()
             return app, server
         time.sleep(0.2)
     raise RuntimeError(f"Không mở được server ở cổng {PORT} (cổng đang bị chương trình khác dùng?)")
@@ -109,6 +129,18 @@ def main() -> None:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("dytool.app")
 
     import httpx
+    if not _first_instance():
+        # đã có 1 dytool đang mở (có thể còn đang khởi động, import torch mất vài giây): chờ nó lên rồi đưa
+        # cửa sổ của nó ra trước — không tự bật server / worker thứ 2
+        for _ in range(60):
+            try:
+                if httpx.post(URL + "/app/show", timeout=3).status_code == 200:
+                    return
+            except httpx.HTTPError:
+                pass
+            time.sleep(1)
+        _message("dytool đang chạy (xem biểu tượng ở khay hệ thống cạnh đồng hồ).")
+        return
     if _alive():
         # dytool đang chạy: có cửa sổ (app desktop) -> đưa lên trước rồi thoát
         try:

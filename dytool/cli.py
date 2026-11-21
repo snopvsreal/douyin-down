@@ -105,7 +105,8 @@ def cmd_ui(cfg, args):
     from .web.app import create_app
     host = "0.0.0.0" if args.lan else "127.0.0.1"
     con.print(f"Giao diện: http://127.0.0.1:{args.port}" + ("  (mở được từ máy khác cùng wifi)" if args.lan else ""))
-    uvicorn.run(create_app(args.config, autostart=args.autostart), host=host, port=args.port, log_level="warning")
+    uvicorn.run(create_app(args.config, autostart=args.autostart, lan=args.lan), host=host, port=args.port,
+                log_level="warning")
 
 
 def cmd_fb_login(cfg, args):

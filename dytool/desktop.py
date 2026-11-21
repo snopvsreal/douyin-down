@@ -190,7 +190,15 @@ def main() -> None:
         menu_items.append(pystray.MenuItem(
             lambda it: "Tạm dừng chạy tự động" if app.state.worker.running else "Bật chạy tự động", toggle_worker))
     menu_items += [pystray.Menu.SEPARATOR, pystray.MenuItem("Thoát dytool", quit_app)]
-    tray = pystray.Icon("dytool", Image.open(ICON) if ICON.exists() else Image.new("RGB", (64, 64), "#172030"),
+    def _icon_image():
+        # đọc hết vào bộ nhớ rồi đóng file: Image.open giữ file mở -> trình cài bản mới không ghi đè được dytool.ico
+        if not ICON.exists():
+            return Image.new("RGB", (64, 64), "#172030")
+        with Image.open(ICON) as im:
+            im.load()
+            return im.copy()
+
+    tray = pystray.Icon("dytool", _icon_image(),
                         TITLE, menu=pystray.Menu(*menu_items))
     tray.run_detached()
 

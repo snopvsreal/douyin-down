@@ -26,10 +26,11 @@ def draw(size: int = 1024) -> Image.Image:
     return img
 
 
-big = draw()
-sizes = [16, 24, 32, 48, 64, 128, 256]
-(ROOT / "installer").mkdir(exist_ok=True)
-big.save(ROOT / "installer" / "dytool.ico", sizes=[(s, s) for s in sizes])
-big.resize((256, 256), Image.LANCZOS).save(ROOT / "dytool" / "web" / "static" / "icon.png")
-big.resize((64, 64), Image.LANCZOS).save(ROOT / "dytool" / "web" / "static" / "favicon.png")
-print("Đã ghi installer/dytool.ico, dytool/web/static/icon.png, favicon.png")
+if __name__ == "__main__":
+  big = draw()
+  sizes = [16, 24, 32, 48, 64, 128, 256]
+  (ROOT / "installer").mkdir(exist_ok=True)
+  big.save(ROOT / "installer" / "dytool.ico", sizes=[(s, s) for s in sizes])
+  big.resize((256, 256), Image.LANCZOS).save(ROOT / "dytool" / "web" / "static" / "icon.png")
+  big.resize((64, 64), Image.LANCZOS).save(ROOT / "dytool" / "web" / "static" / "favicon.png")
+  print("Đã ghi installer/dytool.ico, dytool/web/static/icon.png, favicon.png")

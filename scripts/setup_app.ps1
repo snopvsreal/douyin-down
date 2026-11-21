@@ -6,8 +6,12 @@
 # FFmpeg (tools\ffmpeg), backend tải Douyin (vendor). Không dùng AppData vì có máy Windows chặn chạy exe ở đó.
 param(
     [switch]$Launch,     # cài xong thì mở dytool
-    [switch]$NoPrompt    # không hỏi gì (cài VoiceStudio thì bỏ qua)
+    [switch]$NoPrompt,   # không hỏi gì (thiếu ShardBrowser / VoiceStudio thì chỉ nhắc, trừ khi có 2 cờ dưới)
+    [switch]$Wizard,     # chạy ẩn trong trình cài: tiến độ đọc từ các dòng "▸ N/7", không hỏi gì
+    [switch]$WithShardBrowser,   # thiếu thì tải + cài im lặng (người dùng đã tick ở trình cài)
+    [switch]$WithVoiceStudio
 )
+if ($Wizard) { $NoPrompt = $true }
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -113,9 +117,9 @@ try {
     $sb = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
         Where-Object { $_.DisplayName -match 'ShardBrowser' } | Select-Object -First 1
     if ($sb) { Ok "ShardBrowser đã cài ($($sb.DisplayVersion))" }
-    elseif ($NoPrompt) { Warn "Chưa có ShardBrowser — cài tại https://github.com/ProxyShard/ShardBrowser/releases" }
+    elseif ($NoPrompt -and -not $WithShardBrowser) { Warn "Chưa có ShardBrowser — cài tại https://github.com/ProxyShard/ShardBrowser/releases" }
     else {
-        $a = Read-Host "   Tải bản ShardBrowser mới nhất từ GitHub chính thức rồi mở trình cài? (C/K)"
+        $a = if ($WithShardBrowser) { "C" } else { Read-Host "   Tải bản ShardBrowser mới nhất từ GitHub chính thức rồi cài? (C/K)" }
         if ($a -match '^[CcYy]') {
             $rel = Invoke-RestMethod "https://api.github.com/repos/ProxyShard/ShardBrowser/releases/latest" -Headers @{ "User-Agent" = "dytool-setup" }
             $asset = $rel.assets | Where-Object { $_.name -match '_x64-setup\.exe$' } | Select-Object -First 1
@@ -168,11 +172,13 @@ try {
     Say "7/7  VoiceStudio (app lồng tiếng Việt)"
     $vs = @("$env:LOCALAPPDATA\Programs\VoiceStudio\VoiceStudio.exe", "$env:ProgramFiles\VoiceStudio\VoiceStudio.exe") | Where-Object { Test-Path $_ }
     if ($vs) { Ok "VoiceStudio đã cài" }
-    elseif ($NoPrompt) { Warn "Chưa có VoiceStudio — cài sau tại https://github.com/debpalash/VoiceStudio/releases" }
+    elseif ($NoPrompt -and -not $WithVoiceStudio) { Warn "Chưa có VoiceStudio — cài sau tại https://github.com/debpalash/VoiceStudio/releases" }
     else {
-        $a = Read-Host "   Cài VoiceStudio bằng trình cài chính thức (voicestudio.sh)? (C/K)"
+        $a = if ($WithVoiceStudio) { "C" } else { Read-Host "   Cài VoiceStudio bằng trình cài chính thức (voicestudio.sh)? (C/K)" }
         if ($a -match '^[CcYy]') {
-            Invoke-RestMethod https://voicestudio.sh/install.ps1 | Invoke-Expression
+            Write-Host "   Đang tải và cài VoiceStudio…"
+            # trình cài chính thức, cờ -Silent = cài không hỏi (cửa sổ trình cài vẫn có thể hiện thanh tiến độ)
+            & ([scriptblock]::Create((Invoke-RestMethod https://voicestudio.sh/install.ps1))) -Silent
             Warn "Mở VoiceStudio > Model Catalogue > chấp nhận license OmniVoice và higgs-audio-v2-tokenizer"
             Warn "Nếu VoiceStudio báo lỗi tải Python: bấm 'Thay đổi…' và chọn thư mục runtime ở ổ C:, vd C:\VoiceStudio\runtime"
         } else { Warn "Bỏ qua — lồng tiếng cần VoiceStudio, cài sau tại https://github.com/debpalash/VoiceStudio/releases" }

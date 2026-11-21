@@ -220,9 +220,7 @@ def sync_engine() -> None:
     """Máy chặn chạy exe trong AppData (lỗi side-by-side) -> nhân ShardX được chép ra C:\\ShardX và ShardBrowser trỏ
     `browser_path` (settings.json) vào đó. ShardBrowser cập nhật nhân trong AppData -> chép lại bản mới trước khi mở hồ sơ.
     Chỉ làm khi browser_path đang trỏ vào bản chép này; lỗi (đang có hồ sơ mở, khoá file) -> dùng tạm bản cũ."""
-    import os
-    import shutil
-    appdata = Path(os.environ.get("APPDATA", "")) / "shardx-launcher"
+    appdata = _shardx_dir()
     try:
         bp = json.loads((appdata / "settings.json").read_text("utf-8")).get("browser_path") or ""
         if Path(bp).parent != ENGINE_COPY:
@@ -231,11 +229,27 @@ def sync_engine() -> None:
     except (OSError, ValueError):
         return
     src = appdata / "runtime" / "ShardX-Windows"
-    stamp = "%s|%s|%s" % (m.get("installed_chromium_version"), m.get("installed_engine_build"), m.get("browser_etag"))
+    stamp = _engine_stamp(m)
     mark = ENGINE_COPY.parent / ".dytool-engine"
     if not (src / "chrome.exe").exists() or (mark.exists() and mark.read_text("utf-8") == stamp
                                               and (ENGINE_COPY / "chrome.exe").exists()):
         return
+    try:
+        _copy_engine(src, stamp)
+    except OSError:
+        pass                                     # đang có hồ sơ mở / khoá file -> dùng tạm bản cũ, lần sau chép lại
+
+
+def _engine_stamp(manifest: dict) -> str:
+    return "%s|%s|%s" % (manifest.get("installed_chromium_version"), manifest.get("installed_engine_build"),
+                         manifest.get("browser_etag"))
+
+
+def _copy_engine(src: Path, stamp: str) -> None:
+    """Chép nhân ShardX ra ENGINE_COPY qua thư mục tạm rồi đổi tên (không để lại bản chép dở)."""
+    import shutil
+    ENGINE_COPY.parent.mkdir(parents=True, exist_ok=True)
+    mark = ENGINE_COPY.parent / ".dytool-engine"
     tmp = ENGINE_COPY.with_name(ENGINE_COPY.name + ".new")
     old = ENGINE_COPY.with_name(ENGINE_COPY.name + ".old")
     try:
@@ -251,6 +265,104 @@ def sync_engine() -> None:
         if not ENGINE_COPY.exists() and old.exists():
             old.rename(ENGINE_COPY)              # đổi tên giữa chừng thất bại -> trả bản cũ về chỗ
         shutil.rmtree(tmp, ignore_errors=True)
+        raise
+
+
+def _shardx_dir() -> Path:
+    import os
+    return Path(os.environ.get("APPDATA", "")) / "shardx-launcher"
+
+
+def engine_blocked(exe: Path) -> bool:
+    """Windows có chặn chạy file nhân này không? Tạo tiến trình ở trạng thái TREO (CREATE_SUSPENDED): Windows kiểm tra
+    manifest side-by-side / chính sách chặn ngay lúc tạo -> máy chặn exe trong AppData báo lỗi (WinError 14001,
+    'side-by-side configuration is incorrect') mà không mở cửa sổ nào. Tạo được thì huỷ ngay."""
+    import subprocess
+    import sys
+    if sys.platform != "win32" or not exe.exists():
+        return False
+    try:
+        p = subprocess.Popen([str(exe), "--version"], creationflags=0x00000004,     # CREATE_SUSPENDED
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return True
+    try:
+        p.kill()
+        p.wait(5)
+    except Exception:
+        pass
+    return False
+
+
+def _kill_launcher() -> None:
+    import subprocess
+    import time
+    subprocess.run(["taskkill", "/IM", "shardbrowser-launcher.exe", "/T", "/F"], capture_output=True)
+    for _ in range(20):
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq shardbrowser-launcher.exe", "/NH"],
+                             capture_output=True, text=True).stdout
+        if "shardbrowser-launcher.exe" not in out.lower():
+            return
+        time.sleep(0.5)
+
+
+def relocate_engine(sx: Path) -> None:
+    """Nhân ShardX trong AppData bị chặn -> chép ra C:\\ShardX, trỏ ShardBrowser sang (settings.json `browser_path`,
+    ShardBrowser có sẵn mục này) rồi mở lại launcher. Phải tắt launcher trước khi sửa settings.json: đang chạy thì nó
+    ghi đè lại khi thoát. Đang có hồ sơ mở thì không làm (tắt launcher sẽ đóng hồ sơ đó)."""
+    try:
+        running = _api("GET", "/running", _retry=False)
+    except BrowserError:
+        running = []
+    if running:
+        raise BrowserError("Nhân trình duyệt ShardBrowser bị Windows chặn chạy trong AppData. dytool cần chép nó ra "
+                           "C:\\ShardX nhưng đang có hồ sơ mở — đóng các cửa sổ ShardBrowser rồi thử lại")
+    print("Nhân ShardBrowser bị chặn chạy trong AppData -> chép ra C:\\ShardX và trỏ ShardBrowser sang đó", flush=True)
+    try:
+        manifest = json.loads((sx / "runtime" / "manifest.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        manifest = {}
+    try:
+        _copy_engine(sx / "runtime" / "ShardX-Windows", _engine_stamp(manifest))
+    except OSError as e:
+        raise BrowserError(f"Không chép được nhân ShardBrowser ra C:\\ShardX: {e}") from e
+    if engine_blocked(ENGINE_COPY / "chrome.exe"):
+        raise BrowserError("Nhân ShardBrowser bị Windows chặn chạy cả ở C:\\ShardX — kiểm tra phần mềm diệt virus / "
+                           "chính sách AppLocker của máy")
+    _kill_launcher()
+    path = sx / "settings.json"
+    s = json.loads(path.read_text("utf-8"))           # đọc lại sau khi launcher đã tắt (nó có thể vừa ghi)
+    s["browser_path"] = str(ENGINE_COPY / "chrome.exe")
+    path.write_text(json.dumps(s, indent=2, ensure_ascii=False), encoding="utf-8")
+    _start_launcher(shardx_settings()[0])
+
+
+_engine_ok = False
+
+
+def ensure_engine() -> None:
+    """Gọi trước khi mở hồ sơ. Nhân ShardX chạy được -> thôi; bị chặn (máy chặn exe trong AppData) -> tự chuyển ra
+    C:\\ShardX; đã chuyển rồi -> chép lại khi ShardBrowser cập nhật nhân. Kiểm tra 1 lần mỗi lần chạy app."""
+    global _engine_ok
+    import sys
+    if _engine_ok or sys.platform != "win32":
+        return
+    sx = _shardx_dir()
+    try:
+        bp = json.loads((sx / "settings.json").read_text("utf-8")).get("browser_path") or ""
+    except (OSError, ValueError):
+        return                                         # ShardBrowser chưa chạy lần nào
+    if bp:
+        if Path(bp).parent == ENGINE_COPY:
+            sync_engine()
+        _engine_ok = True                              # người dùng tự đặt nhân khác -> để nguyên
+        return
+    exe = sx / "runtime" / "ShardX-Windows" / "chrome.exe"
+    if not exe.exists():
+        return                                         # chưa tải nhân xong -> lần sau kiểm tra lại
+    if engine_blocked(exe):
+        relocate_engine(sx)
+    _engine_ok = True
 
 
 def attach(pw, acc_dir: Path, headless: bool):
@@ -259,7 +371,7 @@ def attach(pw, acc_dir: Path, headless: bool):
     if not choice:
         raise BrowserError("Chưa chọn hồ sơ ShardBrowser cho tài khoản này — vào Tài khoản & kênh, bấm Đăng nhập (dytool tự tạo hồ sơ)")
     pid = choice["profile_id"]
-    sync_engine()
+    ensure_engine()
     res = _api("POST", f"/profiles/{pid}/start", json={"headless": bool(headless)})
     ws = (res.get("cdp") or {}).get("web_socket_debugger_url")
     if not ws:

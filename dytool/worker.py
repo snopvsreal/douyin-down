@@ -446,8 +446,9 @@ class Worker:
     def _voicestudio_up(self) -> bool:
         import httpx
         api = self.cfg["edit"].get("dub", {}).get("api", "http://127.0.0.1:3900").rstrip("/")
+        from .services import LOCAL_TIMEOUT
         try:
-            ok = httpx.get(api + "/health", timeout=3).status_code < 500
+            ok = httpx.get(api + "/health", timeout=LOCAL_TIMEOUT).status_code < 500
         except httpx.HTTPError:
             ok = False
         if not ok and time.time() - self._vs_warned > 600:     # nhắc 10 phút/lần, không spam log

@@ -37,6 +37,10 @@ DisableWelcomePage=no
 DisableDirPage=auto
 CloseApplications=yes
 RestartApplications=no
+; Inno 7: RedirectionGuard (mặc định bật) chặn đi qua junction / symlink do người dùng thường tạo và — khi cài không cần
+; admin như ở đây — truyền sang mọi tiến trình con (setup_app.ps1 -> uv: uv tạo junction cho Python / .venv; dytool mở
+; lại sau cập nhật). Trình cài không chạy quyền admin nên tắt đi gần như không mất gì về bảo mật.
+RedirectionGuard=no
 
 [Languages]
 Name: "vi"; MessagesFile: "installer\Vietnamese.isl"
@@ -63,6 +67,7 @@ vi.Step5=Bộ tải video Douyin
 vi.Step6=Cấu hình và model AI (~1.5 GB)
 vi.Step7=VoiceStudio (lồng tiếng Việt)
 vi.Closing=Đang đóng dytool đang chạy…
+vi.NoWebView2=Máy này chưa có Microsoft Edge WebView2 Runtime — thành phần cửa sổ dytool dùng để hiện giao diện.%n%nSau khi cài dytool, hãy tải "Evergreen Bootstrapper" ở trang Microsoft rồi chạy (miễn phí, khoảng 2 MB).%n%nMở trang tải ngay?
 vi.LibDone=Đã cài xong thư viện
 vi.LibFail=Cài thư viện chưa xong (mã lỗi %1).%n%nKiểm tra mạng rồi chạy lại: Start Menu → dytool - Cài đặt lại thư viện.%nNhật ký: %2
 
@@ -215,16 +220,59 @@ begin
     MsgBox(FmtMessage(CustomMessage('LibFail'), [IntToStr(RC), ExpandConstant('{app}\data\setup.log')]), mbError, MB_OK);
 end;
 
-// dytool đang mở giữ file (icon, .venv\pythonw.exe) -> chép đè / uv sync lỗi. Đóng nó trước; cài xong có ô "Mở dytool".
-function PrepareToInstall(var NeedsRestart: Boolean): String;
+// Đóng MỌI tiến trình chạy từ thư mục dytool (app, backend tải Douyin, ffmpeg con, Python của .venv / .python /
+// vendor / tools) cùng cây con, rồi chờ nhả file. Trước chỉ đóng tiến trình có "dytool.desktop" trong dòng lệnh:
+// backend tải + ffmpeg vẫn giữ .venv -> uv sync báo "Access is denied"; lại còn khớp nhầm cả cửa sổ PowerShell /
+// editor có chữ đó. Lọc theo đường dẫn file chạy nên không đụng chương trình khác.
+procedure StopApp(const Root: String);
 var
   RC: Integer;
+  Cmd: String;
+begin
+  Cmd := '$r=''' + Root + '''; $d=@(''\.venv\'',''\.python\'',''\vendor\'',''\tools\''); ' +
+         'Get-CimInstance Win32_Process | ForEach-Object { $p=$_; ' +
+         'if ($p.ProcessId -ne $PID -and $p.ExecutablePath -and ' +
+         '($d | Where-Object { $p.ExecutablePath -like ($r + $_ + ''*'') })) ' +
+         '{ taskkill /PID $p.ProcessId /T /F | Out-Null } }; Start-Sleep -Seconds 2';
+  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+       '-NoProfile -ExecutionPolicy Bypass -Command "' + Cmd + '"', '', SW_HIDE, ewWaitUntilTerminated, RC);
+end;
+
+// dytool đang mở giữ file -> chép đè / uv sync lỗi. Đóng hết trước; cài xong có ô "Mở dytool" / tự mở lại (/RELAUNCH).
+function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
   WizardForm.PreparingLabel.Caption := CustomMessage('Closing');
-  Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-       '-NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like ''*dytool.desktop*'' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"',
-       '', SW_HIDE, ewWaitUntilTerminated, RC);
+  StopApp(ExpandConstant('{app}'));
+end;
+
+// Gỡ cài đặt khi app đang chạy: đóng hết trước, không thì .venv / vendor bị xoá dở và app vẫn nằm ở khay
+function InitializeUninstall: Boolean;
+begin
+  StopApp(ExpandConstant('{app}'));
+  Result := True;
+end;
+
+// WebView2 Runtime (cửa sổ dytool dùng nó để hiện giao diện). Windows 11 / Win 10 có Edge mới thì có sẵn;
+// Windows 10 LTSC thường không. Thiếu -> báo kèm link tải chính thức, vẫn cho cài tiếp.
+function HasWebView2: Boolean;
+var
+  V: String;
+begin
+  Result :=
+    (RegQueryStringValue(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', V) and (V <> '') and (V <> '0.0.0.0')) or
+    (RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', V) and (V <> '') and (V <> '0.0.0.0')) or
+    (RegQueryStringValue(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', V) and (V <> '') and (V <> '0.0.0.0'));
+end;
+
+function InitializeSetup: Boolean;
+var
+  RC: Integer;
+begin
+  Result := True;
+  if (not HasWebView2) and (not WizardSilent) then
+    if MsgBox(CustomMessage('NoWebView2'), mbInformation, MB_YESNO) = IDYES then
+      ShellExec('open', 'https://developer.microsoft.com/microsoft-edge/webview2/', '', '', SW_SHOWNORMAL, ewNoWait, RC);
 end;
 
 // /RELAUNCH: dytool tự cập nhật (updates.py chạy trình cài /SILENT /RELAUNCH) -> cài xong hết thì mở lại dytool

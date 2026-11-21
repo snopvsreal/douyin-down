@@ -75,6 +75,37 @@ Write-Host "  ──────────────────────
 Write-Host "  Lần đầu mất 15–30 phút và cần mạng. Đừng đóng cửa sổ này."
 Write-Host "  Thư mục: $Root" -ForegroundColor DarkGray
 
+# Tải 1 file trong bản phát hành GitHub và đối chiếu SHA256 GitHub công bố (asset.digest). Sai mã -> xoá, dừng.
+function Get-GitHubAsset($apiUrl, $pattern, $outDir) {
+    $rel = Invoke-RestMethod $apiUrl -Headers @{ "User-Agent" = "dytool-setup" }
+    $asset = $rel.assets | Where-Object { $_.name -match $pattern } | Select-Object -First 1
+    if (-not $asset) { throw "Không thấy file '$pattern' trong bản phát hành $($rel.tag_name)" }
+    $out = Join-Path $outDir $asset.name
+    Write-Host "   Đang tải $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB, bản $($rel.tag_name))…"
+    Invoke-WebRequest $asset.browser_download_url -OutFile $out -UseBasicParsing
+    if ($asset.digest -match '^sha256:([0-9a-f]{64})$') {
+        if ((Get-FileHash $out -Algorithm SHA256).Hash -ne $Matches[1].ToUpper()) {
+            Remove-Item $out -Force -ErrorAction SilentlyContinue
+            throw "File $($asset.name) tải về không khớp mã SHA256 GitHub công bố — đã xoá, không cài"
+        }
+        Ok "Đã kiểm tra mã SHA256"
+    } else { Warn "Bản phát hành không có mã SHA256 để đối chiếu" }
+    return $out
+}
+
+# Chạy "Cài đặt lại thư viện" khi dytool đang mở: đóng hết tiến trình chạy từ thư mục này (app, backend tải, ffmpeg)
+# để uv sync không bị "Access is denied". Trong trình cài thì trình cài đã đóng rồi.
+if (-not $Wizard) {
+    $dirs = @("\.venv\", "\.python\", "\vendor\", "\tools\")
+    $run = Get-CimInstance Win32_Process | Where-Object { $p = $_; $p.ProcessId -ne $PID -and $p.ExecutablePath -and
+        ($dirs | Where-Object { $p.ExecutablePath -like ($Root + $_ + "*") }) }
+    if ($run) {
+        Warn "Đang đóng dytool đang chạy để cài thư viện…"
+        $run | ForEach-Object { taskkill /PID $_.ProcessId /T /F 2>$null | Out-Null }
+        Start-Sleep -Seconds 2
+    }
+}
+
 try {
     # ---------- 1. uv (quản lý Python) ----------
     Say "1/7  uv (quản lý Python)"
@@ -98,16 +129,17 @@ try {
     if ($ff) { $hasSubs = ((& ffmpeg -hide_banner -filters 2>&1 | Out-String) -match " subtitles ") }
     if (-not $hasSubs) {
         Write-Host "   Đang tải FFmpeg (~200 MB)…"
-        $zip = "$env:TEMP\dytool-ffmpeg.zip"
-        Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile $zip -UseBasicParsing
+        $zip = Get-GitHubAsset "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest" `
+            '^ffmpeg-master-latest-win64-gpl\.zip$' $env:TEMP
         $tmp = "$Root\tools\ffmpeg-tmp"
-        if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
-        Expand-Archive $zip -DestinationPath $tmp -Force
-        Remove-Item $zip
+        if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp -ErrorAction Stop }
+        Expand-Archive $zip -DestinationPath $tmp -Force -ErrorAction Stop
+        Remove-Item $zip -ErrorAction SilentlyContinue
         $bin = (Get-ChildItem $tmp -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
-        if (Test-Path "$Root\tools\ffmpeg") { Remove-Item -Recurse -Force "$Root\tools\ffmpeg" }
-        Move-Item (Split-Path -Parent $bin) "$Root\tools\ffmpeg"
-        Remove-Item -Recurse -Force $tmp
+        if (-not $bin) { throw "Gói FFmpeg tải về không có ffmpeg.exe" }
+        if (Test-Path "$Root\tools\ffmpeg") { Remove-Item -Recurse -Force "$Root\tools\ffmpeg" -ErrorAction Stop }
+        Move-Item (Split-Path -Parent $bin) "$Root\tools\ffmpeg" -ErrorAction Stop
+        Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
         Refresh-Path
     }
     Ok ((& ffmpeg -hide_banner -version | Select-Object -First 1) -replace "Copyright.*", "")
@@ -121,17 +153,17 @@ try {
     else {
         $a = if ($WithShardBrowser) { "C" } else { Read-Host "   Tải bản ShardBrowser mới nhất từ GitHub chính thức rồi cài? (C/K)" }
         if ($a -match '^[CcYy]') {
-            $rel = Invoke-RestMethod "https://api.github.com/repos/ProxyShard/ShardBrowser/releases/latest" -Headers @{ "User-Agent" = "dytool-setup" }
-            $asset = $rel.assets | Where-Object { $_.name -match '_x64-setup\.exe$' } | Select-Object -First 1
-            if (-not $asset) { throw "Không thấy file cài Windows trong bản phát hành $($rel.tag_name) của ShardBrowser" }
-            $exe = "$env:TEMP\$($asset.name)"
-            Write-Host "   Đang tải $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB, bản $($rel.tag_name))…"
-            Invoke-WebRequest $asset.browser_download_url -OutFile $exe -UseBasicParsing
-            Warn "File cài ShardBrowser chưa ký số: Windows có thể hỏi lại — bấm 'More info > Run anyway' nếu bạn đồng ý cài"
-            Start-Process $exe -ArgumentList "/S" -Wait
-            Remove-Item $exe -ErrorAction SilentlyContinue
-            Ok "Đã cài ShardBrowser"
-            $sb = $true
+            # phần đi kèm: lỗi (GitHub giới hạn lượt hỏi, mạng…) chỉ cảnh báo, không bỏ dở các bước thiết yếu 5-6
+            try {
+                $exe = Get-GitHubAsset "https://api.github.com/repos/ProxyShard/ShardBrowser/releases/latest" `
+                    '_x64-setup\.exe$' $env:TEMP
+                Warn "File cài ShardBrowser chưa ký số: Windows có thể hỏi lại — bấm 'More info > Run anyway' nếu bạn đồng ý cài"
+                $proc = Start-Process $exe -ArgumentList "/S" -Wait -PassThru
+                Remove-Item $exe -ErrorAction SilentlyContinue
+                if ($proc.ExitCode -ne 0) { throw "trình cài ShardBrowser báo lỗi (mã $($proc.ExitCode))" }
+                Ok "Đã cài ShardBrowser"
+                $sb = $true
+            } catch { Warn "Chưa cài được ShardBrowser: $($_.Exception.Message) — cài sau tại https://github.com/ProxyShard/ShardBrowser/releases" }
         } else { Warn "Bỏ qua — dytool cần ShardBrowser để đăng nhập / đăng bài" }
     }
     if ($sb) {
@@ -146,15 +178,15 @@ try {
         New-Item -ItemType Directory -Force -Path "$Root\vendor" | Out-Null
         $zip = "$env:TEMP\dytool-tdl.zip"
         Invoke-WebRequest "https://codeload.github.com/JoeanAmier/TikTokDownloader/zip/refs/heads/master" -OutFile $zip -UseBasicParsing
-        Expand-Archive $zip -DestinationPath "$Root\vendor" -Force
-        Remove-Item $zip
-        if (Test-Path $vendor) { Remove-Item -Recurse -Force $vendor }
-        Rename-Item "$Root\vendor\TikTokDownloader-master" "TikTokDownloader"
+        Expand-Archive $zip -DestinationPath "$Root\vendor" -Force -ErrorAction Stop
+        Remove-Item $zip -ErrorAction SilentlyContinue
+        if (Test-Path $vendor) { Remove-Item -Recurse -Force $vendor -ErrorAction Stop }
+        Rename-Item "$Root\vendor\TikTokDownloader-master" "TikTokDownloader" -ErrorAction Stop
     }
     if (-not (Test-Path "$vendor\.venv")) {
         # uv.lock của dự án này trỏ tới mirror Trung Quốc (bị chặn 403) -> giải lại với PyPI chính thức
-        if (Test-Path "$vendor\uv.lock") { Move-Item "$vendor\uv.lock" "$vendor\uv.lock.mirror-bak" -Force }
-        Push-Location $vendor
+        if (Test-Path "$vendor\uv.lock") { Move-Item "$vendor\uv.lock" "$vendor\uv.lock.mirror-bak" -Force -ErrorAction Stop }
+        Push-Location $vendor -ErrorAction Stop       # lỗi thì dừng, không chạy uv sync nhầm trong thư mục dytool
         & uv sync --python 3.12 --default-index https://pypi.org/simple
         $rc = $LASTEXITCODE
         Pop-Location
@@ -177,10 +209,16 @@ try {
         $a = if ($WithVoiceStudio) { "C" } else { Read-Host "   Cài VoiceStudio bằng trình cài chính thức (voicestudio.sh)? (C/K)" }
         if ($a -match '^[CcYy]') {
             Write-Host "   Đang tải và cài VoiceStudio…"
-            # trình cài chính thức, cờ -Silent = cài không hỏi (cửa sổ trình cài vẫn có thể hiện thanh tiến độ)
-            & ([scriptblock]::Create((Invoke-RestMethod https://voicestudio.sh/install.ps1))) -Silent
-            Warn "Mở VoiceStudio > Model Catalogue > chấp nhận license OmniVoice và higgs-audio-v2-tokenizer"
-            Warn "Nếu VoiceStudio báo lỗi tải Python: bấm 'Thay đổi…' và chọn thư mục runtime ở ổ C:, vd C:\VoiceStudio\runtime"
+            # trình cài chính thức, cờ -Silent = cài không hỏi. Chạy ở tiến trình PowerShell RIÊNG: script đó gọi `exit`
+            # hay báo lỗi cũng không cắt ngang script này; lỗi chỉ cảnh báo (phần đi kèm, phần lõi đã cài xong)
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `
+                "& ([scriptblock]::Create((Invoke-RestMethod https://voicestudio.sh/install.ps1))) -Silent"
+            if ($LASTEXITCODE -ne 0) {
+                Warn "Chưa cài được VoiceStudio (mã $LASTEXITCODE) — cài sau tại https://github.com/debpalash/VoiceStudio/releases"
+            } else {
+                Warn "Mở VoiceStudio > Model Catalogue > chấp nhận license OmniVoice và higgs-audio-v2-tokenizer"
+                Warn "Nếu VoiceStudio báo lỗi tải Python: bấm 'Thay đổi…' và chọn thư mục runtime ở ổ C:, vd C:\VoiceStudio\runtime"
+            }
         } else { Warn "Bỏ qua — lồng tiếng cần VoiceStudio, cài sau tại https://github.com/debpalash/VoiceStudio/releases" }
     }
 
@@ -192,11 +230,16 @@ try {
 }
 catch {
     Write-Host ""
-    Write-Host "  × LỖI: $($_.Exception.Message)" -ForegroundColor Red
+    $errMsg = $_.Exception.Message
+    Write-Host "  × LỖI: $errMsg" -ForegroundColor Red
     Write-Host "    Kiểm tra mạng rồi chạy lại: Start Menu > dytool > Cài đặt lại thư viện." -ForegroundColor Yellow
     Write-Host "    Nhật ký: $Root\data\setup.log" -ForegroundColor Yellow
     $code = 1
 }
+# dấu cho app biết lần cài thư viện gần nhất có xong không (cập nhật im lặng lỗi -> app hiện nút Cài lại thư viện)
+$marker = "$Root\data\setup_failed.txt"
+if ($code -eq 0) { Remove-Item $marker -ErrorAction SilentlyContinue }
+else { try { Set-Content -Path $marker -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm')`n$errMsg" -Encoding UTF8 } catch {} }
 try { Stop-Transcript | Out-Null } catch {}
 if (-not $NoPrompt) { Write-Host ""; Read-Host "Nhấn Enter để đóng cửa sổ này" | Out-Null }
 exit $code

@@ -27,8 +27,10 @@
   <a href="/queue?status=new"><span class="n">{{ t.get('new', 0) }}</span><span class="l">Tìm thấy</span></a>
   <a href="/queue?status=downloaded"><span class="n">{{ t.get('downloaded', 0) }}</span><span class="l">Đã tải, chờ edit</span></a>
   <a href="/review" class="{{ 'is-hot' if t.get('review') }}"><span class="n">{{ t.get('review', 0) }}</span><span class="l">Chờ bạn duyệt</span></a>
-  <a href="/queue?status=approved"><span class="n">{{ t.get('approved', 0) + t.get('publish_now', 0) }}</span><span class="l">Chờ đăng</span></a>
-  <a href="/review"><span class="n">{{ t.get('schedule_pending', 0) + t.get('scheduled', 0) }}</span><span class="l">Đã lên lịch</span></a>
+  {# "Chờ đăng" gồm cả lịch CHƯA gửi lên nền tảng (schedule_pending) và bài đang đăng; "Đã lên lịch" chỉ đếm lịch
+     đã nằm trên Facebook / TikTok (trước gộp cả 2 -> tưởng đã hẹn giờ xong trong khi máy vẫn phải bật để gửi) #}
+  <a href="/queue?status=approved"><span class="n">{{ t.get('approved', 0) + t.get('publish_now', 0) + t.get('schedule_pending', 0) + t.get('uploading', 0) }}</span><span class="l">Chờ đăng</span></a>
+  <a href="/review"><span class="n">{{ t.get('scheduled', 0) }}</span><span class="l">Đã lên lịch</span></a>
   <a href="/queue?status=uploaded" class="is-fin"><span class="n">{{ t.get('uploaded', 0) }}</span><span class="l">Đã đăng</span></a>
 </nav>
 {% if t.get('failed') %}

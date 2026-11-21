@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -142,6 +143,12 @@ def cmd_fbcheck(cfg, args):
 
 
 def main():
+    # FFmpeg do trình cài tải về nằm ở tools\ffmpeg\bin (không thêm vào PATH của Windows) -> thêm cho lệnh dòng lệnh,
+    # giống app desktop. Trước: mọi lệnh `dytool …` trên máy cài bằng trình cài đều báo "Chưa cài ffmpeg"
+    root = Path(__file__).resolve().parent.parent
+    extra = [p for p in (root / "tools" / "ffmpeg" / "bin", Path.home() / ".local" / "bin") if p.exists()]
+    os.environ["PATH"] = os.pathsep.join(map(str, extra)) + os.pathsep + os.environ.get("PATH", "")
+    os.environ.setdefault("UV_PYTHON_INSTALL_DIR", str(root / ".python"))   # không tải Python vào AppData (bị chặn)
     if not shutil.which("ffmpeg"):
         sys.exit("Chưa cài ffmpeg")
     ap = argparse.ArgumentParser(prog="dytool", description="Douyin -> edit -> Facebook Page")

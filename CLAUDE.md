@@ -13,8 +13,9 @@ uv run dytool douyin-login                # đăng nhập douyin.com -> lưu coo
 uv run dytool fb-login                    # (cũ, 1 tài khoản) — giờ đăng nhập FB qua giao diện, mỗi tài khoản 1 phiên
 uv run dytool edit-file video.mp4         # edit thử 1 file theo config.yaml
 ```
-Windows: bấm đúp `install_windows.bat` (1 file lai batch + PowerShell, cài mọi thứ; giữ **CRLF + chỉ ASCII** khi sửa
-vì Windows PowerShell 5.1 đọc file theo ANSI) rồi chạy shortcut dytool / `scripts\run_ui.bat`.
+Windows: cách chính là **trình cài** `dist\dytool-Setup-<ver>.exe` (build: `installer\build.ps1`) → app desktop
+`C:\dytool\dytool.exe`. `install_windows.bat` là cách cũ (cần winget — Windows 10 LTSC không có; giữ **CRLF + chỉ
+ASCII** khi sửa vì Windows PowerShell 5.1 đọc file theo ANSI). Đừng chạy `run_ui.bat` song song với app desktop.
 
 **Đừng chạy giao diện bằng preview của app Claude** (`preview_start` có lệnh khởi động): app sẽ tự tắt server
 khi nhàn rỗi → worker chết giữa chừng. Chạy tiến trình riêng (run_ui.bat / `nohup caffeinate -i uv run dytool ui
@@ -77,6 +78,10 @@ Luồng 1 video: `new` → tải → `downloaded` → edit → `review` (hoặc 
   được phục vụ tĩnh — đừng mount cả `data/` (cookie FB, app.db). Ghi vào config.yaml: lọc giá trị bằng regex chặt.
 - `onsubmit="return confirm()"` vô tác dụng khi body có `hx-boost` → dùng `hx-confirm`. htmx bỏ qua phản hồi
   4xx/5xx → `base.html` hiện thông báo nổi `#dy-toast` (poll `every …` thì không).
+- Trình cài / gỡ cài / "Cài đặt lại thư viện" đóng mọi tiến trình có **đường dẫn file chạy** trong `.venv|.python|vendor|tools`
+  của thư mục cài (cả cây con, kể cả backend tải) — không lọc theo dòng lệnh. `RedirectionGuard=no` (Inno 7 truyền
+  sang uv). `setup_app.ps1` ghi `data/setup_failed.txt` khi lỗi → Tổng quan / Cài đặt hiện nút Cài lại thư viện;
+  ShardBrowser / VoiceStudio lỗi chỉ cảnh báo; file tải từ GitHub phải khớp `asset.digest`.
 - **Giờ lịch đăng = giờ VN cố định UTC+7** (`store.vn_time / vn_ts / vn_fmt`, template `vnt(ts, fmt)`), không dùng
   `fromtimestamp` / `time.localtime` theo múi giờ máy. Hạn mức ngày tính theo ngày VN, gồm cả bài hẹn giờ.
 - Worker chọn việc bằng SQL lọc sẵn Page đang bật (`_top_video`), không `LIMIT 20` rồi mới lọc. Backend tải hỏng → chờ

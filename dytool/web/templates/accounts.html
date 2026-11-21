@@ -32,10 +32,10 @@
     <div class="spacer"></div>
     <div class="actions">
       {% if a.status != 'da_dang_nhap' %}
-        <form method="post" action="/accounts/{{ a.id }}/login"><button class="btn sm primary"
+        <form method="post" action="/accounts/{{ a.id }}/login" hx-disabled-elt="find button"><button class="btn sm primary"
               aria-label="Đăng nhập {{ 'TikTok' if tt else 'Facebook' }} cho {{ a.name }}">Đăng nhập</button></form>
       {% else %}
-        <form method="post" action="/accounts/{{ a.id }}/login"><button class="btn sm ghost">Đăng nhập lại</button></form>
+        <form method="post" action="/accounts/{{ a.id }}/login" hx-disabled-elt="find button"><button class="btn sm ghost">Đăng nhập lại</button></form>
       {% endif %}
       {% if not tt and a.status == 'da_dang_nhap' %}
         <form method="post" action="/accounts/{{ a.id }}/discover"><button class="btn sm ghost" title="Tìm lại các Page tài khoản này quản lý">Quét lại Page</button></form>
@@ -43,7 +43,7 @@
       {# hx-confirm (không dùng onsubmit="return confirm"): body có hx-boost, htmx gửi form trước khi xét kết quả
          confirm() -> bấm Huỷ vẫn bị xoá. hx-confirm: Huỷ = htmx không gửi gì #}
       <form method="post" action="/accounts/{{ a.id }}/delete"
-            hx-confirm="Xoá tài khoản {{ a.name }} và các kênh của nó khỏi tool? Không ảnh hưởng gì trên {{ 'TikTok' if tt else 'Facebook' }}.">
+            hx-confirm="Xoá tài khoản {{ a.name }} khỏi tool? Xoá luôn các kênh của nó cùng mọi video, lịch đăng chưa gửi và cài đặt kênh trong tool. Bài đã đăng / đã hẹn giờ trên {{ 'TikTok' if tt else 'Facebook' }} không bị ảnh hưởng.">
         <button class="btn sm ghost danger" aria-label="Xoá tài khoản {{ a.name }}" title="Xoá khỏi tool">Xoá</button></form>
     </div>
   </div>

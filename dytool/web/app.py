@@ -81,9 +81,28 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                            css_v=lambda: int((HERE / "static" / "app.css").stat().st_mtime))
     tpl.env.filters["ago"] = lambda ts: _ago(ts)
 
+    def _setup_failed() -> str | None:
+        """Lần cài / cập nhật thư viện gần nhất chưa xong (setup_app.ps1 ghi data/setup_failed.txt) -> nội dung lỗi."""
+        try:
+            return (data / "setup_failed.txt").read_text(encoding="utf-8-sig").strip() or "không rõ lỗi"
+        except OSError:
+            return None
+
     def render(request: Request, name: str, **ctx):
         # navc: số video theo trạng thái cho huy hiệu trên menu (Chờ duyệt / Lỗi)
-        return tpl.TemplateResponse(request, name, {"worker": worker, "navc": store.counts(), **ctx})
+        return tpl.TemplateResponse(request, name, {"worker": worker, "navc": store.counts(),
+                                                    "setup_failed": _setup_failed(), **ctx})
+
+    @app.post("/settings/reinstall-libs")
+    def reinstall_libs():
+        """Mở cửa sổ cài lại thư viện (setup_app.ps1, có hiện tiến độ). Script tự đóng dytool trước khi cài
+        (-Launch: cài xong mở lại)."""
+        script = ROOT / "scripts" / "setup_app.ps1"
+        flags = subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
+        subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                          "-Launch"], cwd=str(ROOT), creationflags=flags)
+        store.log("Đang cài lại thư viện — dytool sẽ tự đóng rồi mở lại khi xong")
+        return HTMLResponse('<div class="done">Đã mở cửa sổ cài lại thư viện</div>')
 
     def health() -> dict:
         def ok(url):
@@ -260,7 +279,9 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         from .. import loginstate
         lg = loginstate.view(path, alive)   # không có lần đăng nhập nào gần đây -> trả rỗng, khung tự ẩn (CSS :empty)
         if not lg:
-            return HTMLResponse("")
+            # 286 = htmx dừng hỏi lại (trước: mỗi tài khoản + Douyin hỏi mỗi giây mãi mãi). Bấm Đăng nhập -> trang
+            # tải lại -> khung bắt đầu theo dõi lại
+            return HTMLResponse("", status_code=286)
         # chỉ gửi câu đọc to (#sr-live) khi bước / trạng thái đổi — khung tự làm mới mỗi giây vì đồng hồ đếm ngược
         key = (lg["step"], lg["state"])
         say = None

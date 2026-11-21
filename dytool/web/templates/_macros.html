@@ -29,7 +29,8 @@
       <button class="btn sm">Dùng hồ sơ này</button>
     </form>
     {% endif %}
-    {% if new_action %}<form method="post" action="{{ new_action }}"><button class="btn sm ghost">Tạo hồ sơ mới</button></form>{% endif %}
+    {% if new_action %}<form method="post" action="{{ new_action }}"
+          hx-confirm="Tạo hồ sơ ShardBrowser mới và dùng thay hồ sơ hiện tại? Phải đăng nhập lại trong hồ sơ mới (hồ sơ cũ vẫn còn trong ShardBrowser, chọn lại được)."><button class="btn sm ghost">Tạo hồ sơ mới</button></form>{% endif %}
   </div>
 </details>
 {% endmacro %}

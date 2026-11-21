@@ -34,7 +34,13 @@ def _prepare_env() -> None:
     if not cfg.exists():                      # lần chạy đầu sau khi cài
         shutil.copy(ROOT / "config.example.yaml", cfg)
     if sys.stdout is None or "pythonw" in Path(sys.executable).name.lower():
-        log = open(ROOT / "data" / "app.log", "a", encoding="utf-8", buffering=1)
+        path = ROOT / "data" / "app.log"
+        try:                                  # xoay vòng: quá 5 MB -> đổi thành app.log.1 (giữ 1 bản cũ)
+            if path.stat().st_size > 5 * 1024 * 1024:
+                path.replace(path.with_suffix(".log.1"))
+        except OSError:
+            pass
+        log = open(path, "a", encoding="utf-8", buffering=1)
         sys.stdout = sys.stderr = log
         print(f"\n===== dytool mở lúc {time.strftime('%Y-%m-%d %H:%M:%S')} =====", flush=True)
 
@@ -99,6 +105,22 @@ def _windows_dark() -> bool:
             return winreg.QueryValueEx(k, "AppsUseLightTheme")[0] == 0
     except OSError:
         return False
+
+
+def _allow_close_on_shutdown(state: dict) -> None:
+    """Windows tắt máy / đăng xuất: cho cửa sổ đóng hẳn. Không có thì on_closing luôn huỷ (thu xuống khay) ->
+    Windows hiện 'dytool đang ngăn tắt máy'. Worker đang đăng dở -> lần mở sau trả về Chờ duyệt (không đăng lại)."""
+    if sys.platform != "win32":
+        return
+    try:
+        from Microsoft.Win32 import SessionEndingEventHandler, SystemEvents     # pythonnet (đi kèm pywebview)
+
+        def ending(sender, e):
+            state["quitting"] = True
+            print("Windows đang tắt máy / đăng xuất -> đóng dytool", flush=True)
+        SystemEvents.SessionEnding += SessionEndingEventHandler(ending)
+    except Exception as e:
+        print("Không theo dõi được sự kiện tắt máy:", e, flush=True)
 
 
 def _style_window(window) -> None:
@@ -216,6 +238,7 @@ def main() -> None:
         app.state.show_window = show
     window.events.closing += on_closing
     window.events.shown += lambda: _style_window(window)
+    window.events.shown += lambda: _allow_close_on_shutdown(state)
 
     menu_items = [pystray.MenuItem("Mở dytool", lambda i, it: show(), default=True)]
     if app:

@@ -64,7 +64,20 @@ def _reg_version(pattern: str) -> str | None:
     return None
 
 
+_inst_cache: dict[str, tuple[float, str | None]] = {}
+
+
 def installed(app: str) -> str | None:
+    """Bản đang cài. Nhớ 60 giây: thanh trạng thái hỏi mỗi 5 giây, mỗi lần quét cả 3 nhánh registry Uninstall."""
+    hit = _inst_cache.get(app)
+    if hit and time.time() - hit[0] < 60:
+        return hit[1]
+    v = _installed(app)
+    _inst_cache[app] = (time.time(), v)
+    return v
+
+
+def _installed(app: str) -> str | None:
     if app == "dytool":
         try:
             from importlib.metadata import version
@@ -127,6 +140,11 @@ def status() -> list[dict]:
     rows = []
     for app, a in APPS.items():
         cur, new = installed(app), _latest.get(app)
+        j = _job.get(app)
+        if app == "dytool" and j and j["state"] == "installing" and time.time() - j["at"] > 15 * 60:
+            # trình cài đáng lẽ đã đóng app này rồi mở lại bản mới; vẫn còn đây sau 15 phút = trình cài bị huỷ / lỗi
+            _set(app, "error", "trình cài không chạy xong (bị huỷ hoặc lỗi) — xem data/updates/dytool-update.log "
+                               "rồi bấm Cập nhật lại")
         rows.append({"app": app, "name": a["name"], "installed": cur, "latest": new and new["version"],
                      "page": new and new["page"], "size_mb": new and round(new["size"] / 1048576, 1),
                      # không đặt tên khoá "update": Jinja đọc r.update thành hàm dict.update (luôn đúng)
@@ -266,23 +284,30 @@ def start(app: str) -> str | None:
     """Bắt đầu cập nhật ở thread nền. Trả về lý do từ chối (hoặc None nếu đã bắt đầu)."""
     if app not in APPS:
         return "không rõ app"
-    j = _job.get(app)
-    if j and j["state"] in ("downloading", "installing"):
-        return "đang cập nhật rồi"
     info = _latest.get(app)
     if not info:
         return "chưa kiểm tra được bản mới — bấm Kiểm tra lại"
+    cur = installed(app)
+    if not cur:
+        return f"{APPS[app]['name']} chưa cài trên máy này — cài bằng trình cài dytool hoặc trang phát hành chính thức"
+    if _ver(info["version"]) <= _ver(cur):
+        return f"đang dùng bản mới nhất ({cur})"
     why = busy_reason(app)
     if why:
         return why
+    with _lock:      # nhận việc nguyên tử: 2 lần bấm sát nhau không chạy 2 lượt tải / 2 trình cài
+        j = _job.get(app)
+        if j and j["state"] in ("downloading", "installing"):
+            return "đang cập nhật rồi"
+        _set(app, "downloading", "Đang tải…", 0)
 
     def run():
         try:
-            _set(app, "downloading", "Đang tải…", 0)
             exe = _download(app, info)
             {"voicestudio": _install_voicestudio, "shardbrowser": _install_shardbrowser,
              "dytool": _install_dytool}[app](exe)
             if app != "dytool":
+                _inst_cache.pop(app, None)       # đọc lại bản đang cài ngay (không đợi hết 60 giây)
                 _set(app, "done", f"Đã cập nhật lên {info['version']}")
         except Exception as e:
             _set(app, "error", str(e)[:300])

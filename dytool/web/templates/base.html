@@ -42,7 +42,15 @@
     <p class="nav-hint">Chuyển trang nhanh: <kbd>Ctrl</kbd> + <kbd>1</kbd>–<kbd>5</kbd></p>
   </nav>
 
-  <div class="content" id="main" tabindex="-1"><main>{% block body %}{% endblock %}</main></div>
+  <div class="content" id="main" tabindex="-1"><main>
+    {% if setup_failed and request.url.path in ('/', '/settings') %}
+    {# cập nhật im lặng mà bước cài thư viện lỗi: trước không ai biết, app chạy hỏng ngầm #}
+    <div class="notice warn" role="alert">Lần cài thư viện gần nhất chưa xong ({{ setup_failed.splitlines()|last|truncate(140) }}).
+      Một số chức năng có thể lỗi.
+      <button class="btn sm" hx-post="/settings/reinstall-libs" hx-swap="outerHTML" hx-disabled-elt="this"
+              hx-confirm="Cài lại thư viện? dytool sẽ tự đóng, cửa sổ cài hiện tiến độ, xong thì tự mở lại.">Cài lại thư viện</button></div>
+    {% endif %}
+    {% block body %}{% endblock %}</main></div>
 
   {# thanh trạng thái: chạy tự động / việc đang làm / Douyin / tải Douyin / VoiceStudio (làm mới 5s) #}
   <footer class="statusbar" hx-get="/partials/services" hx-trigger="load, every 5s" hx-swap="innerHTML">

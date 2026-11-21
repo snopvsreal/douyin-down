@@ -2,7 +2,7 @@
 ; Chỉ chép mã nguồn + dytool.exe (~1 MB); thư viện (~4 GB) tải ở bước scripts\setup_app.ps1 lúc cài.
 
 #ifndef AppVer
-  #define AppVer "0.3.0"
+  #define AppVer "0.3.1"
 #endif
 
 [Setup]
@@ -48,6 +48,8 @@ vi.Extras=Thành phần đi kèm (tải từ trang chính thức):
 vi.TaskShard=ShardBrowser — trình duyệt dytool dùng để đăng nhập và đăng bài (cần có)
 vi.TaskVoice=VoiceStudio — app lồng tiếng Việt (cần có để lồng tiếng)
 vi.OpenApp=Mở dytool
+vi.OpenShard=Mở ShardBrowser (lần đầu tự tải nhân trình duyệt ~200 MB)
+vi.OpenVoice=Mở VoiceStudio (lần đầu: Model Catalogue → chấp nhận license OmniVoice)
 vi.Reinstall=dytool - Cài đặt lại thư viện
 vi.LibTitle=Đang cài thư viện
 vi.LibDesc=Tải Python, AI, FFmpeg… (~4 GB). Lần đầu mất 15–30 phút và cần mạng — đừng tắt máy.
@@ -92,6 +94,11 @@ Name: "{autodesktop}\dytool"; Filename: "{app}\dytool.exe"; WorkingDir: "{app}";
 [Run]
 ; Bước cài thư viện chạy ẩn trong CurStepChanged (dưới), tiến độ hiện ngay trên thanh của trình cài
 Filename: "{app}\dytool.exe"; Description: "{cm:OpenApp}"; Flags: postinstall nowait skipifsilent
+; vừa cài ShardBrowser / VoiceStudio ở lần cài này (đã tick ở trang Thành phần) -> mở luôn lần đầu
+Filename: "{code:ShardExe}"; Description: "{cm:OpenShard}"; Tasks: shardbrowser; Check: ShardInstalled; \
+  Flags: postinstall nowait skipifsilent
+Filename: "{code:VoiceExe}"; Description: "{cm:OpenVoice}"; Tasks: voicestudio; Check: VoiceInstalled; \
+  Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
 ; Xoá phần tải về lúc cài (vài GB). GIỮ data\ và config.yaml (tài khoản, cookie, video) — xoá tay nếu muốn.
@@ -114,6 +121,28 @@ var
 function ShardMissing: Boolean;
 begin
   Result := not FileExists(ExpandConstant('{localappdata}\ShardBrowser Launcher\shardbrowser-launcher.exe'));
+end;
+
+function ShardExe(Param: String): String;
+begin
+  Result := ExpandConstant('{localappdata}\ShardBrowser Launcher\shardbrowser-launcher.exe');
+end;
+
+function VoiceExe(Param: String): String;
+begin
+  Result := ExpandConstant('{localappdata}\Programs\VoiceStudio\VoiceStudio.exe');
+  if not FileExists(Result) then Result := ExpandConstant('{commonpf64}\VoiceStudio\VoiceStudio.exe');
+end;
+
+// trang Hoàn tất: chỉ hiện ô "Mở …" khi phần mềm đã cài xong thật (tải lỗi thì không hiện)
+function ShardInstalled: Boolean;
+begin
+  Result := FileExists(ShardExe(''));
+end;
+
+function VoiceInstalled: Boolean;
+begin
+  Result := FileExists(VoiceExe(''));
 end;
 
 function VoiceMissing: Boolean;

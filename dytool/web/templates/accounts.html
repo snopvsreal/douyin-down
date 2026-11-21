@@ -40,8 +40,10 @@
       {% if not tt and a.status == 'da_dang_nhap' %}
         <form method="post" action="/accounts/{{ a.id }}/discover"><button class="btn sm ghost" title="Tìm lại các Page tài khoản này quản lý">Quét lại Page</button></form>
       {% endif %}
+      {# hx-confirm (không dùng onsubmit="return confirm"): body có hx-boost, htmx gửi form trước khi xét kết quả
+         confirm() -> bấm Huỷ vẫn bị xoá. hx-confirm: Huỷ = htmx không gửi gì #}
       <form method="post" action="/accounts/{{ a.id }}/delete"
-            onsubmit="return confirm('Xoá tài khoản {{ a.name }} và các kênh của nó khỏi tool? Không ảnh hưởng gì trên {{ 'TikTok' if tt else 'Facebook' }}.')">
+            hx-confirm="Xoá tài khoản {{ a.name }} và các kênh của nó khỏi tool? Không ảnh hưởng gì trên {{ 'TikTok' if tt else 'Facebook' }}.">
         <button class="btn sm ghost danger" aria-label="Xoá tài khoản {{ a.name }}" title="Xoá khỏi tool">Xoá</button></form>
     </div>
   </div>

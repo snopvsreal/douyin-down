@@ -83,7 +83,7 @@
             <form method="post" action="/sources/{{ src.id }}/toggle" style="display:inline">
               <button class="btn sm ghost">{{ 'Tạm tắt' if src.enabled else 'Bật lại' }}</button></form>
             <form method="post" action="/sources/{{ src.id }}/delete" style="display:inline"
-                  onsubmit="return confirm('Xoá nguồn {{ src.value }}?')"><button class="btn sm ghost danger">Xoá</button></form>
+                  hx-confirm="Xoá nguồn {{ src.value }}?"><button class="btn sm ghost danger">Xoá</button></form>
           </td>
         </tr>
         {% endfor %}

@@ -1,34 +1,59 @@
 {% extends "base.html" %}
 {% block title %}Tiến trình{% endblock %}
 {% block body %}
-<h1>Tiến trình</h1>
-<p class="sub">Mọi video theo từng bước: tìm thấy → tải → edit/lồng tiếng → duyệt → đăng.</p>
-<div class="row" style="margin-bottom:12px">
-  <a class="pill {{ 'info' if not cur }}" href="/queue">Tất cả</a>
-  {% for k, label in STATUS_VI.items() %}
-    <a class="pill {{ 'info' if cur == k }}" href="/queue?status={{ k }}">{{ label }} · {{ totals.get(k, 0) }}</a>
-  {% endfor %}
+<div class="head">
+  <div><h1>Tiến trình</h1>
+    <p class="sub">Mọi video và bước đang ở: tìm thấy, tải, edit, chờ duyệt, đăng.</p></div>
 </div>
-<div class="card" style="padding:0; overflow-x:auto">
+
+{% set main = ['review', 'failed', 'scheduled', 'uploaded'] %}
+<div class="filters" role="navigation" aria-label="Lọc theo trạng thái">
+  <a class="pill {{ 'on' if not cur }}" href="/queue">Tất cả</a>
+  {% for k in main %}
+    <a class="pill {{ 'on' if cur == k }}" href="/queue?status={{ k }}">{{ STATUS_VI[k] }} <span class="num">{{ totals.get(k, 0) }}</span></a>
+  {% endfor %}
+  {# không tự gửi khi đổi: dùng phím mũi tên trong ô chọn sẽ không nhảy trang liên tục #}
+  <form method="get" action="/queue" class="row" style="gap:6px">
+    <select name="status" aria-label="Trạng thái khác">
+      <option value="">Trạng thái khác…</option>
+      {% for k, label in STATUS_VI.items() if k not in main %}
+        <option value="{{ k }}" {{ 'selected' if cur == k }}>{{ label }} ({{ totals.get(k, 0) }})</option>
+      {% endfor %}
+    </select>
+    <button class="btn sm">Xem</button>
+  </form>
+</div>
+
+<div class="card table-card">
 <table>
-  <tr><th>Video</th><th>Page</th><th>Nguồn</th><th>Trạng thái</th><th>Cập nhật</th><th></th></tr>
+  <tr><th style="width:44%">Video</th><th style="width:14%">Kênh</th><th>Trạng thái</th><th style="width:110px">Cập nhật</th><th style="width:96px"></th></tr>
   {% for v in videos %}
-  {% set cls = {'uploaded':'ok','failed':'err','review':'warn','approved':'info','publish_now':'info'}.get(v.status, '') %}
+  {% set cls = {'uploaded':'ok','scheduled':'ok','failed':'err','review':'warn','approved':'info','publish_now':'info','schedule_pending':'info'}.get(v.status, '') %}
   <tr>
-    <td><div class="trunc">{{ v.desc or v.id }}</div>
-      <div class="small muted">❤ {{ '{:,}'.format(v.likes or 0) }} · {{ (v.duration or 0)|round|int }}s ·
-        <a href="https://www.douyin.com/video/{{ v.id }}" target="_blank">{{ v.id }}</a></div></td>
-    <td>{{ v.page_name }}</td>
-    <td class="small trunc" style="max-width:160px">{{ v.source }}</td>
-    <td><span class="pill {{ cls }}">{{ STATUS_VI.get(v.status, v.status) }}</span>
-      {% if v.error %}<div class="small" style="color:var(--err)">{{ v.error[:140] }}</div>{% endif %}
-      {% if v.fb_url and v.status == 'uploaded' %}<div class="small"><a href="{{ v.fb_url }}" target="_blank">xem bài ↗</a></div>{% endif %}</td>
-    <td class="small muted">{{ v.updated_at|ago }}</td>
-    <td>{% if v.status == 'failed' %}
+    <td><div class="trunc" style="max-width:420px">{{ v.desc or v.id }}</div>
+      <div class="small muted num">❤ {{ '{:,}'.format(v.likes or 0) }}, {{ (v.duration or 0)|round|int }}s,
+        <a href="https://www.douyin.com/video/{{ v.id }}" target="_blank" rel="noopener">xem gốc</a>
+        {% if v.source %}<span title="{{ v.source }}">— {{ v.source.split(':', 1)[-1][:24] }}</span>{% endif %}</div></td>
+    <td class="small">{{ v.page_name }}</td>
+    <td style="max-width:300px"><span class="pill {{ cls }}">{{ STATUS_VI.get(v.status, v.status) }}</span>
+      {% if v.error %}<div class="small" style="color:var(--err); margin-top:3px">{{ v.error[:160] }}</div>{% endif %}
+      {% if v.fb_url and v.status == 'uploaded' %}<div class="small"><a href="{{ v.fb_url }}" target="_blank" rel="noopener">xem bài ↗</a></div>{% endif %}</td>
+    <td class="small muted" style="white-space:nowrap">{{ v.updated_at|ago }}</td>
+    <td style="text-align:right">{% if v.status == 'failed' %}
       <button class="btn sm" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/retry" hx-swap="outerHTML">Thử lại</button>
     {% endif %}</td>
   </tr>
-  {% else %}<tr><td colspan="6" class="muted">Chưa có video.</td></tr>{% endfor %}
+  {% else %}
+  <tr><td colspan="5" class="empty" style="padding:18px">{% if cur %}Không có video nào ở trạng thái này.{% else %}Chưa có video — bật 1 kênh và thêm nguồn ở <a href="/accounts">Tài khoản & kênh</a>.{% endif %}</td></tr>
+  {% endfor %}
 </table>
 </div>
+{% if pages > 1 %}
+{% set q = '&status=' ~ cur if cur else '' %}
+<nav class="row" aria-label="Chuyển trang" style="margin-top:14px">
+  {% if page > 1 %}<a class="btn sm" href="/queue?page={{ page - 1 }}{{ q }}">← Trang trước</a>{% endif %}
+  <span class="small muted num">Trang {{ page }} / {{ pages }}, tổng {{ total }} video</span>
+  {% if page < pages %}<a class="btn sm" href="/queue?page={{ page + 1 }}{{ q }}">Trang sau →</a>{% endif %}
+</nav>
+{% endif %}
 {% endblock %}

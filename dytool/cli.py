@@ -113,6 +113,16 @@ def cmd_fb_login(cfg, args):
     fb_browser.login(cfg["_data"])
 
 
+def cmd_tt_dryrun(cfg, args):
+    """Thử đăng TikTok: điền hết form (tải video, mô tả, hẹn giờ) rồi DỪNG trước nút Post — không đăng thật."""
+    import datetime as dt
+    from . import tt_browser
+    acc_dir = Path(cfg["_data"]) / "accounts" / str(args.account)
+    when = dt.datetime.strptime(args.schedule, "%Y-%m-%d %H:%M") if args.schedule else None
+    res = tt_browser.publish(acc_dir, Path(args.video), args.caption, schedule_at=when, dry_run=True)
+    con.print(f"[green]{res['status']}[/] — ảnh chụp form: {acc_dir / 'tt_logs'}")
+
+
 def cmd_fb_probe(cfg, args):
     from . import fb_browser
     fb_browser.probe(cfg["_data"], args.url, cfg["_data"] / "fb_probe")
@@ -159,6 +169,12 @@ def main():
     p.set_defaults(f=cmd_ui)
     sub.add_parser("fb-login", help="mở trình duyệt để đăng nhập Facebook 1 lần (lưu phiên)").set_defaults(
         f=cmd_fb_login)
+    p = sub.add_parser("tt-dryrun", help="thử đăng TikTok tới trước nút Post (không đăng thật)")
+    p.add_argument("account", type=int, help="id tài khoản TikTok (số trong data/accounts/<id>)")
+    p.add_argument("video")
+    p.add_argument("--caption", default="dytool test #test")
+    p.add_argument("--schedule", help='hẹn giờ thử, vd "2026-11-20 21:00"')
+    p.set_defaults(f=cmd_tt_dryrun)
     p = sub.add_parser("fb-probe", help="(dev) chụp 1 trang Facebook bằng phiên đã lưu")
     p.add_argument("url")
     p.set_defaults(f=cmd_fb_probe)

@@ -34,18 +34,21 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
     procs: dict[str, subprocess.Popen] = {}
 
     app = FastAPI(title="dytool")
+    app.state.worker = worker          # app desktop (desktop.py) dùng để tạm dừng / bật từ icon khay
+    app.state.show_window = None       # desktop.py gán hàm đưa cửa sổ lên trước (khi mở dytool.exe lần 2)
     if autostart:
         worker.start()          # tự bật chạy tự động khi mở giao diện
     app.mount("/media", StaticFiles(directory=str(data)), name="media")
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
     tpl = Jinja2Templates(directory=str(HERE / "templates"))
+    # css_v(): đổi theo lần sửa app.css (đọc lại mỗi trang) để trình duyệt không dùng bản CSS cũ trong cache
     tpl.env.globals.update(STATUS_VI=STATUS_VI, time=time,
-                           # đổi theo lần sửa app.css -> trình duyệt không dùng bản CSS cũ trong cache
-                           css_ver=int((HERE / "static" / "app.css").stat().st_mtime))
+                           css_v=lambda: int((HERE / "static" / "app.css").stat().st_mtime))
     tpl.env.filters["ago"] = lambda ts: _ago(ts)
 
     def render(request: Request, name: str, **ctx):
-        return tpl.TemplateResponse(request, name, {"worker": worker, **ctx})
+        # navc: số video theo trạng thái cho huy hiệu trên menu (Chờ duyệt / Lỗi)
+        return tpl.TemplateResponse(request, name, {"worker": worker, "navc": store.counts(), **ctx})
 
     def health() -> dict:
         def ok(url):
@@ -58,18 +61,75 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
             "voicestudio": ok(cfg["edit"].get("dub", {}).get("api", "http://127.0.0.1:3900") + "/health"),
         }
 
+    def _sub_cfg() -> dict:
+        return cfg["edit"].setdefault("subtitles", {})
+
+    def voicestudio_exe() -> Path | None:
+        import os
+        for base in (os.environ.get("LOCALAPPDATA", ""), os.environ.get("ProgramFiles", "")):
+            p = Path(base) / ("Programs" if "Local" in base else "") / "VoiceStudio" / "VoiceStudio.exe"
+            if base and p.exists():
+                return p
+        return None
+
+    # ---------------- App desktop ----------------
+    @app.post("/app/show")
+    def app_show():
+        """dytool.exe mở lần 2 gọi vào đây để đưa cửa sổ đang chạy lên trước thay vì mở thêm cửa sổ."""
+        if app.state.show_window:
+            app.state.show_window()
+            return HTMLResponse("ok")
+        return HTMLResponse("no window", status_code=404)
+
+    @app.post("/services/voicestudio")
+    def open_voicestudio():
+        exe = voicestudio_exe()
+        if exe:
+            subprocess.Popen([str(exe)], cwd=str(exe.parent))
+            store.log("Đang mở VoiceStudio — chờ khoảng 1–3 phút để app khởi động xong")
+        else:
+            store.log("Không tìm thấy VoiceStudio — cài từ https://github.com/debpalash/VoiceStudio/releases", "error")
+        return HTMLResponse("", headers={"HX-Trigger": "services-changed"})
+
+    @app.post("/settings/api-key")
+    def save_api_key(key: str = Form("")):
+        """Lưu Anthropic API key (dịch phụ đề / lồng tiếng) vào config.yaml và cấu hình đang chạy."""
+        import re
+        key = key.strip()
+        if not key.startswith("sk-ant-"):
+            return RedirectResponse("/?key_error=1", 303)
+        path = ROOT / config_path
+        text = path.read_text(encoding="utf-8")
+        safe = key.replace('"', "")
+        text, n = re.subn(r'(?m)^(\s*anthropic_api_key:\s*)"[^"\n]*"', lambda m: f'{m.group(1)}"{safe}"', text, count=1)
+        if n:
+            path.write_text(text, encoding="utf-8")
+        _sub_cfg()["anthropic_api_key"] = key      # dùng ngay, không cần khởi động lại
+        store.log("Đã lưu Anthropic API key")
+        return RedirectResponse("/?key_saved=1", 303)
+
     # ---------------- Tổng quan ----------------
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request):
+        import os
         pages = store.q("SELECT p.*, a.name acc_name FROM pages p JOIN accounts a ON a.id=p.account_id "
                         "WHERE p.enabled=1 ORDER BY p.id")
         stats = {p["id"]: store.counts(p["id"]) for p in pages}
-        return render(request, "home.html", pages=pages, stats=stats, totals=store.counts())
+        need_key = not (_sub_cfg().get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY"))
+        return render(request, "home.html", pages=pages, stats=stats, totals=store.counts(), need_key=need_key)
 
-    @app.get("/partials/status", response_class=HTMLResponse)
-    def status_partial(request: Request):
-        logs = store.q("SELECT * FROM logs ORDER BY id DESC LIMIT 25")
-        return render(request, "_status.html", health=health(), logs=logs)
+    @app.get("/partials/services", response_class=HTMLResponse)
+    def services_partial(request: Request):
+        from .. import progress
+        from ..cookies import cookie_status
+        return render(request, "_services.html", health=health(), vs_installed=bool(voicestudio_exe()),
+                      task=progress.snapshot(),
+                      douyin=cookie_status(cfg["douyin"].get("cookie", "")), dy_logging_in=_alive("douyin"))
+
+    @app.get("/partials/log", response_class=HTMLResponse)
+    def log_partial(request: Request):
+        logs = store.q("SELECT * FROM logs ORDER BY id DESC LIMIT 40")
+        return render(request, "_log.html", logs=logs)
 
     @app.get("/partials/progress", response_class=HTMLResponse)
     def progress_partial(request: Request):
@@ -84,14 +144,79 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
 
     @app.post("/services/douyin-login")
     def douyin_login():
-        """Mở Chromium để đăng nhập douyin.com, lưu cookie vào config (chạy được trên Windows)."""
+        """Mở hồ sơ ShardBrowser dành cho Douyin để đăng nhập douyin.com, lưu cookie vào config."""
+        if not _auto_profile(data, "dytool · Douyin", "Đăng nhập Douyin"):
+            return RedirectResponse("/accounts#trinh-duyet", 303)
         p = procs.get("douyin")
         if not p or p.poll() is not None:
+            from .. import loginstate
+            loginstate.write(data / "douyin_login.json", loginstate.DOUYIN_STEPS, "Mở trình duyệt")
             log = open(data / "douyin_login.log", "w")
-            procs["douyin"] = subprocess.Popen([sys.executable, "-m", "dytool.cli", "-c", str(ROOT / config_path),
-                                                "douyin-login"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
+            procs["douyin"] = p = subprocess.Popen([sys.executable, "-m", "dytool.cli", "-c", str(ROOT / config_path),
+                                                    "douyin-login"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
             store.log("Mở trình duyệt đăng nhập Douyin — đăng nhập xong cookie sẽ tự lưu vào config.yaml")
+
+            def report():   # báo kết quả lên khung Trạng thái (trước đây lỗi chỉ nằm trong douyin_login.log)
+                p.wait()
+                log.close()
+                lines = [l for l in (data / "douyin_login.log").read_text("utf-8", "replace").splitlines() if l.strip()]
+                if p.returncode == 0:
+                    # nạp cookie mới vào cấu hình đang chạy (DouyinClient giữ chính dict cfg["douyin"]),
+                    # trước đây phải khởi động lại tool mới dùng được cookie vừa đăng nhập
+                    cfg["douyin"]["cookie"] = config.load(ROOT / config_path)["douyin"].get("cookie", "")
+                    store.log("Đăng nhập Douyin xong, đã lưu cookie")
+                else:
+                    err = lines[-1][:200] if lines else f"mã {p.returncode}"
+                    loginstate.fail(data / "douyin_login.json", err)
+                    store.log(f"Đăng nhập Douyin lỗi: {err} (chi tiết: data/douyin_login.log)", "error")
+            import threading
+            threading.Thread(target=report, daemon=True).start()
         return RedirectResponse("/", 303)
+
+    def _alive(key: str) -> bool:
+        p = procs.get(key)
+        return bool(p and p.poll() is None)
+
+    announced: dict[str, tuple] = {}     # bước đăng nhập đã đọc cho trình đọc màn hình, theo file trạng thái
+
+    def _login_view(request: Request, title: str, path: Path, alive: bool, url: str):
+        from .. import loginstate
+        lg = loginstate.view(path, alive)   # không có lần đăng nhập nào gần đây -> trả rỗng, khung tự ẩn (CSS :empty)
+        if not lg:
+            return HTMLResponse("")
+        # chỉ gửi câu đọc to (#sr-live) khi bước / trạng thái đổi — khung tự làm mới mỗi giây vì đồng hồ đếm ngược
+        key = (lg["step"], lg["state"])
+        say = None
+        if announced.get(str(path)) != key:
+            announced[str(path)] = key
+            say = {"running": f"{title}: {lg['step']}", "done": f"{title}: xong. {lg['msg']}",
+                   "error": f"{title} dừng ở bước {lg['step']}: {lg['msg']}"}[lg["state"]]
+        return render(request, "_login.html", title=title, lg=lg, dismiss_url=url + "/dismiss", say=say)
+
+    def _dismiss(path: Path, alive: bool):
+        if not alive:               # chỉ ẩn khi cửa sổ đăng nhập không còn chạy
+            path.unlink(missing_ok=True)
+        return HTMLResponse("")
+
+    @app.get("/partials/login/douyin", response_class=HTMLResponse)
+    def douyin_login_partial(request: Request):
+        return _login_view(request, "Đăng nhập Douyin", data / "douyin_login.json", _alive("douyin"),
+                           "/partials/login/douyin")
+
+    @app.post("/partials/login/douyin/dismiss", response_class=HTMLResponse)
+    def douyin_login_dismiss():
+        return _dismiss(data / "douyin_login.json", _alive("douyin"))
+
+    @app.get("/partials/login/fb/{aid}", response_class=HTMLResponse)
+    def fb_login_partial(request: Request, aid: int):
+        acc = store.one("SELECT platform FROM accounts WHERE id=?", (aid,))
+        title = "Đăng nhập TikTok" if acc and acc["platform"] == "tiktok" else "Đăng nhập Facebook"
+        return _login_view(request, title, store.account_dir(data, aid) / "login_state.json",
+                           _alive(f"login{aid}"), f"/partials/login/fb/{aid}")
+
+    @app.post("/partials/login/fb/{aid}/dismiss", response_class=HTMLResponse)
+    def fb_login_dismiss(aid: int):
+        return _dismiss(store.account_dir(data, aid) / "login_state.json", _alive(f"login{aid}"))
 
     @app.post("/services/tdl")
     def start_tdl():
@@ -104,77 +229,156 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
     # ---------------- Tài khoản & Page ----------------
     @app.get("/accounts", response_class=HTMLResponse)
     def accounts(request: Request):
-        for k in [k for k, p in procs.items() if k.startswith("login") and p.poll() is not None]:
-            _finalize(int(k[5:]))
         accs = store.q("SELECT * FROM accounts ORDER BY id")
         pages = store.q("SELECT * FROM pages ORDER BY account_id, id")
-        running = {int(k[5:]) for k, p in procs.items() if k.startswith("login") and p.poll() is None}
-        return render(request, "accounts.html", accounts=accs, pages=pages, logging_in=running,
-                      jobs={aid: {"st": _job_state(aid), "kind": procs_kind.get(aid, "login")} for aid in running})
+        mirrors: dict[int, list[str]] = {}     # kênh TikTok -> các Page Facebook đang đăng kèm vào nó
+        for p in pages:
+            dst = int(store.page_settings(p).get("tiktok_mirror") or 0)
+            if p["platform"] != "tiktok" and dst:
+                mirrors.setdefault(dst, []).append(p["name"])
+        from .. import browsers
+        api, token = browsers.shardx_settings()
+        shard = {"api": api, "has_token": bool(token), "profiles": [], "error": None,
+                 "installed": browsers.launcher_exe() is not None, "download": browsers.DOWNLOAD,
+                 "douyin": browsers.get_choice(data), "auto": browsers.auto_token()}
+        if token:
+            try:
+                shard["profiles"] = browsers.list_profiles()
+            except browsers.BrowserError as e:
+                shard["error"] = str(e)
+        choices = {a["id"]: browsers.get_choice(store.account_dir(data, a["id"])) for a in accs}
+        return render(request, "accounts.html", accounts=accs, pages=pages, mirrors=mirrors, shard=shard,
+                      choices=choices,
+                      logging_in={int(k[5:]) for k, p in procs.items() if k.startswith("login") and p.poll() is None})
 
-    @app.post("/accounts")
-    def add_account(name: str = Form(...)):
-        aid = store.x("INSERT INTO accounts(name, created_at) VALUES (?,?)", (name.strip(), int(time.time())))
-        store.account_dir(data, aid)
+    # ---------------- Trình duyệt (Chromium / ShardBrowser) ----------------
+    @app.post("/settings/shardx")
+    def save_shardx(api: str = Form(""), token: str = Form("")):
+        """Lưu API + token ShardBrowser vào config.yaml (mục browser:), giữ nguyên các dòng khác."""
+        import re
+        api = (api.strip() or "http://127.0.0.1:40325").rstrip("/")
+        token = token.strip().replace('"', "")
+        path = ROOT / config_path
+        text = path.read_text(encoding="utf-8")
+        if re.search(r"(?m)^browser:", text):
+            for key, val in (("shardx_api", api), ("shardx_token", token)):
+                if not token and key == "shardx_token":
+                    continue                      # để trống ô token = giữ token cũ
+                pat = rf'(?m)^(\s+{key}:\s*)"[^"\n]*"'
+                text = re.sub(pat, lambda m: f'{m.group(1)}"{val}"', text, count=1) if re.search(pat, text) \
+                    else re.sub(r"(?m)^browser:.*$", lambda m: f'{m.group(0)}\n  {key}: "{val}"', text, count=1)
+        else:
+            text = text.rstrip("\n") + f'\n\nbrowser:\n  shardx_api: "{api}"\n  shardx_token: "{token}"\n'
+        path.write_text(text, encoding="utf-8")
+        store.log("Đã lưu cài đặt ShardBrowser")
+        return RedirectResponse("/accounts?browser_saved=1#trinh-duyet", 303)
+
+    def _auto_profile(target: Path, name: str, who: str, quiet: bool = False) -> bool:
+        """Chưa gắn hồ sơ -> tự tạo hồ sơ ShardBrowser mới và gắn luôn (người dùng không phải liên kết tay)."""
+        from .. import browsers
+        try:
+            c, new = browsers.ensure_profile(target, name)
+        except browsers.BrowserError as e:
+            if not quiet:
+                store.log(f"{who}: không tạo được hồ sơ ShardBrowser — {e}", "error")
+            return False
+        if new:
+            store.log(f"{who}: đã tạo hồ sơ ShardBrowser '{c['profile_name']}' (thư mục {browsers.FOLDER})")
+        return True
+
+    def _acc_profile_name(acc) -> str:
+        plat = "TikTok" if acc["platform"] == "tiktok" else "Facebook"
+        return f"dytool · {plat} · {acc['name']}"
+
+    @app.post("/accounts/{aid}/browser/new")
+    def new_account_profile(aid: int):
+        """Tạo hồ sơ mới thay cho hồ sơ đang gắn (hồ sơ cũ vẫn còn trong ShardBrowser)."""
+        from .. import browsers
+        acc = store.one("SELECT * FROM accounts WHERE id=?", (aid,))
+        if acc:
+            acc_dir = store.account_dir(data, aid)
+            old = browsers.get_choice(acc_dir)
+            browsers.set_choice(acc_dir, "")
+            if not _auto_profile(acc_dir, _acc_profile_name(acc), f"Tài khoản #{aid}") and old:
+                browsers.set_choice(acc_dir, old["profile_id"], old.get("profile_name", ""))
         return RedirectResponse("/accounts", 303)
 
-    def _busy(aid: int) -> bool:
-        p = procs.get(f"login{aid}")
-        return bool(p and p.poll() is None)
+    def _set_profile(target: Path, choice: str, who: str):
+        """choice = '<profile_id>|<tên hồ sơ>' hoặc '' (bỏ chọn)."""
+        from .. import browsers
+        pid, _, name = choice.partition("|")
+        browsers.set_choice(target, pid, name)
+        store.log(f"{who}: dùng hồ sơ ShardBrowser '{name}' — bấm Đăng nhập để đăng nhập trong hồ sơ đó" if pid
+                  else f"{who}: đã bỏ chọn hồ sơ ShardBrowser")
 
-    def _spawn_account_job(aid: int, do_login: bool):
-        """Chạy đăng nhập (+ quét Page) hoặc chỉ quét Page ở tiến trình con; tiến trình ghi ra login.log
-        (dòng STEP=pct|chữ), giao diện đọc để vẽ thanh tiến trình."""
-        acc_dir = store.account_dir(data, aid)
-        code = ("import sys,json; from pathlib import Path; from dytool import fb_browser as f\n"
-                "d=Path(sys.argv[1])\n"
-                "try:\n"
-                + ("    f.login(d, on_step=f.report)\n" if do_login else "")
-                + "    print('PAGES='+json.dumps(f.discover_pages(d, on_step=f.report)), flush=True)\n"
-                "except Exception as e:\n"
-                "    print('ERROR='+str(e).splitlines()[0][:300], flush=True)\n")
-        log = open(acc_dir / "login.log", "w")
-        procs[f"login{aid}"] = subprocess.Popen([sys.executable, "-u", "-c", code, str(acc_dir)], cwd=ROOT,
-                                               stdout=log, stderr=subprocess.STDOUT)
-        procs_kind[aid] = "login" if do_login else "discover"
+    @app.post("/accounts/{aid}/browser")
+    def set_account_browser(aid: int, choice: str = Form("")):
+        _set_profile(store.account_dir(data, aid), choice, f"Tài khoản #{aid}")
+        return RedirectResponse("/accounts", 303)
 
-    procs_kind: dict[int, str] = {}
+    @app.post("/settings/douyin-browser")
+    def set_douyin_browser(choice: str = Form("")):
+        _set_profile(data, choice, "Đăng nhập Douyin")
+        return RedirectResponse("/accounts#trinh-duyet", 303)
+
+    @app.post("/settings/douyin-browser/new")
+    def new_douyin_profile():
+        from .. import browsers
+        old = browsers.get_choice(data)
+        browsers.set_choice(data, "")
+        if not _auto_profile(data, "dytool · Douyin", "Đăng nhập Douyin") and old:
+            browsers.set_choice(data, old["profile_id"], old.get("profile_name", ""))
+        return RedirectResponse("/accounts#trinh-duyet", 303)
+
+    @app.post("/accounts")
+    def add_account(name: str = Form(...), platform: str = Form("facebook")):
+        platform = "tiktok" if platform == "tiktok" else "facebook"
+        aid = store.x("INSERT INTO accounts(name, created_at, platform) VALUES (?,?,?)",
+                      (name.strip(), int(time.time()), platform))
+        acc = store.one("SELECT * FROM accounts WHERE id=?", (aid,))
+        # tạo sẵn hồ sơ nếu ShardBrowser đang chạy; không được thì để tới lúc bấm Đăng nhập
+        _auto_profile(store.account_dir(data, aid), _acc_profile_name(acc), f"Tài khoản #{aid}", quiet=True)
+        return RedirectResponse("/accounts" + ("#tiktok" if platform == "tiktok" else ""), 303)
 
     @app.post("/accounts/{aid}/login")
     def login(aid: int):
-        """Mở cửa sổ Chromium để người dùng tự đăng nhập; xong thì tự quét Page."""
-        if _busy(aid):          # đang có cửa sổ mở cho tài khoản này -> không mở thêm (trùng hồ sơ trình duyệt)
+        """Mở hồ sơ ShardBrowser của tài khoản để người dùng tự đăng nhập; xong thì tự quét Page / lấy tên kênh."""
+        acc_dir = store.account_dir(data, aid)
+        acc = store.one("SELECT * FROM accounts WHERE id=?", (aid,))
+        if not acc:
             return RedirectResponse("/accounts", 303)
-        _spawn_account_job(aid, do_login=True)
+        if not _auto_profile(acc_dir, _acc_profile_name(acc), f"Tài khoản #{aid}"):
+            return RedirectResponse("/accounts#trinh-duyet", 303)
+        from .. import loginstate
+        if acc and acc["platform"] == "tiktok":
+            code = ("import sys,json; from pathlib import Path; from dytool import tt_browser as t; "
+                    "d=Path(sys.argv[1]); print('TT='+json.dumps(t.login(d)))")
+            steps = loginstate.TT_STEPS
+        else:
+            code = ("import sys,json; from pathlib import Path; from dytool import fb_browser as f; "
+                    "d=Path(sys.argv[1]); print('PAGES='+json.dumps(f.login_and_discover(d)))")
+            steps = loginstate.FB_STEPS
+        (acc_dir / "login_state.json").unlink(missing_ok=True)   # tránh hiện lại kết quả lần trước
+        loginstate.write(acc_dir / "login_state.json", steps, "Mở trình duyệt")
+        log = open(acc_dir / "login.log", "w")
+        procs[f"login{aid}"] = subprocess.Popen([sys.executable, "-c", code, str(acc_dir)], cwd=ROOT,
+                                               stdout=log, stderr=subprocess.STDOUT)
         store.x("UPDATE accounts SET status='dang_dang_nhap' WHERE id=?", (aid,))
         store.log(f"Mở trình duyệt đăng nhập cho tài khoản #{aid}")
         return RedirectResponse("/accounts", 303)
 
     @app.post("/accounts/{aid}/discover")
     def discover(aid: int):
-        if not _busy(aid):
-            _spawn_account_job(aid, do_login=False)
-            store.log(f"Tài khoản #{aid}: đang quét lại Page")
-        return RedirectResponse("/accounts", 303)
-
-    def _job_state(aid: int) -> dict:
-        """Đọc login.log -> {pct, text, error, pages}."""
+        from .. import fb_browser
+        acc_dir = store.account_dir(data, aid)
         try:
-            out = (store.account_dir(data, aid) / "login.log").read_text(errors="ignore")
-        except OSError:
-            out = ""
-        st = {"pct": 0, "text": "Đang khởi động…", "error": None, "pages": None}
-        for line in out.splitlines():
-            if line.startswith("STEP="):
-                pct, _, text = line[5:].partition("|")
-                st["pct"], st["text"] = int(pct or 0), text
-            elif line.startswith("ERROR="):
-                st["error"] = line[6:]
-            elif line.startswith("PAGES="):
-                st["pages"] = json.loads(line[6:])
-        if procs_kind.get(aid) == "discover":     # chỉ quét Page: các bước 40-100% -> giãn ra 0-100%
-            st["pct"] = max(0, (st["pct"] - 40) * 100 // 60)
-        return st
+            res = fb_browser.discover_pages(acc_dir)
+        except Exception as e:
+            store.log(f"Tài khoản #{aid}: không quét được Page ({e})", "error")
+            store.x("UPDATE accounts SET status='chua_dang_nhap' WHERE id=?", (aid,))
+            return RedirectResponse("/accounts", 303)
+        _save_discovery(aid, res)
+        return RedirectResponse("/accounts", 303)
 
     def _save_discovery(aid: int, res: dict):
         for p in res["pages"]:
@@ -182,29 +386,40 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
         store.x("UPDATE accounts SET status='da_dang_nhap', fb_user=? WHERE id=?", (res.get("fb_user"), aid))
         store.log(f"Tài khoản #{aid}: tìm thấy {len(res['pages'])} Page")
 
-    @app.get("/partials/accounts/{aid}", response_class=HTMLResponse)
-    def account_progress(request: Request, aid: int):
-        if not _busy(aid):
-            _finalize(aid)      # việc đã xong -> lưu kết quả, tải lại trang để hiện Page vừa tìm thấy
-            return HTMLResponse("", headers={"HX-Refresh": "true"})
-        return render(request, "_account_progress.html", a={"id": aid}, st=_job_state(aid),
-                      kind=procs_kind.get(aid, "login"))
-
-    def _finalize(aid: int):
-        p = procs.pop(f"login{aid}", None)
-        if not p:
-            return
-        kind = procs_kind.pop(aid, "login")
-        st = _job_state(aid)
-        if st["pages"] is not None:
-            _save_discovery(aid, st["pages"])
-            return
-        reason = st["error"] or "tiến trình dừng giữa chừng"
-        if kind == "login":
-            store.x("UPDATE accounts SET status='chua_dang_nhap' WHERE id=?", (aid,))
-            store.log(f"Tài khoản #{aid}: đăng nhập chưa xong — {reason}", "error")
+    def _save_tiktok(aid: int, who: dict):
+        """Tài khoản TikTok có đúng 1 kênh đăng (dòng pages platform='tiktok'), mặc định tắt."""
+        acc = store.one("SELECT * FROM accounts WHERE id=?", (aid,))
+        user = who.get("username") or ""
+        name = f"@{user}" if user else (acc["name"] if acc else f"TikTok #{aid}")
+        old = store.one("SELECT id FROM pages WHERE account_id=? AND platform='tiktok'", (aid,))
+        if old:     # đăng nhập lại: cập nhật tên, giữ cài đặt / nguồn của kênh
+            store.x("UPDATE pages SET name=?, profile_id=?, asset_id=? WHERE id=?",
+                    (name, user, user or f"tt{aid}", old["id"]))
         else:
-            store.log(f"Tài khoản #{aid}: không quét được Page — {reason}", "error")
+            store.upsert_page(aid, name, user, user or f"tt{aid}", platform="tiktok")
+        store.x("UPDATE accounts SET status='da_dang_nhap', fb_user=? WHERE id=?", (user, aid))
+        store.log(f"Tài khoản TikTok #{aid}: đã đăng nhập {name}")
+
+    @app.get("/partials/accounts", response_class=HTMLResponse)
+    def accounts_poll(request: Request):
+        # hoàn tất đăng nhập đang chờ
+        for key, p in list(procs.items()):
+            if key.startswith("login") and p.poll() is not None:
+                aid = int(key[5:])
+                out = (store.account_dir(data, aid) / "login.log").read_text(errors="ignore")
+                line = next((l for l in out.splitlines() if l.startswith("PAGES=")), None)
+                tt = next((l for l in out.splitlines() if l.startswith("TT=")), None)
+                if line:
+                    _save_discovery(aid, json.loads(line[6:]))
+                elif tt:
+                    _save_tiktok(aid, json.loads(tt[3:]))
+                else:
+                    store.x("UPDATE accounts SET status='chua_dang_nhap' WHERE id=?", (aid,))
+                    store.log(f"Tài khoản #{aid}: đăng nhập chưa xong", "error")
+                procs.pop(key)
+                # báo trình duyệt tải lại trang để hiện Page vừa tìm thấy
+                return HTMLResponse("", headers={"HX-Refresh": "true"})
+        return HTMLResponse("")
 
     @app.post("/accounts/{aid}/delete")
     def delete_account(aid: int):
@@ -217,8 +432,15 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
         page = store.one("SELECT p.*, a.name acc_name FROM pages p JOIN accounts a ON a.id=p.account_id "
                          "WHERE p.id=?", (pid,))
         sources = store.q("SELECT * FROM sources WHERE page_id=? ORDER BY id", (pid,))
+        mirror = store.q("SELECT c.*, p.name dst_name FROM crossposts c JOIN pages p ON p.id=c.dst_page_id "
+                         "WHERE c.src_page_id=? ORDER BY c.updated_at DESC LIMIT 10", (pid,))
         return render(request, "page.html", page=page, s=store.page_settings(page), sources=sources,
-                      stats=store.counts(pid), json=json)
+                      stats=store.counts(pid), json=json, tiktoks=store.tiktok_channels(), mirror=mirror)
+
+    @app.post("/crossposts/{src}/{dst}/{vid}/retry")
+    def crosspost_retry(src: int, dst: int, vid: str):
+        store.set_crosspost(vid, src, dst, status="pending", error=None)
+        return HTMLResponse('<span class="pill info">Chờ đăng lại</span>')
 
     @app.post("/pages/{pid}/settings")
     async def page_save(request: Request, pid: int):
@@ -277,10 +499,10 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
     # ---------------- Duyệt video ----------------
     @app.get("/review", response_class=HTMLResponse)
     def review(request: Request, page: int | None = None):
-        sql = ("SELECT v.*, p.name page_name FROM videos v JOIN pages p ON p.id=v.page_id "
+        sql = ("SELECT v.*, p.name page_name, p.platform FROM videos v JOIN pages p ON p.id=v.page_id "
                "WHERE v.status='review'" + (" AND v.page_id=?" if page else "") + " ORDER BY v.updated_at DESC")
         vids = store.q(sql, (page,) if page else ())
-        sched = store.q("SELECT v.*, p.name page_name, p.asset_id FROM videos v JOIN pages p ON p.id=v.page_id "
+        sched = store.q("SELECT v.*, p.name page_name, p.asset_id, p.platform FROM videos v JOIN pages p ON p.id=v.page_id "
                         "WHERE v.status IN ('schedule_pending','scheduled')" + (" AND v.page_id=?" if page else "")
                         + " ORDER BY v.scheduled_at", (page,) if page else ())
         return render(request, "review.html", videos=vids, sched=sched, suggest=suggest_slot,
@@ -298,20 +520,29 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
         return dt.datetime.fromtimestamp(t).strftime("%Y-%m-%dT%H:%M")
 
     @app.post("/videos/{pid}/{vid}/schedule")
-    def schedule(pid: int, vid: str, when: str = Form(...), caption: str = Form(None)):
+    def schedule(pid: int, vid: str, when: str = Form(""), caption: str = Form(None)):
+        # when mặc định "": ô giờ để trống -> báo lỗi rõ ràng thay vì 422 (htmx bỏ qua, người dùng không thấy gì)
         import datetime as dt
         if caption is not None:
             store.set_video(vid, pid, caption=caption)
+        pg = store.one("SELECT platform FROM pages WHERE id=?", (pid,))
+        where = "TikTok" if pg and pg["platform"] == "tiktok" else "Facebook"
+
+        def err(msg: str) -> HTMLResponse:
+            # lỗi hiện ngay dưới ô chọn giờ, giữ nguyên các nút Duyệt / Đăng ngay
+            return HTMLResponse(msg, headers={"HX-Retarget": f"#v-{pid}-{vid} .sched-msg", "HX-Reswap": "innerHTML"})
         try:
             ts = int(dt.datetime.strptime(when, "%Y-%m-%dT%H:%M").timestamp())
         except ValueError:
-            return HTMLResponse('<div class="done" style="color:var(--err)">Giờ không hợp lệ</div>')
+            return err("Chưa chọn đủ ngày và giờ — chọn lại trong ô bên trên rồi bấm Lên lịch.")
         if ts < time.time() + 20 * 60:
-            return HTMLResponse('<div class="done" style="color:var(--err)">Facebook chỉ cho lên lịch '
-                                'sau ít nhất 20 phút nữa</div>')
+            earliest = dt.datetime.fromtimestamp(time.time() + 21 * 60)
+            return err(f"{where} chỉ nhận lịch sau ít nhất 20 phút nữa — chọn từ {earliest:%H:%M} trở đi.")
         store.set_video(vid, pid, status="schedule_pending", scheduled_at=ts, error=None)
         store.log(f"Lên lịch {vid} lúc {when.replace('T', ' ')}", page_id=pid)
-        return HTMLResponse(f'<div class="done">Sẽ gửi lịch lên Facebook: {dt.datetime.fromtimestamp(ts):%H:%M %d/%m}</div>')
+        note = " (TikTok chỉ nhận lịch trong 10 ngày — tool sẽ gửi khi tới gần ngày)" \
+            if where == "TikTok" and ts > time.time() + 10 * 86400 - 3600 else ""
+        return HTMLResponse(f'<div class="done">Sẽ gửi lịch lên {where}: {dt.datetime.fromtimestamp(ts):%H:%M %d/%m}{note}</div>')
 
     @app.post("/videos/{pid}/{vid}/{action}")
     def video_action(pid: int, vid: str, action: str, caption: str = Form(None)):
@@ -325,11 +556,15 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False) -> Fas
 
     # ---------------- Tiến trình ----------------
     @app.get("/queue", response_class=HTMLResponse)
-    def queue(request: Request, status: str | None = None):
-        sql = ("SELECT v.*, p.name page_name FROM videos v JOIN pages p ON p.id=v.page_id"
-               + (" WHERE v.status=?" if status else "") + " ORDER BY v.updated_at DESC LIMIT 300")
-        return render(request, "queue.html", videos=store.q(sql, (status,) if status else ()),
-                      totals=store.counts(), cur=status)
+    def queue(request: Request, status: str | None = None, page: int = 1):
+        per = 100       # chia trang thay vì vẽ 300 dòng một lúc
+        page = max(1, page)
+        where, args = (" WHERE v.status=?", (status,)) if status else ("", ())
+        total = store.one("SELECT COUNT(*) n FROM videos v" + where, args)["n"]
+        sql = ("SELECT v.*, p.name page_name FROM videos v JOIN pages p ON p.id=v.page_id" + where
+               + " ORDER BY v.updated_at DESC LIMIT ? OFFSET ?")
+        return render(request, "queue.html", videos=store.q(sql, (*args, per, (page - 1) * per)),
+                      totals=store.counts(), cur=status, page=page, pages=max(1, -(-total // per)), total=total)
 
     return app
 

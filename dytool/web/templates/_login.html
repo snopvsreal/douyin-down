@@ -1,0 +1,42 @@
+{# Thanh tiến trình đăng nhập (Douyin / Facebook). lg = loginstate.view(...), title = tên hiển thị.
+   Class có tiền tố lp- / s- để không đụng class .done dùng chung của app.css #}
+{% if lg %}
+{% if say %}<div id="sr-live" hx-swap-oob="innerHTML">{{ say }}</div>{% endif %}
+<div class="lp lp-{{ lg.state }}">
+  <div class="row lp-head">
+    <b>{{ title }}</b>
+    <div class="spacer"></div>
+    {% if lg.state == 'running' %}
+      <span class="pill info">Bước {{ lg.steps.index(lg.step) + 1 }}/{{ lg.steps|length }} · {{ lg.elapsed // 60 }}:{{ '%02d' % (lg.elapsed % 60) }}</span>
+    {% elif lg.state == 'done' %}
+      <span class="pill ok">✓ Xong</span>
+    {% else %}
+      <span class="pill err">Chưa xong</span>
+      <button class="btn sm lp-close" hx-post="{{ dismiss_url }}" hx-target="closest .lp-slot" hx-swap="innerHTML"
+              title="Ẩn thông báo này" aria-label="Ẩn thông báo này">×</button>
+    {% endif %}
+  </div>
+
+  <div class="lp-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ lg.percent }}"
+       aria-label="{{ title }}: {{ lg.step }}">
+    {% for s in lg.segs %}<div class="lp-seg s-{{ s.status }}"></div>{% endfor %}
+  </div>
+  <ol class="lp-steps">
+    {% for s in lg.segs %}<li class="s-{{ s.status }}">{% if s.status == 'done' %}✓ {% endif %}{{ s.name }}</li>{% endfor %}
+  </ol>
+
+  {% if lg.state == 'running' %}
+    <p class="lp-hint"><b>Đang: {{ lg.step }}.</b> {{ lg.hint }}</p>
+    {% if lg.remaining is not none %}
+      <div class="lp-wait">
+        <div class="lp-wait-bar"><div style="width: {{ [100 - lg.wait_percent, 0]|max }}%"></div></div>
+        <span class="small muted">còn {{ lg.remaining // 60 }}:{{ '%02d' % (lg.remaining % 60) }}</span>
+      </div>
+    {% endif %}
+  {% elif lg.state == 'done' %}
+    <p class="lp-hint lp-ok">{{ lg.msg }}</p>
+  {% else %}
+    <p class="lp-hint lp-err">Dừng ở bước “{{ lg.step }}”: {{ lg.msg }}</p>
+  {% endif %}
+</div>
+{% endif %}

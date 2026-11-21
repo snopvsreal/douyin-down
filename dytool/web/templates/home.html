@@ -1,48 +1,82 @@
 {% extends "base.html" %}
 {% block title %}Tổng quan{% endblock %}
 {% block body %}
-<div class="row">
-  <div><h1>Tổng quan</h1><p class="sub">Tự động tải → edit → lồng tiếng → đăng cho các Page đang bật.</p></div>
+<div class="head">
+  <div><h1>Tổng quan</h1>
+    <p class="sub">{% if worker.running %}Tool đang tự chạy cho các kênh đang bật.{% else %}Chạy tự động đang tắt — tool không quét, edit hay đăng gì.{% endif %}</p></div>
   <div class="spacer"></div>
   {% if worker.running %}
-    <form method="post" action="/worker/stop"><button class="btn danger">⏸ Tắt chạy tự động</button></form>
+    <form method="post" action="/worker/stop"><button class="btn">⏸ Tạm dừng</button></form>
   {% else %}
     <form method="post" action="/worker/start"><button class="btn primary">▶ Bật chạy tự động</button></form>
   {% endif %}
 </div>
 
-<div class="grid g4" style="margin-bottom:16px">
-  <div class="card stat"><div class="n">{{ totals.get('review', 0) }}</div><div class="l">Chờ duyệt</div></div>
-  <div class="card stat"><div class="n">{{ totals.get('scheduled', 0) + totals.get('schedule_pending', 0) }}</div><div class="l">Đã lên lịch</div></div>
-  <div class="card stat"><div class="n">{{ totals.get('uploaded', 0) }}</div><div class="l">Đã đăng</div></div>
-  <div class="card stat"><div class="n">{{ totals.get('failed', 0) }}</div><div class="l">Lỗi</div></div>
-</div>
+{% if request.query_params.get('key_saved') %}<div class="notice" role="status">Đã lưu Anthropic API key — tool dùng ngay.</div>{% endif %}
+{% if need_key %}
+<form method="post" action="/settings/api-key" class="card setup-card" style="margin-bottom:16px">
+  <h2 style="margin-bottom:4px">Cần Anthropic API key để dịch và lồng tiếng</h2>
+  <p class="hint" style="margin:0 0 10px">Lấy key ở <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>
+    (bắt đầu bằng <code>sk-ant-</code>). Key chỉ lưu trong file config.yaml trên máy này.</p>
+  <div class="inline-add">
+    <input type="password" name="key" required autocomplete="off" spellcheck="false" placeholder="sk-ant-…"
+           aria-label="Anthropic API key" {% if request.query_params.get('key_error') %}aria-invalid="true"{% endif %}>
+    <button class="btn primary">Lưu key</button>
+  </div>
+  {% if request.query_params.get('key_error') %}<p class="hint" role="alert" style="color:var(--err)">Key phải bắt đầu bằng sk-ant- — dán lại key từ console.anthropic.com.</p>{% endif %}
+</form>
+{% endif %}
 
-<div class="card" style="margin-bottom:16px" hx-get="/partials/progress" hx-trigger="load, every 2s" hx-swap="innerHTML">
-  <p class="muted">Đang tải tiến trình…</p>
-</div>
+{# thanh tiến trình đăng nhập Douyin; câu đọc to cho trình đọc màn hình đi qua #sr-live (base.html) #}
+<div hx-get="/partials/login/douyin" hx-trigger="load, every 1s" hx-swap="innerHTML" class="lp-slot"
+     style="margin-bottom:16px"></div>
 
-<div class="grid g2">
+{# Dây chuyền: đúng thứ tự 1 video đi qua; bấm vào để xem danh sách ở Tiến trình #}
+{% set t = totals %}
+<nav class="flow" aria-label="Số video ở từng bước">
+  <a href="/queue?status=new"><span class="n">{{ t.get('new', 0) }}</span><span class="l">Tìm thấy</span></a>
+  <a href="/queue?status=downloaded"><span class="n">{{ t.get('downloaded', 0) }}</span><span class="l">Đã tải, chờ edit</span></a>
+  <a href="/review" class="{{ 'is-hot' if t.get('review') }}"><span class="n">{{ t.get('review', 0) }}</span><span class="l">Chờ bạn duyệt</span></a>
+  <a href="/queue?status=approved"><span class="n">{{ t.get('approved', 0) + t.get('publish_now', 0) }}</span><span class="l">Chờ đăng</span></a>
+  <a href="/review"><span class="n">{{ t.get('schedule_pending', 0) + t.get('scheduled', 0) }}</span><span class="l">Đã lên lịch</span></a>
+  <a href="/queue?status=uploaded" class="is-fin"><span class="n">{{ t.get('uploaded', 0) }}</span><span class="l">Đã đăng</span></a>
+</nav>
+{% if t.get('failed') %}
+  <p class="flow-note"><a href="/queue?status=failed">{{ t.failed }} video bị lỗi</a>
+    <span class="muted">— mở để xem lý do và bấm Thử lại.</span></p>
+{% endif %}
+
+<div class="split section">
+  <div class="card" hx-get="/partials/progress" hx-trigger="load, every 2s" hx-swap="innerHTML">
+    <p class="muted">Đang tải…</p>
+  </div>
   <div class="card">
-    <h2>Page đang chạy</h2>
+    <div class="row" style="margin-bottom:6px"><h2 style="margin:0">Kênh đang chạy</h2><div class="spacer"></div>
+      <a class="small" href="/accounts">Quản lý</a></div>
     {% if not pages %}
-      <p class="muted">Chưa bật Page nào. Vào <a href="/accounts">Tài khoản & Page</a> để thêm tài khoản và bật Page.</p>
-    {% endif %}
+      <p class="empty">Chưa bật kênh nào. Vào <a href="/accounts">Tài khoản & kênh</a>, đăng nhập rồi bấm
+        Cài đặt ở Page / kênh TikTok để thêm nguồn và bật.</p>
+    {% else %}
     <table>
       {% for p in pages %}{% set st = stats[p.id] %}
       <tr>
-        <td><a href="/pages/{{ p.id }}"><b>{{ p.name }}</b></a><div class="small muted">{{ p.acc_name }}</div></td>
-        <td class="small">
-          <span class="pill warn">{{ st.get('review', 0) }} chờ duyệt</span>
-          <span class="pill info">{{ st.get('approved', 0) }} chờ đăng</span>
-          <span class="pill ok">{{ st.get('uploaded', 0) }} đã đăng</span>
-        </td>
+        <td><a href="/pages/{{ p.id }}"><b>{{ p.name }}</b></a>
+          {% if p.platform == 'tiktok' %}<span class="tag tt">TikTok</span>{% endif %}
+          <div class="small muted">{{ p.acc_name }}</div></td>
+        <td class="small num" style="text-align:right; white-space:nowrap">
+          {% if st.get('review') %}<span class="pill warn">{{ st.review }} chờ duyệt</span>{% endif %}
+          <span class="pill ok">{{ st.get('uploaded', 0) }} đã đăng</span></td>
       </tr>
       {% endfor %}
     </table>
-  </div>
-  <div class="card" hx-get="/partials/status" hx-trigger="load, every 4s" hx-swap="innerHTML">
-    <p class="muted">Đang tải trạng thái…</p>
+    {% endif %}
   </div>
 </div>
+
+<details class="card fold section">
+  <summary>Nhật ký <span class="small muted" style="font-weight:400">— mọi việc tool đã làm, mới nhất ở trên</span></summary>
+  {# chỉ tải khi mở mục Nhật ký, và chỉ làm mới mỗi 5s khi đang mở #}
+  <div class="log" hx-get="/partials/log" hx-swap="innerHTML"
+       hx-trigger="toggle from:closest details, every 5s [this.closest('details').open]"></div>
+</details>
 {% endblock %}

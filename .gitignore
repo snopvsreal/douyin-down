@@ -7,3 +7,6 @@ __pycache__/
 *.log
 .DS_Store
 .claude/settings.local.json
+build/
+dist/
+installer/build/

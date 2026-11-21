@@ -72,15 +72,12 @@ try {
     Set-Location $proj
     Ok "Du an: $proj"
 
-    # ---------- 3. thu vien Python + Chromium ----------
+    # ---------- 3. thu vien Python (trinh duyet = ShardBrowser, cai rieng) ----------
     Say "Cai thu vien Python (lan dau mat 5-15 phut: torch, whisper, demucs...)"
     & uv sync --python 3.12
     if ($LASTEXITCODE -ne 0) { throw "uv sync that bai" }
     Ok "Thu vien Python xong"
-    Say "Cai trinh duyet Chromium cho Playwright (dang Facebook / dang nhap Douyin)"
-    & uv run playwright install chromium
-    if ($LASTEXITCODE -ne 0) { throw "Cai Chromium that bai" }
-    Ok "Chromium xong"
+    Warn "Trinh duyet: cai ShardBrowser tai https://github.com/ProxyShard/ShardBrowser/releases (dytool khong dung Chromium nua)"
 
     # ---------- 4. backend tai Douyin (TikTokDownloader) ----------
     Say "Cai backend tai Douyin (TikTokDownloader)"

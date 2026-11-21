@@ -162,10 +162,11 @@ def _api(method: str, path: str, _retry: bool = True, **kw):
     return r.json() if r.content else {}
 
 
-def list_profiles() -> list[dict]:
-    """Hồ sơ ShardBrowser để chọn trên giao diện: [{id, name, folder, running}]."""
+def list_profiles(start_launcher: bool = True) -> list[dict]:
+    """Hồ sơ ShardBrowser để chọn trên giao diện: [{id, name, folder, running}].
+    start_launcher=False: ShardBrowser đang tắt thì báo lỗi ngay, không tự mở rồi chờ ~45s (dùng khi vẽ trang)."""
     return [{"id": p.get("id"), "name": p.get("name") or p.get("id"), "folder": p.get("folder") or "",
-             "running": bool(p.get("running"))} for p in _api("GET", "/profiles")]
+             "running": bool(p.get("running"))} for p in _api("GET", "/profiles", _retry=start_launcher)]
 
 
 def get_choice(acc_dir: Path) -> dict:

@@ -12,7 +12,7 @@ import time
 import traceback
 from pathlib import Path
 
-from .store import Store
+from .store import Store, vn_fmt, vn_time, vn_ts
 
 TT_MAX_AHEAD = 10 * 86400 - 3600   # TikTok chỉ hẹn giờ trong 10 ngày tới (chừa 1 giờ)
 TT_MIN_AHEAD = 25 * 60             # TikTok cần >= 20 phút (chừa 5 phút cho thời gian tải lên)
@@ -34,6 +34,8 @@ class Worker:
         self._last_scan: dict[int, float] = {}
         self._dy = None
         self._vs_warned = 0.0
+        self._tdl_retry_at = 0.0
+        self._last_cleanup = 0.0
 
     # ---------- điều khiển ----------
     _mutex = None      # khoá toàn máy: chỉ 1 tiến trình dytool được chạy worker (mở app 2 lần, thêm run_ui.bat…)
@@ -153,12 +155,81 @@ class Worker:
                 traceback.print_exc()
                 did = False
             progress.end()
+            if not did and time.time() - self._last_cleanup > 6 * 3600:
+                self._last_cleanup = time.time()
+                try:
+                    self._cleanup()
+                except Exception as e:
+                    self.store.log(f"Dọn file cũ lỗi: {e}", "error")
             if not did:
                 self.current = "Đang chờ việc mới"
                 for _ in range(15):
                     if not self.running:
                         break
                     time.sleep(1)
+
+    FINAL = ("uploaded", "scheduled", "rejected", "skipped")
+
+    def _cleanup(self) -> None:
+        """Dọn file không còn cần (trước không xoá gì -> ổ đĩa đầy dần: WAV tách giọng ~10 MB/phút/video):
+        - work/ (tách giọng, TTS, file tạm) cũ hơn 1 ngày
+        - raw/<id>.mp4: mọi Page dùng video đó đã xong (đăng / hẹn giờ / bỏ / lọc) từ 3 ngày trước
+        - edited/p<page>_<id>.mp4: đã đăng / bỏ 3 ngày trước, hoặc giờ hẹn đã qua 1 ngày; không còn đăng kèm chờ
+        - ảnh chụp fb_logs / tt_logs cũ hơn 14 ngày, nhật ký cũ hơn 30 ngày"""
+        import shutil
+        now = time.time()
+        freed = 0
+
+        def rm(p: Path) -> None:
+            nonlocal freed
+            try:
+                if p.is_dir():
+                    size = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+                    shutil.rmtree(p)
+                else:
+                    size = p.stat().st_size
+                    p.unlink()
+                freed += size
+            except OSError:
+                pass        # đang bị dùng -> để lần sau
+
+        work = self.data / "work"
+        if work.exists():
+            for p in work.iterdir():
+                if now - p.stat().st_mtime > 86400:
+                    rm(p)
+        final = ",".join(f"'{s}'" for s in self.FINAL)
+        old = int(now - 3 * 86400)
+        for r in self.store.q(f"SELECT id FROM videos GROUP BY id HAVING SUM(status NOT IN ({final}))=0 "
+                              "AND MAX(updated_at)<?", (old,)):
+            p = self.data / "raw" / f"{r['id']}.mp4"
+            if p.exists():
+                rm(p)
+        for r in self.store.q(
+                f"SELECT v.id, v.page_id FROM videos v WHERE ((v.status IN ('uploaded','rejected','skipped') "
+                f"AND v.updated_at<?) OR (v.status='scheduled' AND v.scheduled_at<?)) AND NOT EXISTS (SELECT 1 FROM "
+                "crossposts c WHERE c.video_id=v.id AND c.src_page_id=v.page_id AND c.status IN ('pending','uploading'))",
+                (old, int(now - 86400))):
+            p = self.data / "edited" / f"p{r['page_id']}_{r['id']}.mp4"
+            if p.exists():
+                rm(p)
+        for logs in list((self.data / "accounts").glob("*/fb_logs")) + list((self.data / "accounts").glob("*/tt_logs")):
+            for p in logs.iterdir():
+                if now - p.stat().st_mtime > 14 * 86400:
+                    rm(p)
+        self.store.x("DELETE FROM logs WHERE ts<?", (int(now - 30 * 86400),))
+        if freed > 50 * 1024 * 1024:
+            self.store.log(f"Đã dọn file cũ: giải phóng {freed / 1024 ** 3:.2f} GB")
+
+    def _top_video(self, status: str, page_ids: list[int]):
+        if not page_ids:
+            return None
+        marks = ",".join("?" * len(page_ids))
+        return self.store.one(f"SELECT * FROM videos WHERE status=? AND page_id IN ({marks}) "
+                              "ORDER BY likes DESC LIMIT 1", (status, *page_ids))
+
+    def _has_video(self, status: str, page_ids: list[int]) -> bool:
+        return self._top_video(status, page_ids) is not None
 
     def _pages(self):
         return self.store.q("SELECT p.*, a.id acc FROM pages p JOIN accounts a ON a.id=p.account_id "
@@ -170,8 +241,9 @@ class Worker:
         # lên lịch / đăng ngay là thao tác người dùng bấm -> làm cả với Page đang tắt
         all_pages = {p["id"]: p for p in self.store.q("SELECT p.*, a.id acc FROM pages p "
                                                       "JOIN accounts a ON a.id=p.account_id")}
-        # 0) Page bật "tự lên lịch": video đã duyệt -> xếp vào khung giờ trống tiếp theo
-        self._auto_schedule(all_pages)
+        # 0) Page bật "tự lên lịch": video đã duyệt -> xếp vào khung giờ trống tiếp theo. Chỉ Page ĐANG BẬT
+        #    (trước dùng all_pages: tắt Page rồi mà video đã duyệt vẫn bị tự xếp lịch và đăng)
+        self._auto_schedule(by_id)
         # 1) gửi lịch lên Facebook/TikTok / đăng ngay / video đã duyệt (nếu kênh còn hạn mức)
         for row in self.store.q("SELECT * FROM videos WHERE status IN ('schedule_pending','publish_now','approved') "
                                 "ORDER BY status='schedule_pending' DESC, status='publish_now' DESC, updated_at"):
@@ -187,21 +259,21 @@ class Worker:
         if cp:
             self._crosspost(cp, all_pages)
             return True
-        # 2) edit (Page bật lồng tiếng mà VoiceStudio đang tắt -> để video chờ, không tính là lỗi)
-        vs_up = None
-        for row in self.store.q("SELECT * FROM videos WHERE status='downloaded' ORDER BY likes DESC LIMIT 20"):
-            if row["page_id"] in by_id:
-                page = by_id[row["page_id"]]
-                if self.store.page_settings(page)["dub_enabled"]:
-                    if vs_up is None:
-                        vs_up = self._voicestudio_up()
-                    if not vs_up:
-                        continue
-                self._edit(page, row)
-                return True
-        # 3) tải
-        for row in self.store.q("SELECT * FROM videos WHERE status='new' ORDER BY likes DESC LIMIT 20"):
-            if row["page_id"] in by_id:
+        # 2) edit (Page bật lồng tiếng mà VoiceStudio đang tắt -> để video chờ, không tính là lỗi).
+        #    Lọc Page ngay trong SQL: trước lấy 20 video nhiều like nhất rồi mới lọc -> 20 video của Page đã tắt /
+        #    đang chờ VoiceStudio chắn mất, video của Page đang bật không bao giờ tới lượt
+        edit_ids = list(by_id)
+        dub_ids = [i for i in edit_ids if self.store.page_settings(by_id[i])["dub_enabled"]]
+        if dub_ids and self._has_video("downloaded", dub_ids) and not self._voicestudio_up():
+            edit_ids = [i for i in edit_ids if i not in dub_ids]
+        row = self._top_video("downloaded", edit_ids)
+        if row:
+            self._edit(by_id[row["page_id"]], row)
+            return True
+        # 3) tải (backend tải hỏng -> chờ rồi mới thử lại, không bật lại liên tục)
+        if time.time() >= self._tdl_retry_at:
+            row = self._top_video("new", list(by_id))
+            if row:
                 self._download(by_id[row["page_id"]], row)
                 return True
         # 4) quét nguồn đến hạn
@@ -267,25 +339,42 @@ class Worker:
             if not self.store.set_video_if(row["id"], page["id"], ("approved",), status="schedule_pending",
                                            scheduled_at=ts):
                 continue
-            self.store.log(f"[{page['name']}] Tự lên lịch {row['id']} lúc {dt.datetime.fromtimestamp(ts):%H:%M %d/%m}",
+            self.store.log(f"[{page['name']}] Tự lên lịch {row['id']} lúc {vn_fmt(ts)}",
                            page_id=page["id"])
 
     def _can_post(self, page) -> bool:
+        """Đăng ngay video đã duyệt nếu Page còn hạn mức: tính theo NGÀY giờ VN, gồm cả bài đã đăng lẫn bài đã hẹn
+        giờ trong ngày (trước chỉ đếm bài đã đăng -> trộn đăng ngay + hẹn giờ thì vượt max_posts_per_day), và cách
+        bài gần nhất (đã đăng hoặc hẹn giờ) ít nhất min_gap_minutes."""
+        import datetime as dt
         s = self.store.page_settings(page)
         now = int(time.time())
-        if self.store.uploads_since(page["id"], now - 86400) >= int(s["max_posts_per_day"]):
+        day_start = vn_ts(dt.datetime.combine(vn_time(now).date(), dt.time()))
+        n = self.store.one(
+            "SELECT COUNT(*) n FROM videos WHERE page_id=? AND ((uploaded_at>=? AND uploaded_at<?) OR "
+            "(status IN ('schedule_pending','scheduled') AND scheduled_at>=? AND scheduled_at<?))",
+            (page["id"], day_start, day_start + 86400, day_start, day_start + 86400))["n"]
+        if n >= int(s["max_posts_per_day"]):
             return False
-        return now - self.store.last_upload(page["id"]) >= float(s["min_gap_minutes"]) * 60
+        gap = float(s["min_gap_minutes"]) * 60
+        near = self.store.one(
+            "SELECT COUNT(*) n FROM videos WHERE page_id=? AND status IN ('schedule_pending','scheduled') "
+            "AND scheduled_at BETWEEN ? AND ?", (page["id"], now - gap, now + gap))["n"]
+        return not near and now - self.store.last_upload(page["id"]) >= gap
 
     def _ensure_backend(self) -> bool:
         from .services import ensure_tdl, tdl_alive
         if tdl_alive(self.cfg):
             return True
+        if time.time() < self._tdl_retry_at:      # vừa bật hỏng: chờ hết 10 phút (cả bước tải lẫn quét nguồn)
+            return False
         self.current = "Đang bật backend tải Douyin…"
         self.store.log("Backend tải Douyin chưa chạy -> tự bật")
         ok = ensure_tdl(self.cfg)
         if not ok:
-            self.store.log("Không bật được backend tải Douyin (xem data/tdl_server.log)", "error")
+            self._tdl_retry_at = time.time() + 600     # chờ 10 phút rồi mới thử lại (trước: bật lại liên tục)
+            self.store.log("Không bật được backend tải Douyin (xem data/tdl_server.log) — thử lại sau 10 phút",
+                           "error")
         return ok
 
     def _scan(self, page):
@@ -347,6 +436,7 @@ class Worker:
                     self.store.set_video(row["id"], page["id"], url=url)
                     self._douyin().download(url, dest)
             if not dest.exists() or dest.stat().st_size < 50_000:
+                dest.unlink(missing_ok=True)       # file hỏng: xoá để lần Thử lại tải lại từ đầu (trước: kẹt mãi)
                 raise RuntimeError("file tải về không hợp lệ")
             self.store.set_video(row["id"], page["id"], status="downloaded")
         except Exception as e:
@@ -380,7 +470,10 @@ class Worker:
             edit(src, dst, self.data / "work", ecfg)
             progress.step("Dịch caption")
             desc_vi = subtitles.translate_desc(row["desc"] or "", ecfg.get("subtitles", {}))
-            caption = s["caption_template"].format(desc_vi=desc_vi, desc=row["desc"] or "").strip()
+            # chỉ thay đúng {desc_vi} / {desc}: dấu {} khác trong mẫu (hashtag, emoji…) không được làm lỗi .format()
+            # — lỗi lúc này là sau khi đã tốn công lồng tiếng xong
+            caption = (s["caption_template"].replace("{desc_vi}", desc_vi)
+                       .replace("{desc}", row["desc"] or "").strip())
             status = "approved" if s["auto_publish"] else "review"
             # chỉ ghi khi video vẫn "Đã tải": người dùng bấm Bỏ trong lúc edit thì không được kéo nó về chờ đăng
             if self.store.set_video_if(row["id"], page["id"], ("downloaded",), status=status, caption=caption,
@@ -396,7 +489,8 @@ class Worker:
                 return                                  # vẫn đang "Đã tải"
             import httpx
             from .dub import DubError
-            if isinstance(e, (httpx.ConnectError, DubError)) and not self._voicestudio_up():
+            # tắt VoiceStudio giữa lúc đang đọc thường ra ReadError / RemoteProtocolError, không phải ConnectError
+            if isinstance(e, (httpx.HTTPError, DubError)) and not self._voicestudio_up():
                 # VoiceStudio bị tắt giữa chừng -> để video chờ (vẫn "Đã tải"), edit lại khi app mở lại
                 self.store.log(f"[{page['name']}] VoiceStudio bị tắt khi đang lồng tiếng {row['id']} -> sẽ làm lại",
                                "error", page["id"])
@@ -408,7 +502,7 @@ class Worker:
 
     def _upload(self, page, row):
         import datetime as dt
-        when = (dt.datetime.fromtimestamp(row["scheduled_at"])
+        when = (vn_time(row["scheduled_at"])
                 if row["status"] == "schedule_pending" and row["scheduled_at"] else None)
         if when and row["scheduled_at"] < time.time() + 15 * 60:
             # lịch đã quá giờ (vd tool bị tắt lúc đó) -> không tự đăng, trả về chờ duyệt để chọn giờ mới
@@ -439,7 +533,8 @@ class Worker:
         video = self.data / "edited" / f"p{page['id']}_{row['id']}.mp4"
         acc_dir = self.store.account_dir(self.data, page["account_id"])
         try:
-            tt_browser.publish(acc_dir, video, row["caption"] or "", schedule_at=when, headless=self._tt_headless())
+            tt_browser.publish(acc_dir, video, row["caption"] or "", schedule_at=when, headless=self._tt_headless(),
+                               expect_user=page["profile_id"] or "")
             if when:
                 self.store.set_video(row["id"], page["id"], status="scheduled", error=None)
                 self.store.log(f"[{page['name']}] Đã hẹn giờ trên TikTok {row['id']} lúc {when:%H:%M %d/%m}",
@@ -455,7 +550,7 @@ class Worker:
         dst = int(self.store.page_settings(page).get("tiktok_mirror") or 0)
         if not dst or not self.store.one("SELECT 1 FROM pages WHERE id=? AND platform='tiktok'", (dst,)):
             return
-        self.store.add_crosspost(row["id"], page["id"], dst, int(when.timestamp()) if when else None)
+        self.store.add_crosspost(row["id"], page["id"], dst, vn_ts(when) if when else None)
         self.store.log(f"[{page['name']}] Sẽ đăng kèm {row['id']} lên TikTok"
                        + (f" lúc {when:%H:%M %d/%m}" if when else ""), page_id=page["id"])
 
@@ -465,6 +560,12 @@ class Worker:
         now = time.time()
         for cp in self.store.q("SELECT * FROM crossposts WHERE status='pending' ORDER BY COALESCE(scheduled_at,0)"):
             t = cp["scheduled_at"]
+            if t is not None and t < now - 15 * 60:
+                # quá giờ hẹn lâu (tool tắt lúc đó): không tự đăng muộn — giống quy tắc lịch Facebook quá giờ
+                self.store.set_crosspost(cp["video_id"], cp["src_page_id"], cp["dst_page_id"], status="failed",
+                                         error=f"Quá giờ hẹn {vn_fmt(t)} khi tool chạy lại — bấm Đăng lại nếu vẫn muốn "
+                                               "đăng lên TikTok bây giờ")
+                continue
             if t is None or t <= now or TT_MIN_AHEAD <= t - now <= TT_MAX_AHEAD:
                 return cp
         return None
@@ -479,7 +580,7 @@ class Worker:
             return
         row = self.store.one("SELECT * FROM videos WHERE id=? AND page_id=?", (cp["video_id"], src["id"]))
         t = cp["scheduled_at"]
-        when = dt.datetime.fromtimestamp(t) if t and t - time.time() >= TT_MIN_AHEAD else None
+        when = vn_time(t) if t and t - time.time() >= TT_MIN_AHEAD else None
         caption = (row["caption"] if row else "") or ""
         self.current = f"Đăng kèm {cp['video_id']} lên TikTok {dst['name']}"
         progress.begin("upload", f"Đăng kèm TikTok — hẹn {when:%H:%M %d/%m}" if when else "Đăng kèm lên TikTok",
@@ -488,7 +589,8 @@ class Worker:
         acc_dir = self.store.account_dir(self.data, dst["account_id"])
         self.store.set_crosspost(*key, status="uploading")    # bị tắt giữa chừng -> _recover_uploading, không đăng lại
         try:
-            tt_browser.publish(acc_dir, video, caption, schedule_at=when, headless=self._tt_headless())
+            tt_browser.publish(acc_dir, video, caption, schedule_at=when, headless=self._tt_headless(),
+                               expect_user=dst["profile_id"] or "")
             self.store.set_crosspost(*key, status="scheduled" if when else "uploaded", error=None)
             self.store.log(f"[{dst['name']}] Đăng kèm từ {src['name']}: {cp['video_id']} "
                            + (f"hẹn giờ {when:%H:%M %d/%m}" if when else "đã đăng"), page_id=dst["id"])

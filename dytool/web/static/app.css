@@ -196,6 +196,13 @@ a.sb-update:hover { text-decoration: underline; }
   background: var(--ok-weak); color: var(--text); border: 1px solid var(--stroke); margin-bottom: 16px; }
 .notice::before { content: "✓"; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%;
   background: var(--ok); color: var(--card); font-size: 11px; font-weight: 700; flex: none; }
+/* thông báo nổi khi thao tác lỗi (htmx:responseError / sendError trong base.html) */
+#dy-toast { position: fixed; left: 50%; bottom: 44px; transform: translate(-50%, 20px); max-width: min(560px, 90vw);
+  padding: 10px 16px; border-radius: var(--r-ctl); background: var(--err); color: #fff; font-size: 13px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25); opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s;
+  z-index: 50; }
+#dy-toast.show { opacity: 1; transform: translate(-50%, 0); }
+@media (prefers-reduced-motion: reduce) { #dy-toast { transition: none; } }
 .notice.warn { background: var(--warn-weak); flex-wrap: wrap; }
 .notice.warn::before { content: "!"; background: var(--warn); }
 .setup-card { background: var(--accent-weak); border-color: var(--stroke); }

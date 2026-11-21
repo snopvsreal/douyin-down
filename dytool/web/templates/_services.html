@@ -18,7 +18,7 @@
   {% if dy_logging_in %}
     <span class="sb-item"><span class="dot warn"></span>Douyin: đang đăng nhập…</span>
   {% elif douyin.logged_in %}
-    <span class="sb-item" title="{% if douyin.expires %}Đăng nhập Douyin hết hạn {{ time.strftime('%d/%m/%Y', time.localtime(douyin.expires)) }}{% endif %}">
+    <span class="sb-item" title="{% if douyin.expires %}Đăng nhập Douyin hết hạn {{ vnt(douyin.expires, '%d/%m/%Y') }}{% endif %}">
       <span class="dot {{ 'warn' if douyin.days_left is not none and douyin.days_left < 7 else 'ok' }}"></span>
       Douyin{% if douyin.days_left is not none %}: còn {{ douyin.days_left }} ngày{% endif %}
       {% if douyin.days_left is not none and douyin.days_left < 7 %}

@@ -213,12 +213,19 @@ def dub_audio(video: Path, segments: list[dict], work: Path, cfg: dict,
         if not text.strip():
             continue
         start = max(u["start"], cursor)
+        if start >= total - 0.3:
+            # các câu trước đọc dài đẩy câu này ra sát / quá cuối video: bỏ câu (trước: atrim độ dài âm -> ffmpeg lỗi
+            # cả video)
+            progress.detail(f"bỏ câu {i + 1}: hết thời lượng video")
+            continue
         nxt = utts[i + 1]["start"] if i + 1 < len(utts) else total
         window = max(0.4, min(total, nxt + max_drift) - start - phrasing.COMMA_PAUSE * 0.5)
         clip = clip_dir / f"{i:03d}.wav"
         progress.detail(f"câu {i + 1}/{len(utts)}: {text[:60]}")
         text, d = make_line(vs, text, window, clip, cfg, sub_cfg, voice_names[genders[i]])
         d = min(d, total - start)
+        if d <= 0.05:
+            continue
         n = len(inputs) // 2
         inputs += ["-i", str(clip)]
         delay = int(start * 1000)

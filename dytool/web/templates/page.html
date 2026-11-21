@@ -153,7 +153,7 @@
           <tr class="small">
             <td style="padding-left:0"><a href="https://www.douyin.com/video/{{ c.video_id }}" target="_blank" rel="noopener">{{ c.video_id }}</a>
               <span class="muted">→ {{ c.dst_name }}</span></td>
-            <td class="num">{% if c.scheduled_at %}{{ time.strftime('%H:%M %d/%m', time.localtime(c.scheduled_at)) }}{% else %}đăng ngay{% endif %}</td>
+            <td class="num">{% if c.scheduled_at %}{{ vnt(c.scheduled_at, '%H:%M %d/%m') }}{% else %}đăng ngay{% endif %}</td>
             <td>{% set cls = {'uploaded':'ok','scheduled':'ok','failed':'err','pending':'info'}[c.status] %}
               <span class="pill {{ cls }}">{{ {'pending':'Chờ đăng','scheduled':'Đã hẹn giờ','uploaded':'Đã đăng','failed':'Lỗi'}[c.status] }}</span>
               {% if c.error %}<div style="color:var(--err)">{{ c.error[:160] }}</div>{% endif %}</td>

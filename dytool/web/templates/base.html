@@ -64,6 +64,22 @@
     document.addEventListener('htmx:afterSettle', (e) => {
       if (e.detail.boosted) document.getElementById('main')?.scrollTo(0, 0);
     });
+    // htmx bỏ qua phản hồi lỗi (4xx/5xx) và lỗi mạng -> trước đây bấm nút xong không thấy gì. Hiện thông báo nổi.
+    const toast = (msg) => {
+      let t = document.getElementById('dy-toast');
+      if (!t) { t = document.createElement('div'); t.id = 'dy-toast'; t.setAttribute('role', 'alert'); document.body.appendChild(t); }
+      t.textContent = msg; t.classList.add('show');
+      clearTimeout(window.__dyToastT); window.__dyToastT = setTimeout(() => t.classList.remove('show'), 7000);
+    };
+    document.addEventListener('htmx:responseError', (e) => {
+      const x = e.detail.xhr, body = (x.responseText || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      const poll = (e.detail.elt.getAttribute('hx-trigger') || '').includes('every');   // poll lỗi lẻ tẻ: bỏ qua
+      if (!poll) toast('Lỗi ' + x.status + (body && body.length < 200 ? ': ' + body : ' — xem Nhật ký ở Tổng quan'));
+    });
+    document.addEventListener('htmx:sendError', (e) => {
+      const poll = (e.detail.elt.getAttribute('hx-trigger') || '').includes('every');
+      if (!poll) toast('Không kết nối được dytool — app có đang chạy không?');
+    });
   }
 </script>
 </body>

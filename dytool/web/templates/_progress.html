@@ -36,7 +36,7 @@
       {% if u.desc %}<div class="small muted trunc">{{ u.desc }}</div>{% endif %}</td>
     <td class="small muted num" style="text-align:right; white-space:nowrap">
       {% if u.act == 'Quét nguồn' %}{% if u.when <= now %}đến hạn{% else %}sau {{ ((u.when - now) // 60)|int }} phút{% endif %}
-      {% elif u.when %}{{ time.strftime('%H:%M %d/%m', time.localtime(u.when)) }}{% endif %}</td>
+      {% elif u.when %}{{ vnt(u.when, '%H:%M %d/%m') }}{% endif %}</td>
   </tr>
   {% endfor %}
 </table>

@@ -17,16 +17,21 @@ def tdl_alive(cfg: dict) -> bool:
         return False
 
 
+_proc: subprocess.Popen | None = None      # backend tải đã bật lần gần nhất
+
+
 def ensure_tdl(cfg: dict, config_path: str = "config.yaml", wait: float = 90) -> bool:
     """Backend tải chưa chạy thì bật lên (tiến trình tách riêng: không tắt theo giao diện) và chờ sẵn sàng."""
+    global _proc
     if tdl_alive(cfg):
         return True
     data = Path(cfg["_data"])
-    log = open(data / "tdl_server.log", "a")
-    detach = ({"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
-              if sys.platform == "win32" else {"start_new_session": True})
-    subprocess.Popen([sys.executable, "-m", "dytool.cli", "-c", str(ROOT / config_path), "server"],
-                     cwd=ROOT, stdout=log, stderr=log, stdin=subprocess.DEVNULL, **detach)
+    if _proc is None or _proc.poll() is not None:    # lần trước còn đang khởi động -> chờ tiếp, không bật thêm
+        detach = ({"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
+                  if sys.platform == "win32" else {"start_new_session": True})
+        with open(data / "tdl_server.log", "a") as log:     # tiến trình con giữ handle riêng; đóng bản của mình
+            _proc = subprocess.Popen([sys.executable, "-m", "dytool.cli", "-c", str(ROOT / config_path), "server"],
+                                     cwd=ROOT, stdout=log, stderr=log, stdin=subprocess.DEVNULL, **detach)
     deadline = time.time() + wait
     while time.time() < deadline:
         if tdl_alive(cfg):

@@ -97,7 +97,7 @@
         {% elif douyin.logged_in %}
           <p class="small" style="margin:0 0 8px"><span class="pill {{ 'warn' if douyin.days_left is not none and douyin.days_left < 7 else 'ok' }}">Đã đăng nhập</span>
             {% if douyin.days_left is not none %}<span class="muted">còn {{ douyin.days_left }} ngày{% if douyin.expires %}
-              (hết hạn {{ time.strftime('%d/%m/%Y', time.localtime(douyin.expires)) }}){% endif %}</span>{% endif %}</p>
+              (hết hạn {{ vnt(douyin.expires, '%d/%m/%Y') }}){% endif %}</span>{% endif %}</p>
         {% else %}
           <p class="small" style="margin:0 0 8px"><span class="pill err">{{ 'Hết hạn' if douyin.expired else 'Chưa đăng nhập' }}</span></p>
         {% endif %}

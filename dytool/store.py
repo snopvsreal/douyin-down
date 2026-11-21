@@ -111,6 +111,26 @@ DEFAULT_PAGE_SETTINGS = {
 }
 
 
+# Giờ Việt Nam cố định UTC+7 (không có giờ mùa hè). Mọi lịch đăng tính theo giờ này, KHÔNG theo múi giờ của máy:
+# máy đặt múi giờ khác thì lịch gửi lên Facebook / TikTok vẫn đúng giờ VN (Page / TikTok đều hiểu là giờ VN).
+import datetime as _dt
+VN_TZ = _dt.timezone(_dt.timedelta(hours=7))
+
+
+def vn_time(ts: float) -> _dt.datetime:
+    """unix ts -> datetime giờ VN (naive, để gõ vào Facebook / TikTok và hiển thị)."""
+    return _dt.datetime.fromtimestamp(ts, VN_TZ).replace(tzinfo=None)
+
+
+def vn_ts(d: _dt.datetime) -> int:
+    """datetime giờ VN (naive) -> unix ts."""
+    return int(d.replace(tzinfo=VN_TZ).timestamp())
+
+
+def vn_fmt(ts, fmt: str = "%H:%M %d/%m") -> str:
+    return vn_time(ts).strftime(fmt) if ts else ""
+
+
 def parse_number(v, default):
     """Giá trị ô số -> int/float theo kiểu mặc định; ô mặc định là số nguyên vẫn nhận số lẻ (vd Nghiêng 1.5 độ).
     Rỗng / không phải số -> ValueError."""
@@ -251,17 +271,20 @@ class Store:
         taken = [r["scheduled_at"] for r in self.q(
             "SELECT scheduled_at FROM videos WHERE page_id=? AND status IN ('schedule_pending','scheduled') "
             "AND scheduled_at IS NOT NULL", (page_id,))]
+        # bài đã đăng ngay trong ngày cũng chiếm hạn mức ngày đó (trước chỉ đếm bài hẹn giờ -> vượt max_posts_per_day)
+        taken += [r["uploaded_at"] for r in self.q(
+            "SELECT uploaded_at FROM videos WHERE page_id=? AND uploaded_at>=?", (page_id, int(time.time()) - 86400))]
         taken_set = set(taken)
-        today = dt.date.today()
+        today = vn_time(time.time()).date()
         earliest = time.time() + min_lead
         for d in range(31):
             day = today + dt.timedelta(days=d)
-            day_start = int(dt.datetime.combine(day, dt.time()).timestamp())
+            day_start = vn_ts(dt.datetime.combine(day, dt.time()))
             used_today = sum(1 for t in taken if day_start <= t < day_start + 86400)
             for h, m in hm:
                 if used_today >= per_day:
                     break
-                ts = int(dt.datetime.combine(day, dt.time(h, m)).timestamp())
+                ts = vn_ts(dt.datetime.combine(day, dt.time(h, m)))
                 if ts >= earliest and ts not in taken_set:
                     return ts
         return None

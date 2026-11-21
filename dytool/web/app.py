@@ -76,7 +76,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
     tpl = Jinja2Templates(directory=str(HERE / "templates"))
     # css_v(): đổi theo lần sửa app.css (đọc lại mỗi trang) để trình duyệt không dùng bản CSS cũ trong cache
-    tpl.env.globals.update(STATUS_VI=STATUS_VI, time=time,
+    from ..store import vn_fmt
+    tpl.env.globals.update(STATUS_VI=STATUS_VI, time=time, vnt=vn_fmt,     # vnt(ts, fmt): hiện giờ theo giờ VN
                            css_v=lambda: int((HERE / "static" / "app.css").stat().st_mtime))
     tpl.env.filters["ago"] = lambda ts: _ago(ts)
 
@@ -327,7 +328,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                  "douyin": browsers.get_choice(data), "auto": browsers.auto_token()}
         if token:
             try:
-                shard["profiles"] = browsers.list_profiles()
+                shard["profiles"] = browsers.list_profiles(start_launcher=False)   # không treo trang ~45s
             except browsers.BrowserError as e:
                 shard["error"] = str(e)
         return shard
@@ -457,14 +458,54 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             code = ("import sys,json; from pathlib import Path; from dytool import fb_browser as f; "
                     "d=Path(sys.argv[1]); print('PAGES='+json.dumps(f.login_and_discover(d)))")
             steps = loginstate.FB_STEPS
+        key = f"login{aid}"
+        if procs.get(key) and procs[key].poll() is None:
+            store.log(f"Tài khoản #{aid}: cửa sổ đăng nhập đang mở rồi — đăng nhập trong cửa sổ đó")
+            return RedirectResponse("/accounts", 303)
         (acc_dir / "login_state.json").unlink(missing_ok=True)   # tránh hiện lại kết quả lần trước
         loginstate.write(acc_dir / "login_state.json", steps, "Mở trình duyệt")
         log = open(acc_dir / "login.log", "w")
-        procs[f"login{aid}"] = subprocess.Popen([sys.executable, "-c", code, str(acc_dir)], cwd=ROOT,
-                                               stdout=log, stderr=subprocess.STDOUT)
+        p = procs[key] = subprocess.Popen([sys.executable, "-c", code, str(acc_dir)], cwd=ROOT,
+                                          stdout=log, stderr=subprocess.STDOUT)
         store.x("UPDATE accounts SET status='dang_dang_nhap' WHERE id=?", (aid,))
         store.log(f"Mở trình duyệt đăng nhập cho tài khoản #{aid}")
+
+        def watch():    # lưu kết quả ngay khi đăng nhập xong, kể cả khi người dùng đã rời trang Tài khoản
+            p.wait()
+            log.close()
+            _finish_login(key)
+        import threading
+        threading.Thread(target=watch, daemon=True).start()
         return RedirectResponse("/accounts", 303)
+
+    import threading as _threading
+    login_lock = _threading.Lock()
+
+    def _finish_login(key: str) -> bool:
+        """Đọc kết quả tiến trình đăng nhập đã xong (login.log) -> lưu Page / kênh. Gọi từ luồng theo dõi hoặc lần
+        làm mới trang; chạy đúng 1 lần cho mỗi lần đăng nhập. True = vừa xử lý xong 1 lần đăng nhập."""
+        with login_lock:
+            p = procs.get(key)
+            if not p or p.poll() is None:
+                return False
+            procs.pop(key)
+        aid = int(key[5:])
+        if not store.one("SELECT 1 FROM accounts WHERE id=?", (aid,)):
+            return True         # tài khoản đã bị xoá trong lúc đăng nhập
+        try:
+            out = (store.account_dir(data, aid) / "login.log").read_text(errors="ignore")
+            line = next((l for l in out.splitlines() if l.startswith("PAGES=")), None)
+            tt = next((l for l in out.splitlines() if l.startswith("TT=")), None)
+            if line:
+                _save_discovery(aid, json.loads(line[6:]))
+            elif tt:
+                _save_tiktok(aid, json.loads(tt[3:]))
+            else:
+                store.x("UPDATE accounts SET status='chua_dang_nhap' WHERE id=?", (aid,))
+                store.log(f"Tài khoản #{aid}: đăng nhập chưa xong", "error")
+        except Exception as e:
+            store.log(f"Tài khoản #{aid}: không lưu được kết quả đăng nhập: {e}", "error")
+        return True
 
     @app.post("/accounts/{aid}/discover")
     def discover(aid: int):
@@ -501,28 +542,20 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
 
     @app.get("/partials/accounts", response_class=HTMLResponse)
     def accounts_poll(request: Request):
-        # hoàn tất đăng nhập đang chờ
-        for key, p in list(procs.items()):
-            if key.startswith("login") and p.poll() is not None:
-                aid = int(key[5:])
-                out = (store.account_dir(data, aid) / "login.log").read_text(errors="ignore")
-                line = next((l for l in out.splitlines() if l.startswith("PAGES=")), None)
-                tt = next((l for l in out.splitlines() if l.startswith("TT=")), None)
-                if line:
-                    _save_discovery(aid, json.loads(line[6:]))
-                elif tt:
-                    _save_tiktok(aid, json.loads(tt[3:]))
-                else:
-                    store.x("UPDATE accounts SET status='chua_dang_nhap' WHERE id=?", (aid,))
-                    store.log(f"Tài khoản #{aid}: đăng nhập chưa xong", "error")
-                procs.pop(key)
-                # báo trình duyệt tải lại trang để hiện Page vừa tìm thấy
-                return HTMLResponse("", headers={"HX-Refresh": "true"})
+        # hoàn tất đăng nhập (thường luồng watch() đã làm); hết cửa sổ đăng nhập nào còn mở -> tải lại trang để hiện
+        # Page / kênh vừa tìm thấy (khung poll này chỉ có trên trang khi lúc vẽ còn đang đăng nhập)
+        for key in [k for k in procs if k.startswith("login")]:
+            _finish_login(key)
+        if not any(k.startswith("login") and p.poll() is None for k, p in procs.items()):
+            return HTMLResponse("", headers={"HX-Refresh": "true"})
         return HTMLResponse("")
 
     @app.post("/accounts/{aid}/delete")
     def delete_account(aid: int):
         acc = store.one("SELECT * FROM accounts WHERE id=?", (aid,))
+        p = procs.pop(f"login{aid}", None)       # đang mở cửa sổ đăng nhập -> đóng tiến trình đó
+        if p and p.poll() is None:
+            p.terminate()
         store.x("DELETE FROM accounts WHERE id=?", (aid,))
         if acc:     # ghi lại để biết đã xoá gì (thư mục data/accounts/<id> + hồ sơ ShardBrowser vẫn giữ)
             plat = "TikTok" if acc["platform"] == "tiktok" else "Facebook"
@@ -535,6 +568,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     def page_view(request: Request, pid: int):
         page = store.one("SELECT p.*, a.name acc_name FROM pages p JOIN accounts a ON a.id=p.account_id "
                          "WHERE p.id=?", (pid,))
+        if not page:        # kênh đã bị xoá / tab cũ -> về danh sách, không lỗi 500
+            return RedirectResponse("/accounts", 303)
         sources = store.q("SELECT * FROM sources WHERE page_id=? ORDER BY id", (pid,))
         mirror = store.q("SELECT c.*, p.name dst_name FROM crossposts c JOIN pages p ON p.id=c.dst_page_id "
                          "WHERE c.src_page_id=? ORDER BY c.updated_at DESC LIMIT 10", (pid,))
@@ -543,7 +578,12 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
 
     @app.post("/crossposts/{src}/{dst}/{vid}/retry")
     def crosspost_retry(src: int, dst: int, vid: str):
-        store.set_crosspost(vid, src, dst, status="pending", error=None)
+        cp = store.one("SELECT * FROM crossposts WHERE video_id=? AND src_page_id=? AND dst_page_id=?", (vid, src, dst))
+        if not cp or cp["status"] != "failed":
+            return HTMLResponse('<span class="pill">Không còn ở trạng thái lỗi — tải lại trang</span>')
+        # giờ hẹn đã qua -> đăng ngay khi tới lượt (giữ giờ cũ thì worker lại coi là quá giờ)
+        when = cp["scheduled_at"] if cp["scheduled_at"] and cp["scheduled_at"] > time.time() + 25 * 60 else None
+        store.set_crosspost(vid, src, dst, status="pending", error=None, scheduled_at=when)
         return HTMLResponse('<span class="pill info">Chờ đăng lại</span>')
 
     @app.post("/pages/{pid}/settings")
@@ -592,6 +632,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                       publish_time: int = Form(1), sort_type: int = Form(1), max_age_days: float = Form(3),
                       enabled: str = Form(None)):
         row = store.one("SELECT page_id FROM sources WHERE id=?", (sid,))
+        if not row:
+            return RedirectResponse("/accounts", 303)
         params = ({"max_age_days": max_age_days} if kind == "channel"
                   else {"max_results": max_results, "publish_time": publish_time, "sort_type": sort_type})
         store.x("UPDATE sources SET kind=?, value=?, params=?, enabled=? WHERE id=?",
@@ -602,12 +644,16 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     @app.post("/sources/{sid}/toggle")
     def toggle_source(sid: int):
         row = store.one("SELECT page_id FROM sources WHERE id=?", (sid,))
+        if not row:
+            return RedirectResponse("/accounts", 303)
         store.x("UPDATE sources SET enabled=1-enabled WHERE id=?", (sid,))
         return RedirectResponse(f"/pages/{row['page_id']}", 303)
 
     @app.post("/sources/{sid}/delete")
     def del_source(sid: int):
         row = store.one("SELECT page_id FROM sources WHERE id=?", (sid,))
+        if not row:         # bấm Xoá 2 lần / tab cũ
+            return RedirectResponse("/accounts", 303)
         store.x("DELETE FROM sources WHERE id=?", (sid,))
         return RedirectResponse(f"/pages/{row['page_id']}", 303)
 
@@ -638,12 +684,14 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                          "status IN ('schedule_pending','scheduled')", (page_id,))["t"]
         t = max(time.time() + 1800, last + gap)
         t = int((t + 299) // 300 * 300)      # làm tròn lên 5 phút
-        return dt.datetime.fromtimestamp(t).strftime("%Y-%m-%dT%H:%M")
+        from ..store import vn_time
+        return vn_time(t).strftime("%Y-%m-%dT%H:%M")     # ô chọn giờ hiểu là giờ VN
 
     @app.post("/videos/{pid}/{vid}/schedule")
     def schedule(pid: int, vid: str, when: str = Form(""), caption: str = Form(None)):
         # when mặc định "": ô giờ để trống -> báo lỗi rõ ràng thay vì 422 (htmx bỏ qua, người dùng không thấy gì)
         import datetime as dt
+        from ..store import vn_fmt, vn_ts
         pg = store.one("SELECT platform FROM pages WHERE id=?", (pid,))
         where = "TikTok" if pg and pg["platform"] == "tiktok" else "Facebook"
 
@@ -651,12 +699,12 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             # lỗi hiện ngay dưới ô chọn giờ, giữ nguyên các nút Duyệt / Đăng ngay
             return HTMLResponse(msg, headers={"HX-Retarget": f"#v-{pid}-{vid} .sched-msg", "HX-Reswap": "innerHTML"})
         try:
-            ts = int(dt.datetime.strptime(when, "%Y-%m-%dT%H:%M").timestamp())
+            ts = vn_ts(dt.datetime.strptime(when, "%Y-%m-%dT%H:%M"))     # giờ người dùng chọn = giờ VN
         except ValueError:
             return err("Chưa chọn đủ ngày và giờ — chọn lại trong ô bên trên rồi bấm Lên lịch.")
         if ts < time.time() + 20 * 60:
-            earliest = dt.datetime.fromtimestamp(time.time() + 21 * 60)
-            return err(f"{where} chỉ nhận lịch sau ít nhất 20 phút nữa — chọn từ {earliest:%H:%M} trở đi.")
+            return err(f"{where} chỉ nhận lịch sau ít nhất 20 phút nữa — chọn từ "
+                       f"{vn_fmt(time.time() + 21 * 60, '%H:%M')} trở đi.")
         fields = {"caption": caption} if caption is not None else {}
         if not store.set_video_if(vid, pid, ("review", "approved", "schedule_pending"), status="schedule_pending",
                                   scheduled_at=ts, error=None, **fields):
@@ -664,7 +712,10 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         store.log(f"Lên lịch {vid} lúc {when.replace('T', ' ')}", page_id=pid)
         note = " (TikTok chỉ nhận lịch trong 10 ngày — tool sẽ gửi khi tới gần ngày)" \
             if where == "TikTok" and ts > time.time() + 10 * 86400 - 3600 else ""
-        return HTMLResponse(f'<div class="done">Sẽ gửi lịch lên {where}: {dt.datetime.fromtimestamp(ts):%H:%M %d/%m}{note}</div>')
+        # đổi giờ / lên lịch lại: lượt đăng kèm TikTok đang chờ theo giờ cũ -> bỏ, worker xếp lại theo giờ mới khi
+        # lịch Facebook được gửi
+        store.x("DELETE FROM crossposts WHERE video_id=? AND src_page_id=? AND status='pending'", (vid, pid))
+        return HTMLResponse(f'<div class="done">Sẽ gửi lịch lên {where}: {vn_fmt(ts)}{note}</div>')
 
     @app.post("/videos/{pid}/{vid}/{action}")
     def video_action(pid: int, vid: str, action: str, caption: str = Form(None)):
@@ -682,6 +733,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         if action not in rules:
             return HTMLResponse('<div class="done" style="color:var(--err)">Thao tác không hợp lệ</div>', status_code=400)
         new, allowed = rules[action]
+        if action == "retry" and not (data / "raw" / f"{vid}.mp4").exists():
+            new = "new"         # lỗi ở bước tải (chưa có file gốc) -> tải lại, không đưa thẳng sang edit
         fields = {"caption": caption} if caption is not None else {}
         if new:
             fields.update(status=new, error=None)
@@ -695,6 +748,9 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                     if cur and cur["status"] == "scheduled" else " — tải lại trang để xem trạng thái mới")
             return HTMLResponse(f'<div class="done" style="color:var(--err)">Không làm được: video đang ở trạng thái '
                                 f'"{now}"{hint}</div>')
+        if action in ("unschedule", "reject"):
+            # huỷ lịch / bỏ video -> lượt đăng kèm TikTok chưa đăng của nó cũng bỏ (trước: TikTok vẫn đăng theo giờ cũ)
+            store.x("DELETE FROM crossposts WHERE video_id=? AND src_page_id=? AND status='pending'", (vid, pid))
         return HTMLResponse(f'<div class="done">{STATUS_VI.get(new, "Đã lưu") if new else "Đã lưu caption"}</div>')
 
     # ---------------- Tiến trình ----------------

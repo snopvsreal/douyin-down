@@ -75,7 +75,12 @@ Luồng 1 video: `new` → tải → `downloaded` → edit → `review` (hoặc 
 - **Server cục bộ không có đăng nhập**: `_request_guard` chặn Host lạ (DNS rebinding) và POST có Origin/Referer khác
   dytool (CSRF). Test bằng `TestClient(..., base_url="http://127.0.0.1:8000")`. `/media/edited` là thư mục duy nhất
   được phục vụ tĩnh — đừng mount cả `data/` (cookie FB, app.db). Ghi vào config.yaml: lọc giá trị bằng regex chặt.
-- `onsubmit="return confirm()"` vô tác dụng khi body có `hx-boost` → dùng `hx-confirm`.
+- `onsubmit="return confirm()"` vô tác dụng khi body có `hx-boost` → dùng `hx-confirm`. htmx bỏ qua phản hồi
+  4xx/5xx → `base.html` hiện thông báo nổi `#dy-toast` (poll `every …` thì không).
+- **Giờ lịch đăng = giờ VN cố định UTC+7** (`store.vn_time / vn_ts / vn_fmt`, template `vnt(ts, fmt)`), không dùng
+  `fromtimestamp` / `time.localtime` theo múi giờ máy. Hạn mức ngày tính theo ngày VN, gồm cả bài hẹn giờ.
+- Worker chọn việc bằng SQL lọc sẵn Page đang bật (`_top_video`), không `LIMIT 20` rồi mới lọc. Backend tải hỏng → chờ
+  10 phút (`_tdl_retry_at`). `_cleanup` (6 giờ/lần khi rảnh) dọn work/, raw, edited, ảnh log, nhật ký cũ.
 
 - **OmniVoice phải có giọng mẫu cố định** (voice profile): `voice: default` sinh giọng ngẫu nhiên mỗi lần gọi.
   Profile tạo tự động theo `instruct` + `seed` (tên `dy-nam-<md5>` — dùng md5, **không dùng `hash()`** vì đổi mỗi lần chạy).

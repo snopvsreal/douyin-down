@@ -4,7 +4,7 @@
   <div class="row">
     <h2 id="h-upd" style="margin:0">Cập nhật</h2>
     <div class="spacer"></div>
-    <span class="small muted">{% if checked_at %}Kiểm tra lúc {{ time.strftime('%H:%M', time.localtime(checked_at)) }}{% else %}Đang kiểm tra…{% endif %}</span>
+    <span class="small muted">{% if checked_at %}Kiểm tra lúc {{ vnt(checked_at, '%H:%M') }}{% else %}Đang kiểm tra…{% endif %}</span>
     <button class="btn sm ghost" hx-post="/updates/check" hx-target="closest section" hx-swap="outerHTML"
             hx-disabled-elt="this">Kiểm tra lại</button>
   </div>

@@ -45,18 +45,15 @@
       {% if navc.get('failed') %}<span class="badge err">{{ navc.failed }}<span class="sr-only"> video lỗi</span></span>{% endif %}
     {% endcall %}
 
-    {# nhóm Kênh: nút + nhỏ cạnh tiêu đề (không phải 1 mục menu — trước đây trông như nút "thêm tài khoản" giữa menu) #}
-    <div class="nav-sec nav-sec-row"><span>Kênh</span>
-      <a href="/accounts" class="nav-sec-add" title="Thêm kênh: đăng nhập tài khoản Facebook / TikTok, tool tự tìm Page"
-         aria-label="Thêm kênh"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></a></div>
+    <p class="nav-sec">Kênh</p>
     {% for ch in nav_pages %}
       <a href="/pages/{{ ch.id }}" class="nav-item nav-chan {{ 'on' if p == '/pages/' ~ ch.id }}" {{ 'aria-current=page' if p == '/pages/' ~ ch.id }}
          title="{{ ch.name }} — {{ 'đang bật' if ch.enabled else 'đang tắt' }}">
         <span class="chan-dot" style="background:{{ ch.color if ch.enabled else 'var(--t-dis)' }}" aria-hidden="true"></span>
         <span class="label">{{ ch.name }}</span><span class="ptag">{{ 'TT' if ch.tt else 'FB' }}</span></a>
-    {% else %}
-      <p class="nav-empty">Chưa có kênh — đăng nhập tài khoản ở <a href="/accounts">Tài khoản</a>, tool tự tìm Page.</p>
     {% endfor %}
+    <a href="/accounts" class="nav-item nav-add" title="Đăng nhập tài khoản để thêm Page / kênh TikTok">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="label">{{ 'Thêm kênh' if nav_pages else 'Thêm kênh đầu tiên' }}</span></a>
 
     <p class="nav-sec">Hệ thống</p>
     {{ nav('/accounts', 'Tài khoản', p.startswith('/accounts'), 5,

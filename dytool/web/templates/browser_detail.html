@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}{{ prof.name }} · Hồ sơ trình duyệt{% endblock %}
+{% block body %}
+{% set active = 'profiles' %}{% include "_btabs.html" %}
+{% set saved = request.query_params.get('saved') %}
+
+<div class="settings">
+<nav class="toc" aria-label="Mục cài đặt hồ sơ">
+  <a href="#chung">Chung</a><a href="#mang">Proxy · mạng</a><a href="#van-tay">Dấu vân tay</a><a href="#cookie">Cookie</a>
+  <a href="#tien-ich">Tiện ích</a><a href="#bookmark">Bookmark</a><a href="#nang-cao">Nâng cao</a>
+</nav>
+<div>
+
+<div class="card" style="margin-bottom:16px">
+  <div class="row" style="gap:8px; flex-wrap:wrap">
+    <h2 style="margin:0" class="trunc">{{ prof.name }}</h2>
+    {% if prof.running %}<span class="pill ok">Đang mở</span>{% endif %}
+    {% for u in used %}<span class="tag{{ ' tt' if u.startswith('TikTok') }}">{{ u }}</span>{% endfor %}
+    <div class="spacer"></div>
+    {% if prof.running %}
+      <form method="post" action="/browsers/{{ prof.id }}/close" hx-disabled-elt="find button"
+            {% if not prof.opened_here %}hx-confirm="Hồ sơ này đang được dytool dùng (đăng nhập hoặc đăng bài). Đóng lúc này có thể làm việc đó dừng giữa chừng. Vẫn đóng?"{% endif %}>
+        <input type="hidden" name="back" value="detail"><button class="btn">Đóng</button></form>
+    {% else %}
+      <form method="post" action="/browsers/{{ prof.id }}/open" hx-disabled-elt="find button">
+        <input type="hidden" name="back" value="detail"><button class="btn primary" {{ 'disabled' if not engine_ready }}>Mở trình duyệt</button></form>
+    {% endif %}
+    <form method="post" action="/browsers/{{ prof.id }}/clone" hx-disabled-elt="find button"
+          hx-confirm="Tạo hồ sơ mới cùng cài đặt (proxy, ngôn ngữ, nhiễu, tiện ích, bookmark) nhưng dấu vân tay MỚI và chưa đăng nhập?">
+      <button class="btn ghost">Nhân bản</button></form>
+    <form method="post" action="/browsers/{{ prof.id }}/delete"
+          hx-confirm="Bỏ hồ sơ {{ prof.name }} vào thùng rác? Khôi phục được trong 30 ngày.">
+      <button class="btn ghost danger" {{ 'disabled' if used or prof.running }}
+              title="{{ 'Đang dùng cho tài khoản — đổi sang hồ sơ khác trước' if used else ('Đóng hồ sơ trước' if prof.running else 'Bỏ vào thùng rác') }}">Xoá</button></form>
+  </div>
+  <p class="hint" style="margin:6px 0 0">Thay đổi áp dụng từ lần mở sau{% if prof.running %} — hồ sơ đang mở, đóng rồi mở lại để dùng cài đặt mới{% endif %}.</p>
+</div>
+
+{# ---- Chung ---- #}
+<section class="group" id="chung" aria-labelledby="h-chung">
+  <h2 id="h-chung">Chung</h2>
+  {% if saved == 'general' %}<div class="notice" role="status">Đã lưu.</div>{% endif %}
+  <form method="post" action="/browsers/{{ prof.id }}/general" class="card">
+    <div class="grid g2">
+      <div><label for="g-name">Tên hồ sơ</label>
+        <input type="text" id="g-name" name="name" value="{{ prof.name }}" maxlength="80" required></div>
+      <div><label for="g-lang">Ngôn ngữ giao diện</label>
+        <select id="g-lang" name="lang">
+          <option value="auto" {{ 'selected' if not prof.english }}>Theo IP (proxy / mạng đang dùng)</option>
+          <option value="en" {{ 'selected' if prof.english }}>Tiếng Anh — nên dùng cho TikTok</option>
+        </select></div>
+      <div><label for="g-tags">Nhãn (cách nhau bằng dấu phẩy)</label>
+        <input type="text" id="g-tags" name="tags" value="{{ prof.tags|join(', ') }}" placeholder="vd: mèo, nuôi mới"></div>
+      <div><label for="g-notes">Ghi chú</label>
+        <textarea id="g-notes" name="notes" rows="2" maxlength="2000">{{ prof.notes }}</textarea></div>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn primary">Lưu</button></div>
+  </form>
+</section>
+
+{# ---- Proxy · mạng ---- #}
+<section class="group" id="mang" aria-labelledby="h-mang">
+  <h2 id="h-mang">Proxy · mạng</h2>
+  {% if saved == 'network' %}<div class="notice" role="status">Đã lưu — áp dụng từ lần mở sau.</div>{% endif %}
+  <form method="post" action="/browsers/{{ prof.id }}/network" class="card">
+    <div class="grid g2">
+      <div><label for="n-proxy">Proxy</label>
+        <select id="n-proxy" name="proxy_id">
+          <option value="">Không dùng proxy (mạng của máy này)</option>
+          {% for x in proxies %}
+            <option value="{{ x.id }}" {{ 'selected' if prof.proxy_id == x.id }}>{{ x.label ~ ' · ' if x.label }}{{ mask(x.url) }}{% if x.check %} — {{ (x.check.cc ~ ' ' ~ x.check.ip) if x.check.ok else 'lỗi' }}{% endif %}</option>
+          {% endfor %}
+        </select>
+        <p class="hint">Thêm / kiểm tra proxy ở tab <a href="/browsers/proxies">Proxy</a>. Múi giờ, ngôn ngữ (nếu để theo IP),
+          toạ độ tự theo IP của proxy. Proxy chết thì dytool báo lỗi, không đăng.</p></div>
+      <div><label for="n-webrtc">WebRTC</label>
+        <select id="n-webrtc" name="webrtc">
+          {% for k, v in webrtc_modes.items() %}<option value="{{ k }}" {{ 'selected' if prof.webrtc == k }}>{{ v }}</option>{% endfor %}
+        </select>
+        <p class="hint">Tự động: proxy SOCKS5 có UDP thì WebRTC đi qua proxy, không có thì chỉ TCP — không lộ IP thật.</p></div>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn primary">Lưu</button></div>
+  </form>
+</section>
+
+{# ---- Dấu vân tay ---- #}
+<section class="group" id="van-tay" aria-labelledby="h-vt">
+  <h2 id="h-vt">Dấu vân tay</h2>
+  {% if saved == 'fp' %}<div class="notice" role="status">Đã tạo dấu vân tay mới — áp dụng từ lần mở sau.</div>{% endif %}
+  {% if saved == 'noise' %}<div class="notice" role="status">Đã lưu nhiễu.</div>{% endif %}
+  <div class="card">
+    <table class="small">
+      <tr><td class="muted">Mẫu máy</td><td>{{ prof.template }}</td></tr>
+      <tr><td class="muted">Hệ điều hành · CPU · RAM</td><td>{{ prof.os }} · {{ prof.cores }} nhân · {{ prof.ram }} GB</td></tr>
+      <tr><td class="muted">Card đồ hoạ</td><td>{{ prof.gpu or '—' }}</td></tr>
+      <tr><td class="muted">Màn hình</td><td>{{ prof.screen }} <span class="muted">(khi mở dùng kích thước màn hình thật)</span></td></tr>
+    </table>
+    <form method="post" action="/browsers/{{ prof.id }}/fingerprint" class="row" style="gap:8px; flex-wrap:wrap; margin-top:12px"
+          hx-confirm="Đổi dấu vân tay của hồ sơ {{ prof.name }}? Cookie giữ nguyên, nhưng với trang web đây như máy khác — tài khoản đang đăng nhập có thể bị hỏi xác minh lại."
+          hx-disabled-elt="find button">
+      <label for="f-tpl" class="sr-only">Mẫu máy</label>
+      <select id="f-tpl" name="template" style="width:auto; max-width:100%">
+        <option value="">Ngẫu nhiên (Windows)</option>
+        {% for plat, ids in templates.items() %}
+          <optgroup label="{{ plat }}">{% for t in ids %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</optgroup>
+        {% endfor %}
+      </select>
+      <button class="btn">Tạo dấu vân tay mới</button>
+    </form>
+    <p class="hint">220 mẫu máy thật của ShardBrowser; phần cứng (số nhân, RAM) được chọn ngẫu nhiên hợp với máy này.</p>
+
+    <form method="post" action="/browsers/{{ prof.id }}/noise" style="margin-top:12px">
+      <fieldset style="border:0; padding:0; margin:0">
+        <legend class="small"><b>Nhiễu chống dò</b> <span class="muted">— mặc định tắt (máy thật không có nhiễu); bật khi cần khác biệt hơn giữa các hồ sơ</span></legend>
+        <div class="row" style="gap:16px; flex-wrap:wrap; margin-top:6px">
+          {% for v, label in noise_vectors %}
+            <label class="check"><input type="checkbox" name="noise" value="{{ v }}" {{ 'checked' if v in noise_on }}> {{ label }}</label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      <div class="row" style="margin-top:8px"><button class="btn sm">Lưu nhiễu</button></div>
+    </form>
+  </div>
+</section>
+
+{# ---- Cookie ---- #}
+<section class="group" id="cookie" aria-labelledby="h-ck">
+  <h2 id="h-ck">Cookie</h2>
+  {% if saved == 'cookie' %}<div class="notice" role="status">Đã nhập cookie.</div>{% endif %}
+  <div class="card">
+    <div class="row" style="gap:12px; flex-wrap:wrap; align-items:flex-end">
+      <form method="post" action="/browsers/{{ prof.id }}/cookies/export" hx-boost="false">
+        <button class="btn" {{ 'disabled' if not engine_ready }}>Xuất cookie (.json)</button></form>
+      <form method="post" action="/browsers/{{ prof.id }}/cookies/import" enctype="multipart/form-data" class="row" style="gap:8px; flex-wrap:wrap"
+            hx-confirm="Nhập cookie vào hồ sơ {{ prof.name }}? Cookie cùng tên sẽ bị ghi đè." hx-disabled-elt="find button">
+        <label for="ck-file" class="sr-only">File cookie</label>
+        <input type="file" id="ck-file" name="file" accept=".json,application/json" required>
+        <button class="btn" {{ 'disabled' if not engine_ready }}>Nhập cookie</button></form>
+    </div>
+    <p class="hint">Định dạng JSON của dytool / Playwright / EditThisCookie / Cookie-Editor. File cookie chứa phiên đăng nhập —
+      giữ kín như mật khẩu. Hồ sơ đang tắt thì dytool tự mở ẩn vài giây để đọc / ghi.</p>
+  </div>
+</section>
+
+{# ---- Tiện ích ---- #}
+<section class="group" id="tien-ich" aria-labelledby="h-ti">
+  <h2 id="h-ti">Tiện ích</h2>
+  {% if saved == 'ext' %}<div class="notice" role="status">Đã lưu — áp dụng từ lần mở sau.</div>{% endif %}
+  <form method="post" action="/browsers/{{ prof.id }}/extensions" class="card">
+    {% if extensions %}
+      <div class="row" style="gap:16px; flex-wrap:wrap">
+        {% for e in extensions %}
+          <label class="check"><input type="checkbox" name="ext" value="{{ e.id }}" {{ 'checked' if e.id in prof.extensions }}> {{ e.name }} <span class="muted">{{ e.version }}</span></label>
+        {% endfor %}
+      </div>
+      <div class="row" style="margin-top:12px"><button class="btn primary">Lưu</button></div>
+    {% else %}
+      <p class="empty small" style="margin:0">Chưa có tiện ích nào — thêm ở tab <a href="/browsers/extensions">Tiện ích</a>.</p>
+    {% endif %}
+  </form>
+</section>
+
+{# ---- Bookmark ---- #}
+<section class="group" id="bookmark" aria-labelledby="h-bm">
+  <h2 id="h-bm">Bookmark</h2>
+  {% if saved == 'bm' %}<div class="notice" role="status">Đã lưu — hiện trong thư mục “dytool” trên thanh dấu trang từ lần mở sau.</div>{% endif %}
+  <form method="post" action="/browsers/{{ prof.id }}/bookmarks" class="card">
+    <label for="bm-text">Mỗi dòng 1 trang: <code>Tên | https://…</code> hoặc chỉ địa chỉ</label>
+    <textarea id="bm-text" name="text" rows="4" placeholder="Business Suite | https://business.facebook.com/&#10;https://www.tiktok.com/tiktokstudio">{% for b in prof.bookmarks %}{{ b.title }} | {{ b.url }}
+{% endfor %}</textarea>
+    <div class="row" style="margin-top:12px"><button class="btn primary">Lưu</button></div>
+  </form>
+</section>
+
+{# ---- Nâng cao ---- #}
+<section class="group" id="nang-cao" aria-labelledby="h-nc">
+  <h2 id="h-nc">Nâng cao</h2>
+  {% if saved == 'adv' %}<div class="notice" role="status">Đã lưu — áp dụng từ lần mở sau.</div>{% endif %}
+  <form method="post" action="/browsers/{{ prof.id }}/advanced" class="card">
+    <label for="adv-args">Tham số khởi động thêm</label>
+    <input type="text" id="adv-args" name="extra_args" value="{{ prof.extra_args }}" spellcheck="false" placeholder="vd: --mute-audio --start-maximized">
+    <p class="hint">Thêm vào mỗi lần mở hồ sơ. Không được đặt tham số dytool tự lo (hồ sơ, proxy, tiện ích, cổng điều khiển).</p>
+    <div class="row" style="margin-top:12px"><button class="btn primary">Lưu</button></div>
+  </form>
+  <p class="hint">Mã hồ sơ: <code>{{ prof.id }}</code> · {{ prof.size_mb }} MB · tạo {{ vnt(prof.created, '%d/%m/%Y %H:%M') }}</p>
+</section>
+
+</div>
+</div>
+{% endblock %}

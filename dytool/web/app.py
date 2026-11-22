@@ -397,7 +397,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     _th.Thread(target=_read_accel, daemon=True).start()
 
     # ---------------- Trình duyệt nhúng (SDK ShardX) ----------------
-    # ---------------- Hồ sơ trình duyệt (trang quản lý) ----------------
+    # ---------------- Hồ sơ trình duyệt (trang quản lý, giống app ShardBrowser) ----------------
     def _profile_usage() -> dict[str, list[str]]:
         """id hồ sơ -> tài khoản / Douyin đang dùng nó."""
         from .. import browsers
@@ -412,77 +412,271 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             use.setdefault(c["profile_id"], []).append("Đăng nhập Douyin")
         return use
 
-    @app.get("/browsers", response_class=HTMLResponse)
-    def browsers_page(request: Request):
-        from .. import browsers
-        profiles = browsers.profile_details()
+    def _bctx() -> dict:
+        """Dữ liệu chung các trang Hồ sơ trình duyệt (thanh tab + trạng thái nhân)."""
+        from .. import browser_mgr, browsers
         try:
             engine = json.loads((browsers.SDK_DIR / "manifest.json").read_text("utf-8")).get("installed_chromium_version")
         except (OSError, ValueError):
             engine = None
-        return render(request, "browsers.html", profiles=profiles, usage=_profile_usage(), engine=engine,
-                      engine_ready=browsers.engine_installed(), total_mb=round(sum(p["size_mb"] for p in profiles), 1),
-                      sdk_dir=str(browsers.SDK_DIR))
+        proxies = browser_mgr.list_proxies()
+        return {"engine": engine, "engine_ready": browsers.engine_installed(), "sdk_dir": str(browsers.SDK_DIR),
+                "proxies": proxies, "proxy_by_id": {x["id"]: x for x in proxies}, "mask": browser_mgr.mask,
+                "n_trash": len(browser_mgr.list_trash()), "n_ext": len(browser_mgr.list_extensions())}
 
-    def _browser_op(fn, ok_msg: str = ""):
+    def _bop(fn, back: str, ok_msg=None):
+        """Chạy 1 thao tác hồ sơ: lỗi -> 400 kèm lời nhắn (giao diện hiện thông báo nổi); xong -> về trang `back`."""
         from .. import browsers
         try:
-            fn()
-        except browsers.BrowserError as e:
+            res = fn()
+        except (browsers.BrowserError, ValueError) as e:
             return PlainTextResponse(str(e), 400)
-        if ok_msg:
-            store.log(ok_msg)
-        return RedirectResponse("/browsers", 303)
+        msg = ok_msg(res) if callable(ok_msg) else ok_msg
+        if msg:
+            store.log(msg)
+        return RedirectResponse(back(res) if callable(back) else back, 303)
 
-    def _profile_name(pid: str) -> str:
+    def _pname(pid: str) -> str:
         from .. import browsers
-        return next((p["name"] for p in browsers.list_profiles() if p["id"] == pid), pid)
+        return browsers.read_meta(pid).get("name") or pid
+
+    @app.get("/browsers", response_class=HTMLResponse)
+    def browsers_page(request: Request, tag: str = ""):
+        from .. import browsers
+        profiles = browsers.profile_details()
+        tags = sorted({t for p in profiles for t in p["tags"]}, key=str.lower)
+        shown = [p for p in profiles if not tag or tag in p["tags"]]
+        return render(request, "browsers.html", profiles=shown, all_count=len(profiles), tags=tags, tag=tag,
+                      usage=_profile_usage(), total_mb=round(sum(p["size_mb"] for p in profiles), 1), **_bctx())
 
     @app.post("/browsers/new")
     def browsers_new(name: str = Form(""), lang: str = Form("auto")):
         from .. import browsers
         name = " ".join(name.split())[:80] or "Hồ sơ mới"
-        return _browser_op(lambda: browsers.create_profile(name, english=lang == "en"),
-                           f"Đã tạo hồ sơ trình duyệt '{name}'")
+        return _bop(lambda: browsers.create_profile(name, english=lang == "en"),
+                    lambda c: f"/browsers/{c['profile_id']}", f"Đã tạo hồ sơ trình duyệt '{name}'")
 
-    @app.post("/browsers/{pid}/open")
-    def browsers_open(pid: str):
-        from .. import browsers
-        return _browser_op(lambda: browsers.open_window(pid))
+    # ----- proxy -----
+    @app.get("/browsers/proxies", response_class=HTMLResponse)
+    def browsers_proxies(request: Request):
+        from .. import browser_mgr
+        return render(request, "browser_proxies.html", usage=browser_mgr.proxy_usage(), checking=_proxy_checking,
+                      **_bctx())
 
-    @app.post("/browsers/{pid}/close")
-    def browsers_close(pid: str):
-        from .. import browsers
-        return _browser_op(lambda: browsers.close_window(pid))
+    _proxy_checking: dict = {"on": False}
 
-    @app.post("/browsers/{pid}/rename")
-    def browsers_rename(pid: str, name: str = Form("")):
-        from .. import browsers
+    @app.post("/browsers/proxies/add")
+    def proxies_add(text: str = Form(""), scheme: str = Form("socks5"), label: str = Form("")):
+        from .. import browser_mgr
+        added, bad = browser_mgr.add_proxies(text, scheme, label)
+        if bad and not added:
+            return PlainTextResponse("Không thêm được proxy nào: " + "; ".join(bad[:3]), 400)
+        store.log(f"Đã thêm {added} proxy" + (f" ({len(bad)} dòng lỗi: {'; '.join(bad[:3])})" if bad else ""),
+                  "error" if bad else "info")
+        return RedirectResponse("/browsers/proxies", 303)
+
+    @app.post("/browsers/proxies/check-all")
+    def proxies_check_all():
+        from .. import browser_mgr
+        if not _proxy_checking["on"]:
+            _proxy_checking["on"] = True
+
+            def run():
+                try:
+                    for x in browser_mgr.list_proxies():
+                        browser_mgr.check_proxy(x["id"])
+                finally:
+                    _proxy_checking["on"] = False
+            import threading
+            threading.Thread(target=run, daemon=True).start()
+        return RedirectResponse("/browsers/proxies", 303)
+
+    @app.post("/browsers/proxies/{proxy_id}/check")
+    def proxies_check(proxy_id: str):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.check_proxy(proxy_id), "/browsers/proxies")
+
+    @app.post("/browsers/proxies/{proxy_id}/label")
+    def proxies_label(proxy_id: str, label: str = Form("")):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.update_proxy(proxy_id, label), "/browsers/proxies")
+
+    @app.post("/browsers/proxies/{proxy_id}/delete")
+    def proxies_delete(proxy_id: str):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.delete_proxy(proxy_id), "/browsers/proxies",
+                    lambda names: "Đã xoá 1 proxy" + (f" — bỏ proxy khỏi hồ sơ: {', '.join(names)}" if names else ""))
+
+    # ----- tiện ích -----
+    @app.get("/browsers/extensions", response_class=HTMLResponse)
+    def browsers_extensions(request: Request):
+        from .. import browser_mgr, browsers
+        use: dict[str, list[str]] = {}
+        for p in browsers.list_profiles():
+            for e in browsers.read_meta(p["id"]).get("extensions") or []:
+                use.setdefault(e, []).append(p["name"])
+        return render(request, "browser_extensions.html", extensions=browser_mgr.list_extensions(), ext_usage=use,
+                      **_bctx())
+
+    @app.post("/browsers/extensions/add")
+    def extensions_add(src: str = Form("")):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.add_extension(src), "/browsers/extensions",
+                    lambda x: f"Đã thêm tiện ích {x['name']} {x['version']}")
+
+    @app.post("/browsers/extensions/{ext_id}/delete")
+    def extensions_delete(ext_id: str):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.remove_extension(ext_id), "/browsers/extensions", "Đã gỡ 1 tiện ích")
+
+    # ----- thùng rác -----
+    @app.get("/browsers/trash", response_class=HTMLResponse)
+    def browsers_trash(request: Request):
+        from .. import browser_mgr
+        return render(request, "browser_trash.html", trash=browser_mgr.list_trash(), days=browser_mgr.TRASH_DAYS,
+                      **_bctx())
+
+    @app.post("/browsers/trash/empty")
+    def trash_empty():
+        from .. import browser_mgr
 
         def run():
-            browsers.rename_profile(pid, name)
+            for x in browser_mgr.list_trash():
+                browser_mgr.purge(x["id"])
+        return _bop(run, "/browsers/trash", "Đã dọn sạch thùng rác hồ sơ trình duyệt")
+
+    @app.post("/browsers/trash/{pid}/restore")
+    def trash_restore(pid: str):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.restore(pid), f"/browsers/{pid}", lambda _: f"Đã khôi phục hồ sơ '{_pname(pid)}'")
+
+    @app.post("/browsers/trash/{pid}/purge")
+    def trash_purge(pid: str):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.purge(pid), "/browsers/trash", "Đã xoá hẳn 1 hồ sơ trình duyệt")
+
+    # ----- 1 hồ sơ -----
+    @app.get("/browsers/{pid}", response_class=HTMLResponse)
+    def browser_detail(request: Request, pid: str):
+        from .. import browser_mgr, browsers
+        try:
+            browsers.profile_dir(pid)
+        except browsers.BrowserError:
+            return RedirectResponse("/browsers", 303)
+        p = next(x for x in browsers.profile_details() if x["id"] == pid)
+        try:
+            tpls = browser_mgr.templates()
+        except Exception:
+            tpls = {}
+        return render(request, "browser_detail.html", prof=p,   # không đặt tên `p`: base.html dùng biến p cho menu
+                      used=_profile_usage().get(pid, []), templates=tpls,
+                      noise_on=browser_mgr.noise_on(pid), noise_vectors=browser_mgr.NOISE_VECTORS,
+                      webrtc_modes=browser_mgr.WEBRTC, extensions=browser_mgr.list_extensions(), **_bctx())
+
+    @app.post("/browsers/{pid}/open")
+    def browsers_open(pid: str, back: str = Form("")):
+        from .. import browsers
+        return _bop(lambda: browsers.open_window(pid), f"/browsers/{pid}" if back == "detail" else "/browsers")
+
+    @app.post("/browsers/{pid}/close")
+    def browsers_close(pid: str, back: str = Form("")):
+        from .. import browsers
+        return _bop(lambda: browsers.close_window(pid), f"/browsers/{pid}" if back == "detail" else "/browsers")
+
+    @app.post("/browsers/{pid}/general")
+    def browsers_general(pid: str, name: str = Form(""), notes: str = Form(""), tags: str = Form(""),
+                         lang: str = Form("auto")):
+        from .. import browser_mgr, browsers
+
+        def run():
+            browser_mgr.save_general(pid, name, notes, tags)
+            browsers.set_language(pid, lang == "en")
             new = " ".join(name.split())[:80]
             # tên hiện ở trang Tài khoản / Cài đặt đọc từ browser.json -> cập nhật theo
             for target in [store.account_dir(data, a["id"]) for a in store.q("SELECT id FROM accounts")] + [data]:
                 c = browsers.get_choice(target)
                 if c and c["profile_id"] == pid:
                     browsers.set_choice(target, pid, new)
-        return _browser_op(run)
+        return _bop(run, f"/browsers/{pid}?saved=general#chung")
 
-    @app.post("/browsers/{pid}/language")
-    def browsers_language(pid: str, lang: str = Form("auto")):
-        from .. import browsers
-        return _browser_op(lambda: browsers.set_language(pid, lang == "en"),
-                           f"Hồ sơ '{_profile_name(pid)}': ngôn ngữ {'tiếng Anh' if lang == 'en' else 'theo IP'} (áp dụng lần mở sau)")
+    @app.post("/browsers/{pid}/network")
+    def browsers_network(pid: str, proxy_id: str = Form(""), webrtc: str = Form("auto")):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.save_network(pid, proxy_id, webrtc), f"/browsers/{pid}?saved=network#mang",
+                    f"Hồ sơ '{_pname(pid)}': đổi proxy / WebRTC (áp dụng lần mở sau)")
+
+    @app.post("/browsers/{pid}/fingerprint")
+    def browsers_fingerprint(pid: str, template: str = Form(""), platform: str = Form("Windows")):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.regenerate(pid, template, platform), f"/browsers/{pid}?saved=fp#van-tay",
+                    lambda t: f"Hồ sơ '{_pname(pid)}': dấu vân tay mới ({t})")
+
+    @app.post("/browsers/{pid}/noise")
+    async def browsers_noise(pid: str, request: Request):
+        from .. import browser_mgr
+        form = await request.form()
+        vecs = [str(v) for v in form.getlist("noise")]
+        return _bop(lambda: browser_mgr.set_noise(pid, vecs), f"/browsers/{pid}?saved=noise#van-tay")
+
+    @app.post("/browsers/{pid}/extensions")
+    async def browsers_set_ext(pid: str, request: Request):
+        from .. import browser_mgr
+        form = await request.form()
+        ids = [str(v) for v in form.getlist("ext")]
+        return _bop(lambda: browser_mgr.save_extensions(pid, ids), f"/browsers/{pid}?saved=ext#tien-ich")
+
+    @app.post("/browsers/{pid}/bookmarks")
+    def browsers_bookmarks(pid: str, text: str = Form("")):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.save_bookmarks(pid, text), f"/browsers/{pid}?saved=bm#bookmark")
+
+    @app.post("/browsers/{pid}/advanced")
+    def browsers_advanced(pid: str, extra_args: str = Form("")):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.save_advanced(pid, extra_args), f"/browsers/{pid}?saved=adv#nang-cao")
+
+    @app.post("/browsers/{pid}/cookies/export")
+    def browsers_cookies_export(pid: str):
+        from fastapi.responses import Response
+        from .. import browser_mgr, browsers
+        try:
+            cookies = browser_mgr.export_cookies(pid)
+        except browsers.BrowserError as e:
+            return PlainTextResponse(str(e), 400)
+        import unicodedata          # tên file trong header phải ASCII: bỏ dấu tiếng Việt
+        plain = unicodedata.normalize("NFKD", _pname(pid).replace("đ", "d").replace("Đ", "D"))
+        name = "".join(ch if ch.isascii() and ch.isalnum() else "-" for ch in plain if not unicodedata.combining(ch))[:40] or pid
+        store.log(f"Hồ sơ '{_pname(pid)}': xuất {len(cookies)} cookie")
+        return Response(json.dumps(cookies, ensure_ascii=False, indent=1), media_type="application/json",
+                        headers={"Content-Disposition": f'attachment; filename="cookies-{name}.json"'})
+
+    @app.post("/browsers/{pid}/cookies/import")
+    async def browsers_cookies_import(pid: str, request: Request):
+        from .. import browser_mgr
+        form = await request.form()
+        f = form.get("file")
+        text = (await f.read()).decode("utf-8-sig", "replace") if hasattr(f, "read") else str(form.get("text") or "")
+        if len(text) > 5_000_000:
+            return PlainTextResponse("File cookie quá lớn", 400)
+        from starlette.concurrency import run_in_threadpool      # Playwright bản đồng bộ không chạy trên vòng lặp async
+        return await run_in_threadpool(_bop, lambda: browser_mgr.import_cookies(pid, text), f"/browsers/{pid}?saved=cookie#cookie",
+                    lambda n: f"Hồ sơ '{_pname(pid)}': nhập {n} cookie")
+
+    @app.post("/browsers/{pid}/clone")
+    def browsers_clone(pid: str):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.clone(pid), lambda c: f"/browsers/{c['profile_id']}",
+                    lambda c: f"Đã nhân bản hồ sơ '{_pname(pid)}' -> '{c['profile_name']}'")
 
     @app.post("/browsers/{pid}/delete")
     def browsers_delete(pid: str):
-        from .. import browsers
+        from .. import browser_mgr
         used = _profile_usage().get(pid)
         if used:
             return PlainTextResponse(f"Hồ sơ đang dùng cho {', '.join(used)} — đổi sang hồ sơ khác trước rồi xoá", 400)
-        name = _profile_name(pid)
-        return _browser_op(lambda: browsers.delete_profile(pid), f"Đã xoá hồ sơ trình duyệt '{name}'")
+        name = _pname(pid)
+        return _bop(lambda: browser_mgr.trash(pid), "/browsers",
+                    f"Đã bỏ hồ sơ trình duyệt '{name}' vào thùng rác")
 
     def _auto_profile(target: Path, name: str, who: str, quiet: bool = False, english: bool = False) -> bool:
         """Chưa gắn hồ sơ -> tự tạo hồ sơ trình duyệt mới và gắn luôn (người dùng không phải liên kết tay)."""

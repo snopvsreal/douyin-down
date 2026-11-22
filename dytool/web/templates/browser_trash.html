@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Thùng rác · Hồ sơ trình duyệt{% endblock %}
+{% block body %}
+{% set active = 'trash' %}{% include "_btabs.html" %}
+
+<div class="row" style="margin-bottom:8px">
+  <span class="small muted">Hồ sơ đã xoá giữ {{ days }} ngày (cả cookie đăng nhập), sau đó tự xoá hẳn.</span>
+  <div class="spacer"></div>
+  {% if trash %}<form method="post" action="/browsers/trash/empty"
+        hx-confirm="Xoá hẳn {{ trash|length }} hồ sơ trong thùng rác? Không lấy lại được.">
+    <button class="btn sm ghost danger">Dọn sạch thùng rác</button></form>{% endif %}
+</div>
+
+{% if trash %}
+<div class="card table-card">
+<table>
+  <thead><tr><th>Hồ sơ</th><th>Xoá lúc</th><th>Dung lượng</th><th></th></tr></thead>
+  <tbody>
+  {% for t in trash %}
+    <tr>
+      <td><b>{{ t.name }}</b></td>
+      <td class="small">{{ vnt(t.deleted_at, '%H:%M %d/%m/%Y') if t.deleted_at else '—' }}</td>
+      <td class="small">{{ t.size_mb }} MB</td>
+      <td style="white-space:nowrap; text-align:right">
+        <form method="post" action="/browsers/trash/{{ t.id }}/restore" style="display:inline"><button class="btn sm">Khôi phục</button></form>
+        <form method="post" action="/browsers/trash/{{ t.id }}/purge" style="display:inline"
+              hx-confirm="Xoá hẳn hồ sơ {{ t.name }}? Mất dấu vân tay và cookie đăng nhập, không lấy lại được.">
+          <button class="btn sm ghost danger">Xoá hẳn</button></form></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+  <p class="empty">Thùng rác trống.</p>
+{% endif %}
+{% endblock %}

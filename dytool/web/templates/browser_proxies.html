@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Proxy · Hồ sơ trình duyệt{% endblock %}
+{% block body %}
+{% set active = 'proxies' %}{% include "_btabs.html" %}
+{% if checking.on %}<div hx-get="/browsers/proxies" hx-trigger="every 3s" hx-select=".content > *" hx-target=".content" hx-swap="innerHTML"></div>{% endif %}
+
+<form method="post" action="/browsers/proxies/add" class="card" style="margin-bottom:16px" hx-disabled-elt="find button">
+  <label for="px-text"><b>Thêm proxy</b> — dán nhiều dòng, mỗi dòng 1 proxy</label>
+  <textarea id="px-text" name="text" rows="4" required spellcheck="false"
+            placeholder="socks5://user:pass@1.2.3.4:1080&#10;1.2.3.4:8080&#10;1.2.3.4:1080:user:pass&#10;user:pass@1.2.3.4:1080"></textarea>
+  <div class="row" style="gap:8px; flex-wrap:wrap; margin-top:8px">
+    <label for="px-scheme" class="small">Loại khi dòng không ghi rõ</label>
+    <select id="px-scheme" name="scheme" style="width:auto">
+      <option value="socks5">SOCKS5</option><option value="http">HTTP</option><option value="https">HTTPS</option>
+    </select>
+    <label for="px-label" class="sr-only">Nhãn chung</label>
+    <input type="text" id="px-label" name="label" placeholder="Nhãn chung (không bắt buộc)" maxlength="60" style="width:220px; max-width:100%">
+    <button class="btn primary">Thêm</button>
+  </div>
+  <p class="hint">Proxy lưu trong <code>{{ sdk_dir }}\proxies.json</code> trên máy này (có cả mật khẩu proxy — không lên git).</p>
+</form>
+
+<div class="row" style="margin-bottom:8px">
+  <span class="small muted">{{ proxies|length }} proxy</span><div class="spacer"></div>
+  {% if proxies %}<form method="post" action="/browsers/proxies/check-all"><button class="btn sm" {{ 'disabled' if checking.on }}>
+    {{ 'Đang kiểm tra…' if checking.on else 'Kiểm tra tất cả' }}</button></form>{% endif %}
+</div>
+
+{% if proxies %}
+<div class="card table-card">
+<table>
+  <thead><tr><th>Proxy</th><th>Kết quả kiểm tra</th><th>Hồ sơ dùng</th><th></th></tr></thead>
+  <tbody>
+  {% for x in proxies %}
+    {% set used = usage.get(x.id, []) %}
+    <tr>
+      <td><div class="trunc"><b>{{ x.label or '—' }}</b></div><div class="small muted trunc" translate="no">{{ mask(x.url) }}</div>
+        <details class="small"><summary class="muted" style="cursor:pointer">Đổi nhãn</summary>
+          <form method="post" action="/browsers/proxies/{{ x.id }}/label" class="row" style="gap:6px; margin-top:4px; flex-wrap:nowrap">
+            <label for="lb-{{ x.id }}" class="sr-only">Nhãn</label>
+            <input type="text" id="lb-{{ x.id }}" name="label" value="{{ x.label }}" maxlength="60" style="width:160px">
+            <button class="btn sm">Lưu</button></form></details></td>
+      <td class="small">
+        {% if not x.check %}<span class="muted">Chưa kiểm tra</span>
+        {% elif x.check.ok %}<span class="pill ok">Chạy được</span> {{ x.check.country }}{{ ', ' ~ x.check.city if x.check.city }} · <span translate="no">{{ x.check.ip }}</span>
+          <div class="muted">{{ x.check.isp }} · {{ x.check.ms }} ms · UDP {{ (x.check.udp_ms ~ ' ms') if x.check.udp_ms is not none else 'không có' }} · {{ vnt(x.check.at, '%H:%M %d/%m') }}</div>
+        {% else %}<span class="pill err">Lỗi</span> <span class="muted">{{ x.check.error }}</span>{% endif %}</td>
+      <td class="small">{% for n in used %}<div class="trunc">{{ n }}</div>{% else %}<span class="muted">—</span>{% endfor %}</td>
+      <td style="white-space:nowrap; text-align:right">
+        <form method="post" action="/browsers/proxies/{{ x.id }}/check" style="display:inline" hx-disabled-elt="find button">
+          <button class="btn sm">Kiểm tra</button></form>
+        <form method="post" action="/browsers/proxies/{{ x.id }}/delete" style="display:inline"
+              hx-confirm="Xoá proxy {{ x.label or mask(x.url) }}?{% if used %} Hồ sơ đang dùng ({{ used|join(', ') }}) sẽ chuyển về không proxy.{% endif %}">
+          <button class="btn sm ghost danger">Xoá</button></form></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+  <p class="empty">Chưa có proxy. Dán danh sách proxy ở trên rồi bấm Thêm, sau đó gắn vào hồ sơ ở trang cài đặt của hồ sơ (mục Proxy · mạng).</p>
+{% endif %}
+{% endblock %}

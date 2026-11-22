@@ -16,6 +16,7 @@ Hồ sơ cho đăng nhập Douyin: data/browser.json
 import contextlib
 import json
 import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -276,7 +277,7 @@ def create_profile(name: str, english: bool = False) -> dict:
         nav["language"] = "auto"
     with _quiet():
         s.save_profile(p)
-    (PROFILES_DIR / p.id / META).write_text(json.dumps({"name": name}, ensure_ascii=False), "utf-8")
+    write_meta(p.id, name=name, created=int(time.time()))
     return {"profile_id": p.id, "profile_name": name}
 
 
@@ -290,15 +291,164 @@ def ensure_profile(acc_dir: Path, name: str, english: bool = False) -> tuple[dic
     return c, True
 
 
+# ---------------- cài đặt dytool của hồ sơ (dytool.json) ----------------
+# {name, created, notes, tags[], proxy_id, webrtc, extensions[], bookmarks[{title,url}], extra_args, deleted_at}
+
+def read_meta(pid: str) -> dict:
+    for base in (PROFILES_DIR, SDK_DIR / "trash"):
+        try:
+            m = json.loads((base / pid / META).read_text("utf-8"))
+            return m if isinstance(m, dict) else {}
+        except (OSError, ValueError):
+            continue
+    return {}
+
+
+def write_meta(pid: str, **upd) -> dict:
+    """Gộp trường mới vào dytool.json (None = xoá trường). Ghi nguyên tử."""
+    if not _valid_id(pid):
+        raise BrowserError("Mã hồ sơ không hợp lệ")
+    d = PROFILES_DIR / pid
+    m = read_meta(pid)
+    for k, v in upd.items():
+        if v is None:
+            m.pop(k, None)
+        else:
+            m[k] = v
+    tmp = d / (META + ".tmp")
+    tmp.write_text(json.dumps(m, ensure_ascii=False, indent=1), "utf-8")
+    tmp.replace(d / META)
+    return m
+
+
+# tham số tự thêm không được đè lên cái SDK / dytool tự đặt (hồ sơ, cổng điều khiển, proxy, tiện ích)
+_BLOCKED_ARGS = ("--user-data-dir", "--fingerprint-profile", "--remote-debugging", "--remote-allow-origins",
+                 "--proxy-server", "--load-extension", "--disable-extensions-except", "--headless", "--shardx-")
+
+
+def parse_extra_args(text: str) -> list[str]:
+    import shlex
+    try:
+        args = shlex.split(text or "", posix=True)
+    except ValueError as e:
+        raise BrowserError(f"Tham số khởi động sai cú pháp: {e}") from e
+    for a in args:
+        if not a.startswith("--"):
+            raise BrowserError(f"Tham số phải bắt đầu bằng -- : {a}")
+        if a.lower().startswith(_BLOCKED_ARGS):
+            raise BrowserError(f"Tham số {a.split('=')[0]} do dytool tự đặt — không tự thêm được")
+    return args
+
+
+def _proxy_url(meta: dict) -> str | None:
+    pid = meta.get("proxy_id")
+    if not pid:
+        return None
+    from . import browser_mgr
+    p = browser_mgr.get_proxy(pid)
+    if not p:
+        raise BrowserError("Proxy gắn với hồ sơ đã bị xoá — chọn proxy khác ở trang Hồ sơ trình duyệt")
+    return p["url"]
+
+
+def _proxy_reachable(url: str) -> None:
+    """Proxy chết thì báo rõ ngay (không thì trình duyệt mở lên mà trang nào cũng lỗi, đăng bài lỗi khó hiểu)."""
+    import socket
+    from urllib.parse import urlsplit
+    u = urlsplit(url)
+    try:
+        with socket.create_connection((u.hostname, u.port), timeout=6):
+            return
+    except OSError as e:
+        raise BrowserError(f"Không kết nối được proxy {u.hostname}:{u.port} ({e}) — kiểm tra proxy ở trang Hồ sơ "
+                           "trình duyệt") from e
+
+
+def _write_bookmarks(udd: Path, items: list[dict]) -> None:
+    """Bookmark của hồ sơ = thư mục "dytool" trên thanh dấu trang (ghi lại mỗi lần mở; bookmark người dùng tự thêm
+    ngoài thư mục đó giữ nguyên). Chỉ ghi khi hồ sơ đang tắt."""
+    import uuid as _uuid
+    f = udd / "Default" / "Bookmarks"
+    try:
+        data = json.loads(f.read_text("utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    roots = data.setdefault("roots", {})
+    bar = roots.setdefault("bookmark_bar", {"children": [], "name": "Bookmarks bar", "type": "folder"})
+    kids = [k for k in bar.get("children", []) if not (k.get("type") == "folder" and k.get("name") == "dytool")]
+    if not items and len(kids) == len(bar.get("children", [])):
+        return                                             # không có gì để ghi / xoá
+    if items:
+        now = str((int(time.time()) + 11644473600) * 1000000)   # giờ kiểu Chrome (micro giây từ 1601)
+        kids.insert(0, {"type": "folder", "name": "dytool", "guid": str(_uuid.uuid4()), "date_added": now,
+                        "date_modified": now, "children": [
+                            {"type": "url", "name": b["title"], "url": b["url"], "guid": str(_uuid.uuid4()),
+                             "date_added": now} for b in items]})
+    bar["children"] = kids
+    # id: đánh lại tuần tự (Chrome đọc file không có checksum vẫn được, tự sửa id trùng)
+    n = [0]
+
+    def renum(node):
+        n[0] += 1
+        node["id"] = str(n[0])
+        for ch in node.get("children", []) or []:
+            renum(ch)
+    for k in ("bookmark_bar", "other", "synced"):
+        if k in roots:
+            renum(roots[k])
+    data.pop("checksum", None)
+    data.setdefault("version", 1)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(data, ensure_ascii=False, indent=1), "utf-8")
+    if items:                                              # hiện thanh dấu trang
+        pf = udd / "Default" / "Preferences"
+        try:
+            prefs = json.loads(pf.read_text("utf-8"))
+        except (OSError, ValueError):
+            prefs = {}
+        prefs.setdefault("bookmark_bar", {})["show_on_all_tabs"] = True
+        pf.write_text(json.dumps(prefs, ensure_ascii=False), "utf-8")
+
+
+def _launch_kwargs(pid: str) -> dict:
+    """Cài đặt riêng của hồ sơ -> tham số sdk.launch: proxy, WebRTC, tiện ích, tham số thêm; ghi bookmark."""
+    meta = read_meta(pid)
+    kw: dict = {"webrtc": meta.get("webrtc") or "auto"}
+    url = _proxy_url(meta)
+    if url:
+        _proxy_reachable(url)
+        kw["proxy"] = url
+    args = parse_extra_args(meta.get("extra_args") or "")
+    from . import browser_mgr
+    exts = [str(browser_mgr.EXT_DIR / e) for e in meta.get("extensions") or []
+            if (browser_mgr.EXT_DIR / e / "manifest.json").exists()]
+    if exts:
+        args.append("--load-extension=" + ",".join(exts))
+    if args:
+        kw["extra_args"] = args
+    try:
+        _write_bookmarks(PROFILES_DIR / pid, meta.get("bookmarks") or [])
+    except OSError:
+        pass
+    return kw
+
+
 # ---------------- quản lý hồ sơ (trang Hồ sơ trình duyệt) ----------------
 
 _opened: dict = {}            # hồ sơ mở bằng nút "Mở" trên trang quản lý: id -> BrowserSession (để nút Đóng tắt được)
 
 
-def _profile_dir(pid: str) -> Path:
+def profile_dir(pid: str) -> Path:
     if not _valid_id(pid) or not (PROFILES_DIR / pid / "profile.json").exists():
         raise BrowserError("Không có hồ sơ này")
     return PROFILES_DIR / pid
+
+
+_profile_dir = profile_dir
+
+
+def is_running(pid: str) -> bool:
+    return _valid_id(pid) and _running_cdp(PROFILES_DIR / pid) is not None
 
 
 def _dir_size(d: Path) -> int:
@@ -328,6 +478,7 @@ def profile_details() -> list[dict]:
         m = re.match(r"ANGLE \([^,]*, ([^,(]+)", str(gl.get("renderer") or ""))
         gpu = (m.group(1) if m else str(gl.get("renderer") or "")).strip()
         lang = nav.get("language") or ""
+        meta = read_meta(p["id"])
         s = _opened.get(p["id"])
         if s is not None and s.process.poll() is not None:     # người dùng tự đóng cửa sổ
             _opened.pop(p["id"], None)
@@ -335,8 +486,12 @@ def profile_details() -> list[dict]:
         out.append({**p, "gpu": gpu, "screen": f"{scr.get('width', '?')}×{scr.get('height', '?')}",
                     "cores": nav.get("hardware_concurrency"), "ram": nav.get("device_memory"),
                     "os": nav.get("platform") or "", "lang": lang, "english": lang.startswith("en"),
-                    "template": cfg.get("name") or "", "created": int((d / "profile.json").stat().st_mtime)
-                    if (d / "profile.json").exists() else 0,
+                    "template": cfg.get("name") or "",
+                    "created": meta.get("created") or int((d / "profile.json").stat().st_mtime),
+                    "notes": meta.get("notes") or "", "tags": meta.get("tags") or [],
+                    "proxy_id": meta.get("proxy_id") or "", "webrtc": meta.get("webrtc") or "auto",
+                    "extensions": meta.get("extensions") or [], "bookmarks": meta.get("bookmarks") or [],
+                    "extra_args": meta.get("extra_args") or "",
                     "size_mb": round(_dir_size(d) / 1e6, 1), "opened_here": s is not None})
     return out
 
@@ -351,7 +506,9 @@ def open_window(pid: str) -> None:
     s = sdk()
     try:
         with _quiet():
-            _opened[pid] = s.launch(s.open_profile(pid), cdp=True, headless=False)
+            _opened[pid] = s.launch(s.open_profile(pid), cdp=True, headless=False, **_launch_kwargs(pid))
+    except BrowserError:
+        raise
     except Exception as e:
         raise BrowserError(f"Không mở được hồ sơ: {e}") from e
 
@@ -373,7 +530,8 @@ def rename_profile(pid: str, name: str) -> None:
     name = " ".join(name.split())[:80]
     if not name:
         raise BrowserError("Tên hồ sơ trống")
-    (_profile_dir(pid) / META).write_text(json.dumps({"name": name}, ensure_ascii=False), "utf-8")
+    profile_dir(pid)
+    write_meta(pid, name=name)
 
 
 def set_language(pid: str, english: bool) -> None:
@@ -389,15 +547,6 @@ def set_language(pid: str, english: bool) -> None:
         nav["language"] = "auto"
     with _quiet():
         s.save_profile(p)
-
-
-def delete_profile(pid: str) -> None:
-    """Xoá hẳn hồ sơ (dấu vân tay + cookie đăng nhập). Nơi gọi phải chặn hồ sơ đang gắn với tài khoản."""
-    import shutil
-    d = _profile_dir(pid)
-    if _running_cdp(d):
-        raise BrowserError("Hồ sơ đang mở — đóng trước rồi xoá")
-    shutil.rmtree(d)
 
 
 # ---------------- mở hồ sơ ----------------
@@ -437,7 +586,9 @@ def attach(pw, acc_dir: Path, headless: bool):
     if not ws:
         try:
             with _quiet():
-                sess = s.launch(s.open_profile(pid), cdp=True, headless=bool(headless))
+                sess = s.launch(s.open_profile(pid), cdp=True, headless=bool(headless), **_launch_kwargs(pid))
+        except BrowserError:
+            raise
         except Exception as e:
             raise BrowserError(f"Không mở được hồ sơ '{choice.get('profile_name') or pid}': {e}") from e
         ws = sess.cdp_url

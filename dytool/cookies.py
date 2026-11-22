@@ -51,7 +51,7 @@ def cookie_status(header: str) -> dict:
 
 
 def douyin_login(data_dir: Path, config_path: Path, timeout_min: int = 10) -> int:
-    """Mở hồ sơ ShardBrowser dành cho Douyin (data/browser.json) để BẠN tự đăng nhập douyin.com (quét QR bằng app
+    """Mở hồ sơ trình duyệt dành cho Douyin (data/browser.json) để BẠN tự đăng nhập douyin.com (quét QR bằng app
     Douyin), rồi lưu cookie vào config.yaml. Trả về số cookie đã lưu."""
     import time
     from playwright.sync_api import sync_playwright
@@ -66,7 +66,7 @@ def douyin_login(data_dir: Path, config_path: Path, timeout_min: int = 10) -> in
     from . import browsers
     ls.write(st, steps, "Mở trình duyệt")
     with sync_playwright() as pw:
-        try:   # hồ sơ ShardBrowser dành cho Douyin (data/browser.json)
+        try:   # hồ sơ trình duyệt dành cho Douyin (data/browser.json)
             ctx = browsers.attach(pw, data_dir, headless=False)
         except browsers.BrowserError as e:
             fail(str(e))

@@ -49,10 +49,8 @@ Name: "vi"; MessagesFile: "installer\Vietnamese.isl"
 vi.DesktopIcon=Tạo biểu tượng dytool trên Desktop
 vi.Shortcuts=Biểu tượng:
 vi.Extras=Thành phần đi kèm (tải từ trang chính thức):
-vi.TaskShard=ShardBrowser — trình duyệt dytool dùng để đăng nhập và đăng bài (cần có)
 vi.TaskVoice=VoiceStudio — app lồng tiếng Việt (cần có để lồng tiếng)
 vi.OpenApp=Mở dytool
-vi.OpenShard=Mở ShardBrowser (lần đầu tự tải nhân trình duyệt ~200 MB)
 vi.OpenVoice=Mở VoiceStudio (lần đầu: Model Catalogue → chấp nhận license OmniVoice)
 vi.Reinstall=dytool - Cài đặt lại thư viện
 vi.LibTitle=Đang cài thư viện
@@ -62,7 +60,7 @@ vi.LibStep=Bước %1/7 · %2
 vi.Step1=Công cụ quản lý Python (uv)
 vi.Step2=Python và thư viện AI (~3 GB, lâu nhất)
 vi.Step3=FFmpeg (xử lý video)
-vi.Step4=Trình duyệt ShardBrowser
+vi.Step4=Trình duyệt chống phát hiện (~200 MB)
 vi.Step5=Bộ tải video Douyin
 vi.Step6=Cấu hình và model AI (~1.5 GB)
 vi.Step7=VoiceStudio (lồng tiếng Việt)
@@ -75,7 +73,6 @@ vi.LibFail=Cài thư viện chưa xong (mã lỗi %1).%n%nKiểm tra mạng rồ
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "{cm:Shortcuts}"
-Name: "shardbrowser"; Description: "{cm:TaskShard}"; GroupDescription: "{cm:Extras}"; Check: ShardMissing
 Name: "voicestudio"; Description: "{cm:TaskVoice}"; GroupDescription: "{cm:Extras}"; Check: VoiceMissing
 
 [Files]
@@ -101,9 +98,7 @@ Name: "{autodesktop}\dytool"; Filename: "{app}\dytool.exe"; WorkingDir: "{app}";
 [Run]
 ; Bước cài thư viện chạy ẩn trong CurStepChanged (dưới), tiến độ hiện ngay trên thanh của trình cài
 Filename: "{app}\dytool.exe"; Description: "{cm:OpenApp}"; Flags: postinstall nowait skipifsilent
-; vừa cài ShardBrowser / VoiceStudio ở lần cài này (đã tick ở trang Thành phần) -> mở luôn lần đầu
-Filename: "{code:ShardExe}"; Description: "{cm:OpenShard}"; Tasks: shardbrowser; Check: ShardInstalled; \
-  Flags: postinstall nowait skipifsilent
+; vừa cài VoiceStudio ở lần cài này (đã tick ở trang Thành phần) -> mở luôn lần đầu
 Filename: "{code:VoiceExe}"; Description: "{cm:OpenVoice}"; Tasks: voicestudio; Check: VoiceInstalled; \
   Flags: postinstall nowait skipifsilent
 
@@ -125,16 +120,6 @@ const
 var
   LibStep: Integer;
 
-function ShardMissing: Boolean;
-begin
-  Result := not FileExists(ExpandConstant('{localappdata}\ShardBrowser Launcher\shardbrowser-launcher.exe'));
-end;
-
-function ShardExe(Param: String): String;
-begin
-  Result := ExpandConstant('{localappdata}\ShardBrowser Launcher\shardbrowser-launcher.exe');
-end;
-
 function VoiceExe(Param: String): String;
 begin
   Result := ExpandConstant('{localappdata}\Programs\VoiceStudio\VoiceStudio.exe');
@@ -142,11 +127,6 @@ begin
 end;
 
 // trang Hoàn tất: chỉ hiện ô "Mở …" khi phần mềm đã cài xong thật (tải lỗi thì không hiện)
-function ShardInstalled: Boolean;
-begin
-  Result := FileExists(ShardExe(''));
-end;
-
 function VoiceInstalled: Boolean;
 begin
   Result := FileExists(VoiceExe(''));
@@ -204,7 +184,6 @@ begin
   WizardForm.ProgressGauge.Position := 0;
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\setup_app.ps1') + '" -Wizard';
   // cài im lặng (/VERYSILENT): không tự cài phần mềm bên thứ ba
-  if (not WizardSilent) and WizardIsTaskSelected('shardbrowser') then Params := Params + ' -WithShardBrowser';
   if (not WizardSilent) and WizardIsTaskSelected('voicestudio') then Params := Params + ' -WithVoiceStudio';
   try
     Ok := ExecAndLogOutput(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,

@@ -8,7 +8,7 @@ def _hide_child_consoles() -> None:
     python của backend tải Douyin, thư viện bên ngoài…) Windows lại bật 1 cửa sổ cmd nhảy lên rồi tắt.
     Khi tiến trình này không có console -> mặc định mọi tiến trình con chạy với CREATE_NO_WINDOW.
     Chạy từ cmd / terminal (có console) thì không đổi gì: tiến trình con dùng chung console đó, không bật cửa sổ mới.
-    App có giao diện (ShardBrowser, VoiceStudio…) không bị ảnh hưởng: cờ này chỉ áp cho chương trình console."""
+    App có giao diện (trình duyệt, VoiceStudio…) không bị ảnh hưởng: cờ này chỉ áp cho chương trình console."""
     if sys.platform != "win32":
         return
     import ctypes

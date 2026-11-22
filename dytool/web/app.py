@@ -68,7 +68,11 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     if autostart:
         worker.start()          # tự bật chạy tự động khi mở giao diện
         from .. import updates
-        updates.start_background_checks()   # hỏi GitHub có bản mới của dytool / VoiceStudio / ShardBrowser (6 giờ / lần)
+        updates.start_background_checks()   # hỏi GitHub có bản mới của dytool / VoiceStudio (6 giờ / lần)
+    from .. import browsers
+    # tải sẵn / cập nhật nhân trình duyệt ShardX (lần đầu ~200 MB). Ngoài khối autostart: app desktop tạo giao diện với
+    # autostart=False (tự bật worker riêng)
+    browsers.install_engine_background()
     # chỉ phục vụ video đã edit (xem trước ở Duyệt video). KHÔNG mount cả data/: trong đó có app.db,
     # cookie Facebook (accounts/<id>/fb_state.json), nhật ký đăng nhập
     (data / "edited").mkdir(parents=True, exist_ok=True)
@@ -194,7 +198,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                       task=progress.snapshot(), n_updates=updates.pending(),
                       douyin=cookie_status(cfg["douyin"].get("cookie", "")), dy_logging_in=_alive("douyin"))
 
-    # ---------------- Cập nhật (dytool / VoiceStudio / ShardBrowser) ----------------
+    # ---------------- Cập nhật (dytool / VoiceStudio) ----------------
     @app.get("/partials/updates", response_class=HTMLResponse)
     def updates_partial(request: Request, msg: str = ""):
         from .. import updates
@@ -249,7 +253,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
 
     @app.post("/services/douyin-login")
     def douyin_login(request: Request):
-        """Mở hồ sơ ShardBrowser dành cho Douyin để đăng nhập douyin.com, lưu cookie vào config."""
+        """Mở hồ sơ trình duyệt dành cho Douyin để đăng nhập douyin.com, lưu cookie vào config."""
         if not _auto_profile(data, "dytool · Douyin", "Đăng nhập Douyin"):
             return RedirectResponse("/settings#trinh-duyet", 303)
         p = procs.get("douyin")
@@ -347,23 +351,18 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                 mirrors.setdefault(dst, []).append(p["name"])
         from .. import browsers
         choices = {a["id"]: browsers.get_choice(store.account_dir(data, a["id"])) for a in accs}
+        relogin = {a["id"] for a in accs if browsers.had_old_profile(store.account_dir(data, a["id"]))}
         return render(request, "accounts.html", accounts=accs, pages=pages, mirrors=mirrors, shard=_shard_info(),
-                      choices=choices,
+                      choices=choices, relogin=relogin,
                       logging_in={int(k[5:]) for k, p in procs.items() if k.startswith("login") and p.poll() is None})
 
     def _shard_info() -> dict:
-        """Trạng thái ShardBrowser cho trang Tài khoản (ô đổi hồ sơ) và trang Cài đặt (kết nối, hồ sơ Douyin)."""
+        """Trình duyệt nhúng (SDK ShardX) cho trang Tài khoản (ô đổi hồ sơ) và trang Cài đặt (nhân, hồ sơ Douyin).
+        Chỉ đọc file — không chạm mạng, trang mở tức thì."""
         from .. import browsers
-        api, token = browsers.shardx_settings()
-        shard = {"api": api, "has_token": bool(token), "profiles": [], "error": None,
-                 "installed": browsers.launcher_exe() is not None, "download": browsers.DOWNLOAD,
-                 "douyin": browsers.get_choice(data), "auto": browsers.auto_token()}
-        if token:
-            try:
-                shard["profiles"] = browsers.list_profiles(start_launcher=False)   # không treo trang ~45s
-            except browsers.BrowserError as e:
-                shard["error"] = str(e)
-        return shard
+        return {"profiles": browsers.list_profiles(), "douyin": browsers.get_choice(data),
+                "douyin_old": browsers.had_old_profile(data), "engine": browsers.engine_installed(),
+                "dir": str(browsers.SDK_DIR)}
 
     # ---------------- Cài đặt chung (cập nhật, API key, trình duyệt, Douyin, thông tin) ----------------
     @app.get("/settings", response_class=HTMLResponse)
@@ -397,44 +396,18 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     import threading as _th
     _th.Thread(target=_read_accel, daemon=True).start()
 
-    # ---------------- Trình duyệt (Chromium / ShardBrowser) ----------------
-    @app.post("/settings/shardx")
-    def save_shardx(api: str = Form(""), token: str = Form("")):
-        """Lưu API + token ShardBrowser vào config.yaml (mục browser:), giữ nguyên các dòng khác."""
-        import re
-        api = (api.strip() or "http://127.0.0.1:40325").rstrip("/")
-        token = token.strip()
-        # địa chỉ chỉ gồm http(s)://tên-máy[:cổng]; token chỉ ký tự của JWT — chặn ký tự làm hỏng config.yaml
-        if not re.fullmatch(r"https?://[A-Za-z0-9.\-]+(:\d{1,5})?", api) or \
-                (token and not re.fullmatch(r"[A-Za-z0-9._\-]{10,4000}", token)):
-            store.log("Địa chỉ API / token ShardBrowser không hợp lệ — chưa lưu", "error")
-            return RedirectResponse("/settings?browser_error=1#trinh-duyet", 303)
-        path = ROOT / config_path
-        text = path.read_text(encoding="utf-8")
-        if re.search(r"(?m)^browser:", text):
-            for key, val in (("shardx_api", api), ("shardx_token", token)):
-                if not token and key == "shardx_token":
-                    continue                      # để trống ô token = giữ token cũ
-                pat = rf'(?m)^(\s+{key}:\s*)"[^"\n]*"'
-                text = re.sub(pat, lambda m: f'{m.group(1)}"{val}"', text, count=1) if re.search(pat, text) \
-                    else re.sub(r"(?m)^browser:.*$", lambda m: f'{m.group(0)}\n  {key}: "{val}"', text, count=1)
-        else:
-            text = text.rstrip("\n") + f'\n\nbrowser:\n  shardx_api: "{api}"\n  shardx_token: "{token}"\n'
-        path.write_text(text, encoding="utf-8")
-        store.log("Đã lưu cài đặt ShardBrowser")
-        return RedirectResponse("/settings?browser_saved=1#trinh-duyet", 303)
-
-    def _auto_profile(target: Path, name: str, who: str, quiet: bool = False) -> bool:
-        """Chưa gắn hồ sơ -> tự tạo hồ sơ ShardBrowser mới và gắn luôn (người dùng không phải liên kết tay)."""
+    # ---------------- Trình duyệt nhúng (SDK ShardX) ----------------
+    def _auto_profile(target: Path, name: str, who: str, quiet: bool = False, english: bool = False) -> bool:
+        """Chưa gắn hồ sơ -> tự tạo hồ sơ trình duyệt mới và gắn luôn (người dùng không phải liên kết tay)."""
         from .. import browsers
         try:
-            c, new = browsers.ensure_profile(target, name)
+            c, new = browsers.ensure_profile(target, name, english=english)
         except browsers.BrowserError as e:
             if not quiet:
-                store.log(f"{who}: không tạo được hồ sơ ShardBrowser — {e}", "error")
+                store.log(f"{who}: không tạo được hồ sơ trình duyệt — {e}", "error")
             return False
         if new:
-            store.log(f"{who}: đã tạo hồ sơ ShardBrowser '{c['profile_name']}' (thư mục {browsers.FOLDER})")
+            store.log(f"{who}: đã tạo hồ sơ trình duyệt '{c['profile_name']}'")
         return True
 
     def _acc_profile_name(acc) -> str:
@@ -443,14 +416,14 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
 
     @app.post("/accounts/{aid}/browser/new")
     def new_account_profile(aid: int):
-        """Tạo hồ sơ mới thay cho hồ sơ đang gắn (hồ sơ cũ vẫn còn trong ShardBrowser)."""
+        """Tạo hồ sơ mới thay cho hồ sơ đang gắn (hồ sơ cũ vẫn giữ trong data/shardx/profiles, chọn lại được)."""
         from .. import browsers
         acc = store.one("SELECT * FROM accounts WHERE id=?", (aid,))
         if acc:
             acc_dir = store.account_dir(data, aid)
             old = browsers.get_choice(acc_dir)
             browsers.set_choice(acc_dir, "")
-            if not _auto_profile(acc_dir, _acc_profile_name(acc), f"Tài khoản #{aid}") and old:
+            if not _auto_profile(acc_dir, _acc_profile_name(acc), f"Tài khoản #{aid}", english=acc["platform"] == "tiktok") and old:
                 browsers.set_choice(acc_dir, old["profile_id"], old.get("profile_name", ""))
         return RedirectResponse("/accounts", 303)
 
@@ -458,9 +431,12 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         """choice = '<profile_id>|<tên hồ sơ>' hoặc '' (bỏ chọn)."""
         from .. import browsers
         pid, _, name = choice.partition("|")
+        if pid and not any(p["id"] == pid for p in browsers.list_profiles()):
+            store.log(f"{who}: không có hồ sơ trình duyệt này", "error")
+            return
         browsers.set_choice(target, pid, name)
-        store.log(f"{who}: dùng hồ sơ ShardBrowser '{name}' — bấm Đăng nhập để đăng nhập trong hồ sơ đó" if pid
-                  else f"{who}: đã bỏ chọn hồ sơ ShardBrowser")
+        store.log(f"{who}: dùng hồ sơ trình duyệt '{name}' — bấm Đăng nhập để đăng nhập trong hồ sơ đó" if pid
+                  else f"{who}: đã bỏ chọn hồ sơ trình duyệt")
 
     @app.post("/accounts/{aid}/browser")
     def set_account_browser(aid: int, choice: str = Form("")):
@@ -487,18 +463,19 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         aid = store.x("INSERT INTO accounts(name, created_at, platform) VALUES (?,?,?)",
                       (name.strip(), int(time.time()), platform))
         acc = store.one("SELECT * FROM accounts WHERE id=?", (aid,))
-        # tạo sẵn hồ sơ nếu ShardBrowser đang chạy; không được thì để tới lúc bấm Đăng nhập
-        _auto_profile(store.account_dir(data, aid), _acc_profile_name(acc), f"Tài khoản #{aid}", quiet=True)
+        # tạo sẵn hồ sơ trình duyệt (chỉ ghi file); không được thì để tới lúc bấm Đăng nhập
+        _auto_profile(store.account_dir(data, aid), _acc_profile_name(acc), f"Tài khoản #{aid}", quiet=True,
+                      english=platform == "tiktok")
         return RedirectResponse("/accounts" + ("#tiktok" if platform == "tiktok" else ""), 303)
 
     @app.post("/accounts/{aid}/login")
     def login(aid: int):
-        """Mở hồ sơ ShardBrowser của tài khoản để người dùng tự đăng nhập; xong thì tự quét Page / lấy tên kênh."""
+        """Mở hồ sơ trình duyệt của tài khoản để người dùng tự đăng nhập; xong thì tự quét Page / lấy tên kênh."""
         acc_dir = store.account_dir(data, aid)
         acc = store.one("SELECT * FROM accounts WHERE id=?", (aid,))
         if not acc:
             return RedirectResponse("/accounts", 303)
-        if not _auto_profile(acc_dir, _acc_profile_name(acc), f"Tài khoản #{aid}"):
+        if not _auto_profile(acc_dir, _acc_profile_name(acc), f"Tài khoản #{aid}", english=acc["platform"] == "tiktok"):
             return RedirectResponse("/settings#trinh-duyet", 303)
         from .. import loginstate
         if acc and acc["platform"] == "tiktok":
@@ -608,7 +585,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         if p and p.poll() is None:
             p.terminate()
         store.x("DELETE FROM accounts WHERE id=?", (aid,))
-        if acc:     # ghi lại để biết đã xoá gì (thư mục data/accounts/<id> + hồ sơ ShardBrowser vẫn giữ)
+        if acc:     # ghi lại để biết đã xoá gì (thư mục data/accounts/<id> + hồ sơ trình duyệt vẫn giữ)
             plat = "TikTok" if acc["platform"] == "tiktok" else "Facebook"
             store.log(f"Đã xoá tài khoản {plat} #{aid} '{acc['name']}' khỏi tool "
                       f"(dữ liệu đăng nhập vẫn giữ ở data/accounts/{aid})")

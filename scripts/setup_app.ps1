@@ -2,13 +2,13 @@
 # Chạy lại bất cứ lúc nào để sửa / cập nhật: Start Menu > dytool > "Cài đặt lại thư viện".
 # File lưu UTF-8 CÓ BOM + CRLF: Windows PowerShell 5.1 chỉ đọc đúng chữ có dấu khi có BOM.
 #
-# Trình duyệt dùng ShardBrowser (cài riêng, bước 4). Còn lại nằm trong thư mục cài (ổ C:): Python (.python), thư viện (.venv),
+# Mọi thứ nằm trong thư mục cài (ổ C:): Python (.python), thư viện (.venv), nhân trình duyệt (data\shardx),
 # FFmpeg (tools\ffmpeg), backend tải Douyin (vendor). Không dùng AppData vì có máy Windows chặn chạy exe ở đó.
 param(
     [switch]$Launch,     # cài xong thì mở dytool
-    [switch]$NoPrompt,   # không hỏi gì (thiếu ShardBrowser / VoiceStudio thì chỉ nhắc, trừ khi có 2 cờ dưới)
+    [switch]$NoPrompt,   # không hỏi gì (thiếu VoiceStudio thì chỉ nhắc, trừ khi có cờ -WithVoiceStudio)
     [switch]$Wizard,     # chạy ẩn trong trình cài: tiến độ đọc từ các dòng "▸ N/7", không hỏi gì
-    [switch]$WithShardBrowser,   # thiếu thì tải + cài im lặng (người dùng đã tick ở trình cài)
+    [switch]$WithShardBrowser,   # bỏ (trình duyệt đã nhúng sẵn) — giữ để trình cài cũ truyền vào không lỗi
     [switch]$WithVoiceStudio
 )
 if ($Wizard) { $NoPrompt = $true }
@@ -169,32 +169,14 @@ try {
     }
     Ok ((& ffmpeg -hide_banner -version | Select-Object -First 1) -replace "Copyright.*", "")
 
-    # ---------- 4. ShardBrowser (trình duyệt dùng để đăng nhập / đăng bài) ----------
-    Say "4/7  Trình duyệt ShardBrowser"
-    $sb = Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
-        Where-Object { $_.DisplayName -match 'ShardBrowser' } | Select-Object -First 1
-    if ($sb) { Ok "ShardBrowser đã cài ($($sb.DisplayVersion))" }
-    elseif ($NoPrompt -and -not $WithShardBrowser) { Warn "Chưa có ShardBrowser — cài tại https://github.com/ProxyShard/ShardBrowser/releases" }
-    else {
-        $a = if ($WithShardBrowser) { "C" } else { Read-Host "   Tải bản ShardBrowser mới nhất từ GitHub chính thức rồi cài? (C/K)" }
-        if ($a -match '^[CcYy]') {
-            # phần đi kèm: lỗi (GitHub giới hạn lượt hỏi, mạng…) chỉ cảnh báo, không bỏ dở các bước thiết yếu 5-6
-            try {
-                $exe = Get-GitHubAsset "https://api.github.com/repos/ProxyShard/ShardBrowser/releases/latest" `
-                    '_x64-setup\.exe$' $env:TEMP
-                Warn "File cài ShardBrowser chưa ký số: Windows có thể hỏi lại — bấm 'More info > Run anyway' nếu bạn đồng ý cài"
-                $proc = Start-Process $exe -ArgumentList "/S" -Wait -PassThru
-                Remove-Item $exe -ErrorAction SilentlyContinue
-                if ($proc.ExitCode -ne 0) { throw "trình cài ShardBrowser báo lỗi (mã $($proc.ExitCode))" }
-                Ok "Đã cài ShardBrowser"
-                $sb = $true
-            } catch { Warn "Chưa cài được ShardBrowser: $($_.Exception.Message) — cài sau tại https://github.com/ProxyShard/ShardBrowser/releases" }
-        } else { Warn "Bỏ qua — dytool cần ShardBrowser để đăng nhập / đăng bài" }
-    }
-    if ($sb) {
-        Ok "Không cần tạo hồ sơ hay copy token: dytool tự kết nối ShardBrowser và tự tạo hồ sơ khi bấm Đăng nhập"
-        Write-Host "   Lần đầu ShardBrowser mở sẽ tự tải nhân trình duyệt (~200 MB)."
-    }
+    # ---------- 4. Trình duyệt (nhân ShardX nhúng qua SDK shardx, không cần app ShardBrowser) ----------
+    Say "4/7  Trình duyệt (nhân ShardX ~200 MB)"
+    # Tải sẵn vào data\shardx để lần đầu bấm Đăng nhập không phải chờ. Lỗi (mạng…) chỉ cảnh báo: dytool tự tải lại
+    # khi mở app
+    & uv run --no-sync python -c "from dytool import browsers; browsers.install_engine(); print('engine ok')" 2>&1 |
+        ForEach-Object { "   $_" } | Out-Host
+    if ($LASTEXITCODE -eq 0) { Ok "Nhân trình duyệt sẵn sàng (data\shardx)" }
+    else { Warn "Chưa tải được nhân trình duyệt — dytool sẽ tự tải lại khi mở app" }
 
     # ---------- 5. Backend tải Douyin (TikTokDownloader) ----------
     Say "5/7  Backend tải Douyin (TikTokDownloader)"

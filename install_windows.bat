@@ -72,12 +72,12 @@ try {
     Set-Location $proj
     Ok "Du an: $proj"
 
-    # ---------- 3. thu vien Python (trinh duyet = ShardBrowser, cai rieng) ----------
+    # ---------- 3. thu vien Python (trinh duyet = nhan ShardX nhung san, tu tai khi mo app) ----------
     Say "Cai thu vien Python (lan dau mat 5-15 phut: torch, whisper, demucs...)"
     & uv sync --python 3.12
     if ($LASTEXITCODE -ne 0) { throw "uv sync that bai" }
     Ok "Thu vien Python xong"
-    Warn "Trinh duyet: cai ShardBrowser tai https://github.com/ProxyShard/ShardBrowser/releases (dytool khong dung Chromium nua)"
+    Ok "Trinh duyet: nhan ShardX nhung san trong dytool, tu tai (~200 MB) lan dau mo app"
 
     # ---------- 4. backend tai Douyin (TikTokDownloader) ----------
     Say "Cai backend tai Douyin (TikTokDownloader)"

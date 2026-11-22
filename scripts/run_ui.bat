@@ -7,7 +7,7 @@ chcp 65001 >nul
 set PYTHONIOENCODING=utf-8
 REM Python cua uv nam trong thu muc du an (may chan chay exe trong AppData)
 set UV_PYTHON_INSTALL_DIR=%~dp0..\.python
-REM Trinh duyet dang nhap / dang bai = ShardBrowser (dytool tu mo neu chua chay)
+REM Trinh duyet dang nhap / dang bai = nhan ShardX nhung san (data\shardx), khong can app ShardBrowser
 start "" http://127.0.0.1:8000
 REM --no-sync: khong dong bo lai moi truong (giu ban torch GPU neu da cai)
 uv run --no-sync dytool ui --autostart

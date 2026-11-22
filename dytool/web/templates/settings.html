@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import profile_line, shard_form with context %}
+{% from "_macros.html" import profile_line with context %}
 {% block title %}Cài đặt{% endblock %}
 {% block body %}
 <div class="settings-page">
@@ -48,35 +48,23 @@
   </div>
 </section>
 
-{# 3. Trình duyệt ShardBrowser #}
+{# 3. Trình duyệt nhúng (nhân ShardX qua SDK shardx) #}
 <section class="section" id="trinh-duyet" aria-labelledby="h-br">
   <h2 id="h-br">Trình duyệt</h2>
   <div class="card">
-    {% if request.query_params.get('browser_saved') %}<div class="notice" role="status">Đã lưu cài đặt ShardBrowser.</div>{% endif %}
-    {% if request.query_params.get('browser_error') %}<div class="notice warn" role="alert">Chưa lưu: địa chỉ API phải dạng
-      http://127.0.0.1:40325 và token chỉ gồm chữ, số, dấu chấm, gạch.</div>{% endif %}
     <div class="set-row">
-      <div class="set-label"><b>ShardBrowser</b>
-        <p class="hint">Trình duyệt để đăng nhập và đăng bài. Mỗi tài khoản 1 hồ sơ riêng, dytool tự tạo
-          (thư mục <b>dytool</b> trong ShardBrowser) và tự mở ShardBrowser khi cần.</p></div>
+      <div class="set-label"><b>Trình duyệt chống phát hiện</b>
+        <p class="hint">Nhân ShardX của ShardBrowser, chạy ngay trong dytool — không cần cài app ShardBrowser. Mỗi
+          tài khoản 1 hồ sơ riêng (dấu vân tay + cookie), dytool tự tạo khi bấm Đăng nhập.</p></div>
       <div>
-        {% if not shard.installed %}
-          <p class="small" style="margin:0 0 6px"><span class="pill err">Chưa cài</span></p>
-          <p class="hint" role="alert"><a href="{{ shard.download }}" target="_blank" rel="noopener">Tải bản cài Windows (file _x64-setup.exe)</a>,
-            cài và mở 1 lần — hoặc chạy lại trình cài dytool và tick ShardBrowser.</p>
-        {% elif shard.error %}
-          <p class="small" style="margin:0 0 6px"><span class="pill err">Chưa kết nối</span></p>
-          <p class="hint" role="alert" style="color:var(--err)">{{ shard.error }}</p>
-          <p class="hint">Mở ShardBrowser rồi tải lại trang. Vẫn lỗi: kiểm tra ShardBrowser › Settings › Automation API đang bật.</p>
-        {% elif shard.has_token %}
-          <p class="small" style="margin:0"><span class="pill ok">Đã kết nối</span>
-            <span class="muted">{{ shard.profiles|length }} hồ sơ · tự kết nối{{ '' if shard.auto else ' bằng token' }}</span></p>
+        {% if shard.engine %}
+          <p class="small" style="margin:0"><span class="pill ok">Sẵn sàng</span>
+            <span class="muted">{{ shard.profiles|length }} hồ sơ</span></p>
+        {% else %}
+          <p class="small" style="margin:0"><span class="pill warn">Đang tải nhân trình duyệt…</span></p>
+          <p class="hint">Lần đầu tải khoảng 200 MB, tự chạy nền. Bấm Đăng nhập lúc này thì chờ tải xong mới mở.</p>
         {% endif %}
-        {% if not shard.auto %}
-          <details class="small" {{ 'open' if not shard.has_token }} style="margin-top:8px">
-            <summary class="muted" style="cursor:pointer">ShardBrowser ở máy khác: nhập token / địa chỉ API</summary>
-            {{ shard_form() }}</details>
-        {% endif %}
+        <p class="hint" style="margin-top:6px">Lưu ở <code>{{ shard.dir }}</code></p>
       </div>
     </div>
   </div>
@@ -104,6 +92,8 @@
         <form method="post" action="/services/douyin-login">
           <button class="btn {{ '' if douyin.logged_in else 'primary' }}" {{ 'disabled' if dy_logging_in }}>
             {{ 'Đăng nhập lại' if douyin.logged_in else 'Đăng nhập Douyin' }}</button></form>
+        {% if shard.douyin_old %}<p class="hint" role="status">dytool đã chuyển sang trình duyệt nhúng: đăng nhập
+          Douyin lại 1 lần (cookie đang dùng vẫn chạy tới khi hết hạn).</p>{% endif %}
         {{ profile_line('/settings/douyin-browser', '/settings/douyin-browser/new', shard.douyin, 'br-douyin',
                         'tự tạo khi bấm Đăng nhập Douyin') }}
       </div>

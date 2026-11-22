@@ -33,7 +33,7 @@
         {% elif r.has_update %}
           <button class="btn sm primary" hx-post="/updates/{{ r.app }}" hx-target="closest section" hx-swap="outerHTML"
                   hx-disabled-elt="this"
-                  hx-confirm="{% if r.app == 'dytool' %}dytool sẽ tự đóng trong lúc cài bản {{ r.latest }} ({{ r.size_mb }} MB) rồi tự mở lại. Việc đang làm dở sẽ làm lại sau. Cập nhật ngay?{% elif r.app == 'voicestudio' %}VoiceStudio sẽ được đóng trong lúc cài bản {{ r.latest }} ({{ r.size_mb }} MB) rồi mở lại. Cập nhật ngay?{% else %}ShardBrowser sẽ được tắt trong lúc cài bản {{ r.latest }} ({{ r.size_mb }} MB) rồi mở lại. Cập nhật ngay?{% endif %}">Cập nhật lên {{ r.latest }}</button>
+                  hx-confirm="{% if r.app == 'dytool' %}dytool sẽ tự đóng trong lúc cài bản {{ r.latest }} ({{ r.size_mb }} MB) rồi tự mở lại. Việc đang làm dở sẽ làm lại sau. Cập nhật ngay?{% else %}VoiceStudio sẽ được đóng trong lúc cài bản {{ r.latest }} ({{ r.size_mb }} MB) rồi mở lại. Cập nhật ngay?{% endif %}">Cập nhật lên {{ r.latest }}</button>
         {% elif r.missing %}
           <span class="pill">Chưa cài</span>
         {% elif r.latest %}

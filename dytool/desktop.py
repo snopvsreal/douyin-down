@@ -24,7 +24,7 @@ TITLE = "dytool"
 
 
 def _prepare_env() -> None:
-    """Môi trường giống run_ui.bat: PATH có ffmpeg/uv, ghi log khi chạy bằng pythonw. Trình duyệt = ShardBrowser."""
+    """Môi trường giống run_ui.bat: PATH có ffmpeg/uv, ghi log khi chạy bằng pythonw. Trình duyệt = nhân ShardX nhúng (browsers.py)."""
     os.chdir(ROOT)
     extra = [ROOT / "tools" / "ffmpeg" / "bin", Path.home() / ".local" / "bin"]   # bản cài kèm / bản đã chép
     os.environ["PATH"] = os.pathsep.join(str(p) for p in extra if p.exists()) + os.pathsep + os.environ.get("PATH", "")

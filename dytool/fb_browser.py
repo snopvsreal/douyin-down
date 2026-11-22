@@ -1,5 +1,5 @@
 """Đăng Reels lên Facebook Page bằng trình duyệt (Playwright), không cần Graph API token.
-Trình duyệt = hồ sơ ShardBrowser gắn với tài khoản (browsers.py); phiên đăng nhập nằm trong hồ sơ đó.
+Trình duyệt = hồ sơ trình duyệt nhúng (nhân ShardX) gắn với tài khoản (browsers.py); phiên đăng nhập nằm trong hồ sơ đó.
 Đăng qua Meta Business Suite (business.facebook.com) — giao diện ổn định nhất cho Page."""
 
 import time
@@ -52,7 +52,7 @@ def login(data_dir: Path, timeout_min: int = 10) -> None:
         from . import browsers
         try:
             ctx = _context(pw, data_dir, headless=False)
-        except browsers.BrowserError as e:     # ShardBrowser chưa mở / sai token / chưa chọn hồ sơ
+        except browsers.BrowserError as e:     # chưa có hồ sơ / nhân trình duyệt chưa tải xong
             fail(str(e))
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         ls.write(st, steps, "Tải facebook.com", wait_sec=90)

@@ -7,8 +7,8 @@ Ghi chú cho lập trình viên / Claude: xem [CLAUDE.md](CLAUDE.md).
 ## Cài đặt trên Windows 10/11 — app dytool
 
 1. Chạy **`dytool-Setup-<phiên bản>.exe`** (không cần quyền admin, mặc định cài vào `C:\dytool`).
-   Bước cuối tự tải thư viện (~4 GB: Python, torch, FFmpeg, backend Douyin, model AI) và hỏi cài **ShardBrowser**
-   (trình duyệt dytool dùng để đăng nhập / đăng bài) — lần đầu 15–30 phút,
+   Bước cuối tự tải thư viện (~4 GB: Python, torch, FFmpeg, backend Douyin, model AI, trình duyệt chống phát hiện
+   ShardX nhúng sẵn — không cần cài ShardBrowser riêng) — lần đầu 15–30 phút,
    xem tiến độ ở cửa sổ màu xanh. Windows SmartScreen có thể cảnh báo vì file chưa ký số: bấm *More info → Run anyway*.
 2. Mở **dytool** (Desktop / Start Menu): app có cửa sổ riêng, không cần trình duyệt. Lần đầu dán Anthropic API key
    ngay trên trang Tổng quan. VoiceStudio mở bằng nút **Mở** ở thanh bên.
@@ -66,8 +66,8 @@ uv run dytool ui --autostart   # mở giao diện và tự bật chạy tự đ�
 nohup caffeinate -i uv run dytool ui --autostart > data/ui.log 2>&1 &
 ```
 
-1. **Tài khoản & kênh** (dytool tự kết nối ShardBrowser trên máy, không cần token) → thêm tài khoản Facebook →
-   *Đăng nhập* (dytool tự tạo hồ sơ ShardBrowser riêng cho tài khoản, mở ra, bạn tự đăng nhập) → tool tự tìm các Page.
+1. **Tài khoản & kênh** → thêm tài khoản Facebook → *Đăng nhập* (dytool tự tạo hồ sơ trình duyệt riêng cho tài
+   khoản — nhân ShardX nhúng sẵn, dấu vân tay riêng — mở ra, bạn tự đăng nhập) → tool tự tìm các Page.
 2. Bấm **Cài đặt** ở Page muốn dùng → thêm nguồn (từ khóa / kênh Douyin), chỉnh mẫu edit, giọng, caption, giới hạn đăng → tick *Bật Page này*.
 3. **Tổng quan** → *Bật* backend tải Douyin, mở app VoiceStudio → *Bật chạy tự động*.
 4. **Duyệt video** → xem video đã edit, sửa caption → *Duyệt* (đăng theo lịch) hoặc *Đăng ngay*.

@@ -1,9 +1,9 @@
 """Đăng video lên TikTok bằng trình duyệt (Playwright) qua TikTok Studio, không cần API.
 
 Phần điền form đăng dùng thư viện wkaisertexas/tiktok-uploader (MIT, cũng chạy Playwright): truyền vào trang của
-hồ sơ ShardBrowser gắn với tài khoản (browsers.py) để dùng lại phiên đăng nhập.
+hồ sơ trình duyệt nhúng gắn với tài khoản (browsers.py) để dùng lại phiên đăng nhập.
 Đăng nhập luôn do người dùng tự làm trong cửa sổ mở ra (tool không đọc mật khẩu).
-Lưu ý: bộ chọn của tiktok-uploader viết theo giao diện tiếng Anh -> để hồ sơ ShardBrowser của TikTok ở tiếng Anh.
+Lưu ý: bộ chọn của tiktok-uploader viết theo giao diện tiếng Anh -> hồ sơ TikTok được tạo sẵn ở tiếng Anh (browsers.create_profile english=True).
 """
 
 import datetime as dt
@@ -57,7 +57,7 @@ def login(acc_dir: Path, timeout_min: int = 10) -> dict:
         from . import browsers
         try:
             ctx = _context(pw, acc_dir, headless=False)
-        except browsers.BrowserError as e:     # ShardBrowser chưa mở / sai token / chưa chọn hồ sơ
+        except browsers.BrowserError as e:     # chưa có hồ sơ / nhân trình duyệt chưa tải xong
             fail(str(e))
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         ls.write(st, steps, "Tải tiktok.com", wait_sec=90)

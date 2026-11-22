@@ -251,6 +251,8 @@ class Worker:
             if page and page["platform"] == "tiktok" and row["status"] == "schedule_pending" \
                     and (row["scheduled_at"] or 0) > time.time() + TT_MAX_AHEAD:
                 continue    # TikTok chỉ hẹn giờ tối đa 10 ngày -> chờ tới gần ngày rồi mới gửi lịch
+            if page and self._no_profile(page["account_id"]):
+                continue    # tài khoản chưa có hồ sơ trình duyệt (vd. vừa chuyển sang trình duyệt nhúng) -> chờ đăng nhập
             if page and (row["status"] != "approved" or self._can_post(page)):
                 self._upload(page, row)
                 return True
@@ -568,8 +570,15 @@ class Worker:
                                                "đăng lên TikTok bây giờ")
                 continue
             if t is None or t <= now or TT_MIN_AHEAD <= t - now <= TT_MAX_AHEAD:
+                dst = self.store.one("SELECT account_id FROM pages WHERE id=?", (cp["dst_page_id"],))
+                if dst and self._no_profile(dst["account_id"]):
+                    continue        # kênh TikTok chưa có hồ sơ trình duyệt -> chờ đăng nhập
                 return cp
         return None
+
+    def _no_profile(self, account_id: int) -> bool:
+        from . import browsers
+        return browsers.missing_profile(self.store.account_dir(self.data, account_id))
 
     def _crosspost(self, cp, pages: dict) -> None:
         import datetime as dt

@@ -1,11 +1,11 @@
-"""Tự cập nhật ngay trong app: dytool, VoiceStudio, ShardBrowser.
+"""Tự cập nhật ngay trong app: dytool, VoiceStudio.
 
 Kiểm tra: GitHub releases/latest của từng app (lúc mở app + mỗi 6 giờ) so với bản đang cài
-(dytool: metadata gói; VoiceStudio / ShardBrowser: DisplayVersion trong danh sách phần mềm của Windows).
+(dytool: metadata gói; VoiceStudio: DisplayVersion trong danh sách phần mềm của Windows).
 Cập nhật: tải file cài chính thức trong bản phát hành -> so SHA256 với mã GitHub công bố (asset.digest) -> không khớp
 hoặc không có mã thì KHÔNG cài -> cài im lặng:
 - VoiceStudio: đóng app (không khi đang edit/lồng tiếng) -> /S -> mở lại nếu trước đó đang mở
-- ShardBrowser: không khi đang có hồ sơ mở; tắt launcher -> /S -> mở lại launcher
+(Trình duyệt ShardX nhúng qua SDK shardx: nhân tự cập nhật khi mở app — browsers.install_engine_background.)
 - dytool: chạy trình cài /SILENT /RELAUNCH: trình cài tự đóng dytool, hiện tiến độ, cài xong tự mở lại dytool
 """
 
@@ -26,8 +26,6 @@ APPS = {
     "dytool": {"name": "dytool", "repo": "snopvsreal/douyin-down", "asset": r"^dytool-Setup-[\d.]+\.exe$"},
     "voicestudio": {"name": "VoiceStudio", "repo": "debpalash/VoiceStudio", "asset": r"^VoiceStudio-[\d.]+-win-x64\.exe$",
                     "reg": r"^VoiceStudio( \d|$)"},
-    "shardbrowser": {"name": "ShardBrowser", "repo": "ProxyShard/ShardBrowser", "asset": r"_x64-setup\.exe$",
-                     "reg": r"ShardBrowser"},
 }
 
 _lock = threading.Lock()
@@ -233,14 +231,6 @@ def busy_reason(app: str) -> str | None:
         return "đang edit / lồng tiếng 1 video — đợi xong rồi cập nhật"
     if app == "dytool" and task and task.get("kind") == "upload":
         return "đang đăng 1 video — cập nhật lúc này (đóng app) có thể làm bài bị đăng dở / đăng trùng, đợi xong"
-    if app == "shardbrowser":
-        try:
-            from . import browsers
-            running = browsers._api("GET", "/running", _retry=False)
-            if running:
-                return "đang có hồ sơ ShardBrowser mở (đăng nhập / đăng bài) — đợi xong rồi cập nhật"
-        except Exception:
-            pass
     return None
 
 
@@ -257,18 +247,6 @@ def _install_voicestudio(exe: Path) -> None:
             if vs.exists():
                 subprocess.Popen([str(vs)], cwd=str(vs.parent))
                 break
-
-
-def _install_shardbrowser(exe: Path) -> None:
-    from . import browsers
-    _kill("shardbrowser-launcher.exe")
-    _set("shardbrowser", "installing", "Đang cài ShardBrowser…")
-    rc = subprocess.run([str(exe), "/S"]).returncode
-    if rc not in (0, 3010):
-        raise RuntimeError(f"trình cài ShardBrowser báo lỗi (mã {rc})")
-    launcher = browsers.launcher_exe()
-    if launcher:
-        subprocess.Popen([str(launcher)], cwd=str(launcher.parent))
 
 
 def _install_dytool(exe: Path) -> None:
@@ -310,8 +288,7 @@ def start(app: str) -> str | None:
     def run():
         try:
             exe = _download(app, info)
-            {"voicestudio": _install_voicestudio, "shardbrowser": _install_shardbrowser,
-             "dytool": _install_dytool}[app](exe)
+            {"voicestudio": _install_voicestudio, "dytool": _install_dytool}[app](exe)
             if app != "dytool":
                 _inst_cache.pop(app, None)       # đọc lại bản đang cài ngay (không đợi hết 60 giây)
                 _set(app, "done", f"Đã cập nhật lên {info['version']}")

@@ -25,6 +25,7 @@ dependencies = [
     "tiktok-uploader>=1.2",
     "pywebview>=5",
     "pystray>=0.19",
+    "shardx==2.1.7",            # GHIM: browsers._use_mirror thay hàm nội bộ của SDK — nâng thì thử lại
 ]
 
 [project.optional-dependencies]

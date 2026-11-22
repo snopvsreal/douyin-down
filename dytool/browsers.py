@@ -1,191 +1,216 @@
-"""Trình duyệt của dytool = ShardBrowser (github.com/ProxyShard/ShardBrowser, MIT). Không dùng Chromium riêng nữa.
+"""Trình duyệt của dytool = nhân ShardX của ShardBrowser, chạy NHÚNG qua SDK Python chính thức `shardx`
+(github.com/ProxyShard/ShardBrowser/tree/main/sdks/python, MIT). Không cần cài / mở app ShardBrowser nữa.
 
-Mỗi tài khoản Facebook / TikTok (và bước đăng nhập Douyin) gắn với 1 hồ sơ ShardBrowser do người dùng tự tạo trong
-ShardBrowser. dytool gọi API cục bộ của ShardBrowser: POST /profiles/{id}/start -> địa chỉ CDP -> Playwright
-connect_over_cdp -> đăng nhập / đăng bài -> POST /profiles/{id}/stop. dytool không tạo hồ sơ và không đọc / sửa cài đặt
-trong hồ sơ (proxy, ngôn ngữ, …).
+- Nhân trình duyệt + thư viện dấu vân tay: SDK tự tải từ CDN của ShardBrowser về data/shardx (lần đầu ~200 MB, sau
+  đó tự cập nhật). Đặt ở C:\\dytool\\data chứ không phải AppData: máy người dùng chặn chạy exe trong AppData.
+- Mỗi tài khoản Facebook / TikTok (và đăng nhập Douyin) có 1 hồ sơ riêng: data/shardx/profiles/<id>/ (dấu vân tay
+  cố định + cookie). dytool chỉ gọi SDK (create_profile / launch), không tự viết logic giả dấu vân tay.
+- Mở hồ sơ: SDK chạy nhân với cổng CDP -> Playwright connect_over_cdp. Hồ sơ đang mở sẵn (cửa sổ đăng nhập chưa
+  đóng) -> nối vào phiên đó, không mở lần 2.
 
-Hồ sơ của tài khoản: data/accounts/<id>/browser.json   {"profile_id": "...", "profile_name": "..."}
+Hồ sơ của tài khoản: data/accounts/<id>/browser.json   {"engine": "sdk", "profile_id": "...", "profile_name": "..."}
 Hồ sơ cho đăng nhập Douyin: data/browser.json
-API + token: config.yaml  browser: {shardx_api: "http://127.0.0.1:40325", shardx_token: "..."}
+(browser.json kiểu cũ — hồ sơ của app ShardBrowser, không có "engine" — coi như chưa có: bấm Đăng nhập tạo hồ sơ mới.)
 """
 
+import contextlib
+import io
 import json
+import threading
 from pathlib import Path
-
-import httpx
 
 ROOT = Path(__file__).resolve().parent.parent
 FILE = "browser.json"
-DEFAULT_API = "http://127.0.0.1:40325"
-DOWNLOAD = "https://github.com/ProxyShard/ShardBrowser/releases"
+ENGINE = "sdk"
+SDK_DIR = ROOT / "data" / "shardx"
+PROFILES_DIR = SDK_DIR / "profiles"
+META = "dytool.json"          # tên hồ sơ do dytool đặt, nằm cạnh profile.json của SDK
 
 
 class BrowserError(RuntimeError):
     pass
 
 
-def _cfg() -> dict:
-    from . import config
-    try:
-        return config.load(ROOT / "config.yaml").get("browser") or {}
-    except Exception:
-        return {}
+_sdk = None
+_sdk_lock = threading.Lock()
 
 
-def _launcher_settings() -> dict:
-    """settings.json của ShardBrowser trên máy này (api_secret, api_port, browser_path…) hoặc {}."""
-    import os
-    try:
-        return json.loads((Path(os.environ.get("APPDATA", "")) / "shardx-launcher" / "settings.json").read_text("utf-8"))
-    except (OSError, ValueError):
-        return {}
+@contextlib.contextmanager
+def _quiet():
+    """SDK in tiến trình ra stdout (có ký tự '→'): log ghi theo bảng mã cp1252 / pythonw không có stdout -> lỗi.
+    Gom vào bộ nhớ, bỏ đi."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        yield
 
 
-def _mint_token(secret: str, ttl: int = 24 * 3600) -> str:
-    """Token API y như ShardBrowser tự sinh ở Settings > Automation API (src-tauri/src/api.rs `mint`):
-    JWT HS256 {sub: "shardx-api", iat, exp} ký bằng api_secret. Đọc lại secret mỗi lần -> bấm Regenerate vẫn chạy."""
-    import base64
+def sdk():
+    global _sdk
+    with _sdk_lock:
+        if _sdk is None:
+            try:
+                from shardx import ShardX
+            except ImportError as e:
+                raise BrowserError(f"Thiếu thư viện shardx — bấm Cài lại thư viện ở trang Cài đặt ({e})") from e
+            _sdk = ShardX(cache_dir=str(SDK_DIR), profiles_dir=str(PROFILES_DIR))
+            _use_mirror(_sdk.runtime)
+        return _sdk
+
+
+# ---------------- nguồn tải nhân: bản sao trên GitHub của mình ----------------
+# SDK mặc định tải runtime.json từ GitHub ProxyShard + file zip từ kho R2 của họ, không kiểm tra mã băm. dytool thay
+# 3 chỗ tải (_fetch_manifest / _download / _install_fingerprints) để lấy từ bản phát hành tag `shardx-…` của
+# MIRROR_REPO (GitHub Actions trong kho đó tự tạo khi ShardBrowser ra nhân mới), BẮT BUỘC khớp SHA256 GitHub công bố (asset.digest). Phần giải nén,
+# thay nhân an toàn, ghi phiên bản vẫn là của SDK. runtime.json chép nguyên -> nhân đã có trên máy không tải lại.
+MIRROR_REPO = "snopvsreal/shardx-engine"
+TAG_PREFIX = "shardx-"
+
+
+def _mirror_assets() -> dict:
+    """{tên file: asset} của bản phát hành `shardx-…` mới nhất trong MIRROR_REPO."""
+    import httpx
+    r = httpx.get(f"https://api.github.com/repos/{MIRROR_REPO}/releases?per_page=30", follow_redirects=True,
+                  headers={"Accept": "application/vnd.github+json"}, timeout=httpx.Timeout(20, connect=10))
+    r.raise_for_status()
+    rels = [x for x in r.json() if str(x.get("tag_name", "")).startswith(TAG_PREFIX) and not x.get("draft")]
+    if not rels:
+        raise BrowserError(f"Chưa có bản sao nhân trình duyệt nào trên github.com/{MIRROR_REPO}")
+    rel = max(rels, key=lambda x: x.get("published_at") or "")
+    return {a["name"]: a for a in rel.get("assets", [])}
+
+
+def _fetch_verified(asset: dict, dest: Path) -> Path:
+    """Tải 1 file của bản phát hành, so SHA256 với asset.digest. Không có mã / không khớp -> xoá, báo lỗi."""
     import hashlib
-    import hmac
-    import time
-
-    def b64(b: bytes) -> str:
-        return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
-    now = int(time.time())
-    head = b64(json.dumps({"typ": "JWT", "alg": "HS256"}, separators=(",", ":")).encode())
-    body = b64(json.dumps({"sub": "shardx-api", "iat": now, "exp": now + ttl}, separators=(",", ":")).encode())
-    sig = hmac.new(secret.encode(), f"{head}.{body}".encode(), hashlib.sha256).digest()
-    return f"{head}.{body}.{b64(sig)}"
-
-
-def is_local_api(api: str) -> bool:
-    """Địa chỉ API đúng là máy này? So khớp CHÍNH XÁC tên máy sau khi tách URL — không so phần đầu chuỗi
-    (startswith cho qua 'http://localhost.evil.com' / 'http://127.0.0.1@evil.com' -> token tự ký bị gửi ra ngoài)."""
-    from urllib.parse import urlsplit
+    import os
+    import httpx
+    digest = str(asset.get("digest") or "")
+    if not digest.startswith("sha256:"):
+        raise BrowserError(f"{asset.get('name')}: GitHub không công bố mã SHA256 — không dùng")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".part")
+    h = hashlib.sha256()
     try:
-        u = urlsplit(api.strip())
-        return u.scheme == "http" and u.hostname in ("127.0.0.1", "localhost", "::1") and not u.username \
-            and u.path in ("", "/") and not u.query
-    except ValueError:
-        return False
+        with httpx.stream("GET", asset["browser_download_url"], follow_redirects=True,
+                          timeout=httpx.Timeout(60, connect=15)) as r:
+            r.raise_for_status()
+            with tmp.open("wb") as f:
+                for chunk in r.iter_bytes(1 << 16):
+                    f.write(chunk)
+                    h.update(chunk)
+        if h.hexdigest() != digest[7:].lower():
+            raise BrowserError(f"{asset.get('name')}: mã SHA256 không khớp — file bị hỏng hoặc bị thay, không dùng")
+        os.replace(tmp, dest)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return dest
 
 
-def shardx_settings() -> tuple[str, str]:
-    """(địa chỉ API, token). Mặc định tự lấy từ ShardBrowser cài trên máy này — không cần dán token;
-    config.yaml `browser:` chỉ dùng khi muốn chỉ định tay (ShardBrowser ở máy khác / cổng khác)."""
-    c, ls = _cfg(), _launcher_settings()
-    api = c.get("shardx_api") or (f"http://127.0.0.1:{ls['api_port']}" if ls.get("api_port") else DEFAULT_API)
-    if is_local_api(api) and ls.get("api_secret"):
-        token = _mint_token(ls["api_secret"])            # luôn mới, đúng secret hiện tại
-    else:
-        token = (c.get("shardx_token") or "").strip()
-    return api.rstrip("/"), token
+def _use_mirror(rt) -> None:
+    import shutil
+    import zipfile
+    state: dict = {}
 
+    def assets() -> dict:
+        if "assets" not in state:
+            state["assets"] = _mirror_assets()
+        return state["assets"]
 
-def auto_token() -> bool:
-    """Token tự lấy được từ ShardBrowser trên máy (không cần người dùng dán)."""
-    return bool(_launcher_settings().get("api_secret"))
-
-
-def launcher_exe() -> Path | None:
-    """File chạy ShardBrowser Launcher (tìm trong danh sách chương trình đã cài của Windows)."""
-    import sys
-    if sys.platform != "win32":
-        return None
-    import winreg
-    roots = [(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
-             (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
-             (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall")]
-    for hive, base in roots:
+    def fetch_manifest() -> dict:
+        # lỗi (mất mạng, GitHub giới hạn lượt hỏi) -> {} như SDK: giữ nhân đang có, không tải lại
         try:
-            with winreg.OpenKey(hive, base) as k:
-                for i in range(winreg.QueryInfoKey(k)[0]):
-                    try:
-                        with winreg.OpenKey(k, winreg.EnumKey(k, i)) as sub:
-                            if "ShardBrowser" not in str(winreg.QueryValueEx(sub, "DisplayName")[0]):
-                                continue
-                            for name in ("DisplayIcon", "InstallLocation"):
-                                try:
-                                    v = str(winreg.QueryValueEx(sub, name)[0]).split(",")[0].strip('" ')
-                                except OSError:
-                                    continue
-                                p = Path(v)
-                                if p.is_file() and p.suffix.lower() == ".exe":
-                                    return p
-                                if p.is_dir():
-                                    exe = next((x for x in p.glob("*.exe") if "unins" not in x.name.lower()), None)
-                                    if exe:
-                                        return exe
-                    except OSError:
-                        continue
-        except OSError:
-            continue
-    return None
+            a = assets().get("runtime.json")
+            if not a:
+                return {}
+            p = _fetch_verified(a, rt.root / ".mirror-runtime.json")
+            state["manifest"] = json.loads(p.read_text("utf-8"))
+            p.unlink(missing_ok=True)
+            return state["manifest"]
+        except Exception as e:
+            print(f"Không đọc được danh sách phiên bản nhân trên GitHub: {e}", flush=True)
+            return {}
+
+    def download(arch, dest: Path, unpacks: bool = False):
+        a = assets().get(arch.key)
+        if not a:
+            raise BrowserError(f"Bản sao trên github.com/{MIRROR_REPO} thiếu {arch.key}")
+        tmp = _fetch_verified(a, dest / f".{arch.key}.tmp")
+        etag = ((state.get("manifest") or {}).get("archives") or {}).get(arch.key, "")
+        return tmp, etag
+
+    def install_fingerprints() -> None:
+        # như Runtime._install_fingerprints của SDK, chỉ khác nguồn tải
+        from shardx.runtime import FINGERPRINTS_ARCHIVE, FINGERPRINTS_TOP_DIR, RETIRED_TEMPLATES
+        a = assets().get(FINGERPRINTS_ARCHIVE.key)
+        if not a:
+            raise BrowserError(f"Bản sao trên github.com/{MIRROR_REPO} thiếu {FINGERPRINTS_ARCHIVE.key}")
+        staging = rt.fingerprints_dir / ".staging"
+        shutil.rmtree(staging, ignore_errors=True)
+        tmp = _fetch_verified(a, staging / "bundle.zip")
+        with zipfile.ZipFile(tmp) as z:
+            z.extractall(staging)
+        src = staging / FINGERPRINTS_TOP_DIR
+        for p in (src if src.exists() else staging).iterdir():
+            if p.suffix == ".json":
+                shutil.copy(p, rt.fingerprints_dir / p.name)
+        for old in RETIRED_TEMPLATES:
+            (rt.fingerprints_dir / f"{old}.json").unlink(missing_ok=True)
+        shutil.rmtree(staging, ignore_errors=True)
+
+    rt._fetch_manifest = fetch_manifest
+    rt._download = download
+    rt._install_fingerprints = install_fingerprints
 
 
-def _start_launcher(api: str) -> bool:
-    """ShardBrowser chưa chạy -> mở app (thu nhỏ) và chờ API sẵn sàng (tối đa ~45s)."""
-    import subprocess
-    import time
-    exe = launcher_exe()
-    if not exe:
-        return False
-    subprocess.Popen([str(exe)], cwd=str(exe.parent))
-    for _ in range(45):
-        time.sleep(1)
-        try:
-            httpx.get(api + "/health", timeout=2)
-            return True
-        except httpx.HTTPError:
-            continue
-    return False
+def engine_installed() -> bool:
+    return any(SDK_DIR.glob("ShardX-*/chrome.exe")) or any(SDK_DIR.glob("ShardX-*/*/Contents/MacOS/*"))
 
 
-def _api(method: str, path: str, _retry: bool = True, **kw):
-    api, token = shardx_settings()
-    if not token:
-        raise BrowserError("Chưa có token API của ShardBrowser — mở ShardBrowser 1 lần, hoặc xem Cài đặt > Trình duyệt")
+def install_engine() -> None:
+    """Tải / cập nhật nhân trình duyệt + thư viện dấu vân tay (không làm gì nếu đã mới nhất)."""
+    s = sdk()
     try:
-        # ShardBrowser trên máy này: chờ KẾT NỐI tối đa 1 s (Windows không từ chối ngay cổng đang đóng -> trước treo tới
-        # 60 s khi launcher tắt); chờ TRẢ LỜI vẫn 60 s (mở hồ sơ lâu)
-        to = httpx.Timeout(60.0, connect=1.0) if is_local_api(api) else 60
-        r = httpx.request(method, api + path, headers={"Authorization": f"Bearer {token}"}, timeout=to, **kw)
-    except httpx.ConnectError as e:
-        if _retry and _start_launcher(api):          # tự mở ShardBrowser rồi thử lại 1 lần
-            return _api(method, path, _retry=False, **kw)
-        hint = "hãy mở app ShardBrowser" if launcher_exe() else f"chưa cài ShardBrowser — tải tại {DOWNLOAD}"
-        raise BrowserError(f"Không kết nối được ShardBrowser tại {api} — {hint} ({e})") from e
-    except httpx.HTTPError as e:
-        raise BrowserError(f"Không kết nối được ShardBrowser tại {api} — hãy mở app ShardBrowser trước ({e})") from e
-    if r.status_code == 401:
-        raise BrowserError("Token API ShardBrowser sai hoặc đã đổi — lấy lại ở ShardBrowser > Settings > Automation API")
-    if r.status_code >= 400:
-        raise BrowserError(f"ShardBrowser trả lỗi {r.status_code}: {r.text[:200]}")
-    return r.json() if r.content else {}
+        with _quiet():
+            s.runtime.install()
+    except Exception as e:
+        raise BrowserError(f"Không tải được nhân trình duyệt ShardX: {e}") from e
 
 
-def list_profiles(start_launcher: bool = True) -> list[dict]:
-    """Hồ sơ ShardBrowser để chọn trên giao diện: [{id, name, folder, running}].
-    start_launcher=False: ShardBrowser đang tắt thì báo lỗi ngay, không tự mở rồi chờ ~45s (dùng khi vẽ trang)."""
-    return [{"id": p.get("id"), "name": p.get("name") or p.get("id"), "folder": p.get("folder") or "",
-             "running": bool(p.get("running"))} for p in _api("GET", "/profiles", _retry=start_launcher)]
+def install_engine_background() -> None:
+    """Gọi khi mở app: tải sẵn nhân lần đầu để bấm Đăng nhập không phải chờ ~1 phút."""
+    def run():
+        try:
+            install_engine()
+        except BrowserError as e:
+            print(e, flush=True)
+    threading.Thread(target=run, daemon=True, name="shardx-install").start()
 
+
+# ---------------- hồ sơ ----------------
 
 def get_choice(acc_dir: Path) -> dict:
-    """Hồ sơ đã gắn: {'profile_id', 'profile_name'} hoặc {} nếu chưa chọn."""
+    """Hồ sơ đã gắn: {'profile_id', 'profile_name'} hoặc {} nếu chưa có (kể cả hồ sơ cũ của app ShardBrowser)."""
     try:
         c = json.loads((acc_dir / FILE).read_text("utf-8"))
-        return c if c.get("profile_id") else {}
     except (OSError, ValueError):
         return {}
+    if c.get("engine") != ENGINE or not _valid_id(c.get("profile_id")) or not (PROFILES_DIR / c["profile_id"]).is_dir():
+        return {}
+    return c
+
+
+def _valid_id(pid) -> bool:
+    """Mã hồ sơ SDK = uuid4().hex. Kiểm tra chặt trước khi ghép vào đường dẫn."""
+    import re
+    return isinstance(pid, str) and re.fullmatch(r"[0-9a-f]{32}", pid) is not None
 
 
 def set_choice(acc_dir: Path, profile_id: str, profile_name: str = "") -> None:
     if not profile_id:
         (acc_dir / FILE).unlink(missing_ok=True)
         return
-    (acc_dir / FILE).write_text(json.dumps({"profile_id": profile_id, "profile_name": profile_name},
+    if not _valid_id(profile_id):
+        raise BrowserError("Mã hồ sơ trình duyệt không hợp lệ")
+    (acc_dir / FILE).write_text(json.dumps({"engine": ENGINE, "profile_id": profile_id, "profile_name": profile_name},
                                            ensure_ascii=False), "utf-8")
 
 
@@ -193,193 +218,110 @@ def missing_profile(acc_dir: Path) -> bool:
     return not get_choice(acc_dir)
 
 
-FOLDER = "dytool"          # thư mục chứa các hồ sơ dytool tạo trong ShardBrowser
+def had_old_profile(acc_dir: Path) -> bool:
+    """Đang gắn hồ sơ của app ShardBrowser cũ (trước khi nhúng SDK) -> cần đăng nhập lại 1 lần."""
+    try:
+        c = json.loads((acc_dir / FILE).read_text("utf-8"))
+        return bool(c.get("profile_id")) and c.get("engine") != ENGINE
+    except (OSError, ValueError):
+        return False
 
 
-def create_profile(name: str) -> dict:
-    """Tạo 1 hồ sơ mới y như nút "New profile" của ShardBrowser: lấy cấu hình do chính ShardBrowser sinh
-    (GET /fingerprint/new, máy hiện tại) và lưu nguyên vẹn — dytool không sửa gì trong đó."""
-    fp = _api("GET", "/fingerprint/new").get("fingerprint")
-    if not fp:
-        raise BrowserError("ShardBrowser không sinh được cấu hình hồ sơ mới (thư viện trống?) — mở ShardBrowser kiểm tra")
-    meta = _api("POST", "/profiles", json={"name": name, "folder": FOLDER, "fingerprint": fp})
-    return {"profile_id": meta["id"], "profile_name": meta.get("name") or name}
+def list_profiles() -> list[dict]:
+    """Hồ sơ dytool đã tạo: [{id, name, running}] — để đổi hồ sơ trên giao diện. Chỉ đọc file, không chạm mạng."""
+    out = []
+    if not PROFILES_DIR.is_dir():
+        return out
+    for d in PROFILES_DIR.iterdir():
+        if not _valid_id(d.name) or not (d / "profile.json").exists():
+            continue
+        try:
+            name = json.loads((d / META).read_text("utf-8")).get("name") or d.name
+        except (OSError, ValueError):
+            name = d.name
+        out.append({"id": d.name, "name": name, "running": _running_cdp(d) is not None})
+    return sorted(out, key=lambda p: p["name"].lower())
 
 
-def ensure_profile(acc_dir: Path, name: str) -> tuple[dict, bool]:
+def create_profile(name: str, english: bool = False) -> dict:
+    """Hồ sơ mới y như nút "New profile" của ShardBrowser (SDK create_profile: mẫu dấu vân tay Windows thật + phần
+    cứng ngẫu nhiên phù hợp máy). Múi giờ / ngôn ngữ để "auto" — SDK lấy theo IP mỗi lần mở (máy ở VN -> giờ VN,
+    tiếng Việt), không giữ của mẫu (vd. Ba Lan). english=True (TikTok): giao diện tiếng Anh vì bộ chọn của
+    tiktok-uploader viết theo tiếng Anh."""
+    s = sdk()
+    try:
+        with _quiet():
+            p = s.create_profile(platform="Windows")
+    except Exception as e:
+        raise BrowserError(f"Không tạo được hồ sơ trình duyệt: {e}") from e
+    cfg = p.config
+    cfg["timezone"] = "auto"
+    nav = cfg.setdefault("navigator", {})
+    if english:
+        nav.update(language="en-US", accept_language="en-US,en;q=0.9", languages=["en-US", "en"])
+        cfg["icu_locale"] = "en-US"
+    else:
+        nav["language"] = "auto"
+    with _quiet():
+        s.save_profile(p)
+    (PROFILES_DIR / p.id / META).write_text(json.dumps({"name": name}, ensure_ascii=False), "utf-8")
+    return {"profile_id": p.id, "profile_name": name}
+
+
+def ensure_profile(acc_dir: Path, name: str, english: bool = False) -> tuple[dict, bool]:
     """Hồ sơ đã gắn, hoặc tạo hồ sơ mới tên `name` rồi gắn luôn. Trả (lựa chọn, có_tạo_mới)."""
     c = get_choice(acc_dir)
     if c:
         return c, False
-    c = create_profile(name)
+    c = create_profile(name, english=english)
     set_choice(acc_dir, c["profile_id"], c["profile_name"])
     return c, True
 
 
-ENGINE_COPY = Path(r"C:\ShardX\ShardX-Windows")      # bản chép nhân ra ngoài AppData (xem sync_engine)
+# ---------------- mở hồ sơ ----------------
 
-
-def sync_engine() -> None:
-    """Máy chặn chạy exe trong AppData (lỗi side-by-side) -> nhân ShardX được chép ra C:\\ShardX và ShardBrowser trỏ
-    `browser_path` (settings.json) vào đó. ShardBrowser cập nhật nhân trong AppData -> chép lại bản mới trước khi mở hồ sơ.
-    Chỉ làm khi browser_path đang trỏ vào bản chép này; lỗi (đang có hồ sơ mở, khoá file) -> dùng tạm bản cũ."""
-    appdata = _shardx_dir()
+def _running_cdp(udd: Path) -> str | None:
+    """Hồ sơ đang mở (vd. cửa sổ đăng nhập chưa đóng) -> địa chỉ CDP của phiên đó, không thì None."""
+    import urllib.request
+    # Chrome giữ khoá file `lockfile` trong thư mục hồ sơ khi đang chạy. Kiểm tra cái này trước: DevToolsActivePort còn
+    # sót lại sau khi đóng, gọi vào cổng đã đóng thì Windows chờ ~2 s mỗi hồ sơ (trang Cài đặt / Tài khoản bị chậm)
     try:
-        bp = json.loads((appdata / "settings.json").read_text("utf-8")).get("browser_path") or ""
-        if Path(bp).parent != ENGINE_COPY:
-            return
-        m = json.loads((appdata / "runtime" / "manifest.json").read_text("utf-8"))
-    except (OSError, ValueError):
-        return
-    src = appdata / "runtime" / "ShardX-Windows"
-    stamp = _engine_stamp(m)
-    mark = ENGINE_COPY.parent / ".dytool-engine"
-    if not (src / "chrome.exe").exists() or (mark.exists() and mark.read_text("utf-8") == stamp
-                                              and (ENGINE_COPY / "chrome.exe").exists()):
-        return
-    try:
-        _copy_engine(src, stamp)
+        with open(udd / "lockfile", "rb"):
+            return None                      # mở được = không ai giữ khoá = không chạy
+    except FileNotFoundError:
+        return None
+    except PermissionError:
+        pass                                 # đang chạy
     except OSError:
-        pass                                     # đang có hồ sơ mở / khoá file -> dùng tạm bản cũ, lần sau chép lại
-
-
-def _engine_stamp(manifest: dict) -> str:
-    return "%s|%s|%s" % (manifest.get("installed_chromium_version"), manifest.get("installed_engine_build"),
-                         manifest.get("browser_etag"))
-
-
-def _copy_engine(src: Path, stamp: str) -> None:
-    """Chép nhân ShardX ra ENGINE_COPY qua thư mục tạm rồi đổi tên (không để lại bản chép dở)."""
-    import shutil
-    ENGINE_COPY.parent.mkdir(parents=True, exist_ok=True)
-    mark = ENGINE_COPY.parent / ".dytool-engine"
-    tmp = ENGINE_COPY.with_name(ENGINE_COPY.name + ".new")
-    old = ENGINE_COPY.with_name(ENGINE_COPY.name + ".old")
+        return None
     try:
-        shutil.rmtree(tmp, ignore_errors=True)
-        shutil.copytree(src, tmp)
-        shutil.rmtree(old, ignore_errors=True)
-        if ENGINE_COPY.exists():
-            ENGINE_COPY.rename(old)
-        tmp.rename(ENGINE_COPY)
-        shutil.rmtree(old, ignore_errors=True)
-        mark.write_text(stamp, "utf-8")
-    except OSError:
-        if not ENGINE_COPY.exists() and old.exists():
-            old.rename(ENGINE_COPY)              # đổi tên giữa chừng thất bại -> trả bản cũ về chỗ
-        shutil.rmtree(tmp, ignore_errors=True)
-        raise
-
-
-def _shardx_dir() -> Path:
-    import os
-    return Path(os.environ.get("APPDATA", "")) / "shardx-launcher"
-
-
-def engine_blocked(exe: Path) -> bool:
-    """Windows có chặn chạy file nhân này không? Tạo tiến trình ở trạng thái TREO (CREATE_SUSPENDED): Windows kiểm tra
-    manifest side-by-side / chính sách chặn ngay lúc tạo -> máy chặn exe trong AppData báo lỗi (WinError 14001,
-    'side-by-side configuration is incorrect') mà không mở cửa sổ nào. Tạo được thì huỷ ngay."""
-    import subprocess
-    import sys
-    if sys.platform != "win32" or not exe.exists():
-        return False
-    try:
-        p = subprocess.Popen([str(exe), "--version"], creationflags=0x00000004,     # CREATE_SUSPENDED
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except OSError:
-        return True
-    try:
-        p.kill()
-        p.wait(5)
-    except Exception:
-        pass
-    return False
-
-
-def _kill_launcher() -> None:
-    import subprocess
-    import time
-    subprocess.run(["taskkill", "/IM", "shardbrowser-launcher.exe", "/T", "/F"], capture_output=True)
-    for _ in range(20):
-        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq shardbrowser-launcher.exe", "/NH"],
-                             capture_output=True, text=True).stdout
-        if "shardbrowser-launcher.exe" not in out.lower():
-            return
-        time.sleep(0.5)
-
-
-def relocate_engine(sx: Path) -> None:
-    """Nhân ShardX trong AppData bị chặn -> chép ra C:\\ShardX, trỏ ShardBrowser sang (settings.json `browser_path`,
-    ShardBrowser có sẵn mục này) rồi mở lại launcher. Phải tắt launcher trước khi sửa settings.json: đang chạy thì nó
-    ghi đè lại khi thoát. Đang có hồ sơ mở thì không làm (tắt launcher sẽ đóng hồ sơ đó)."""
-    try:
-        running = _api("GET", "/running", _retry=False)
-    except BrowserError:
-        running = []
-    if running:
-        raise BrowserError("Nhân trình duyệt ShardBrowser bị Windows chặn chạy trong AppData. dytool cần chép nó ra "
-                           "C:\\ShardX nhưng đang có hồ sơ mở — đóng các cửa sổ ShardBrowser rồi thử lại")
-    print("Nhân ShardBrowser bị chặn chạy trong AppData -> chép ra C:\\ShardX và trỏ ShardBrowser sang đó", flush=True)
-    try:
-        manifest = json.loads((sx / "runtime" / "manifest.json").read_text("utf-8"))
-    except (OSError, ValueError):
-        manifest = {}
-    try:
-        _copy_engine(sx / "runtime" / "ShardX-Windows", _engine_stamp(manifest))
-    except OSError as e:
-        raise BrowserError(f"Không chép được nhân ShardBrowser ra C:\\ShardX: {e}") from e
-    if engine_blocked(ENGINE_COPY / "chrome.exe"):
-        raise BrowserError("Nhân ShardBrowser bị Windows chặn chạy cả ở C:\\ShardX — kiểm tra phần mềm diệt virus / "
-                           "chính sách AppLocker của máy")
-    _kill_launcher()
-    path = sx / "settings.json"
-    s = json.loads(path.read_text("utf-8"))           # đọc lại sau khi launcher đã tắt (nó có thể vừa ghi)
-    s["browser_path"] = str(ENGINE_COPY / "chrome.exe")
-    path.write_text(json.dumps(s, indent=2, ensure_ascii=False), encoding="utf-8")
-    _start_launcher(shardx_settings()[0])
-
-
-_engine_ok = False
-
-
-def ensure_engine() -> None:
-    """Gọi trước khi mở hồ sơ. Nhân ShardX chạy được -> thôi; bị chặn (máy chặn exe trong AppData) -> tự chuyển ra
-    C:\\ShardX; đã chuyển rồi -> chép lại khi ShardBrowser cập nhật nhân. Kiểm tra 1 lần mỗi lần chạy app."""
-    global _engine_ok
-    import sys
-    if _engine_ok or sys.platform != "win32":
-        return
-    sx = _shardx_dir()
-    try:
-        bp = json.loads((sx / "settings.json").read_text("utf-8")).get("browser_path") or ""
-    except (OSError, ValueError):
-        return                                         # ShardBrowser chưa chạy lần nào
-    if bp:
-        if Path(bp).parent == ENGINE_COPY:
-            sync_engine()
-        _engine_ok = True                              # người dùng tự đặt nhân khác -> để nguyên
-        return
-    exe = sx / "runtime" / "ShardX-Windows" / "chrome.exe"
-    if not exe.exists():
-        return                                         # chưa tải nhân xong -> lần sau kiểm tra lại
-    if engine_blocked(exe):
-        relocate_engine(sx)
-    _engine_ok = True
+        port = int((udd / "DevToolsActivePort").read_text("utf-8").splitlines()[0].strip())
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1.0) as r:
+            return json.loads(r.read()).get("webSocketDebuggerUrl")
+    except (OSError, ValueError, IndexError):
+        return None
 
 
 def attach(pw, acc_dir: Path, headless: bool):
-    """Mở hồ sơ ShardBrowser của tài khoản, gắn Playwright, trả về BrowserContext. ctx.close() đóng luôn hồ sơ."""
+    """Mở hồ sơ của tài khoản, gắn Playwright, trả về BrowserContext. ctx.close() đóng luôn hồ sơ (nếu chính
+    lần này mở nó)."""
     choice = get_choice(acc_dir)
     if not choice:
-        raise BrowserError("Chưa chọn hồ sơ ShardBrowser cho tài khoản này — vào Tài khoản & kênh, bấm Đăng nhập (dytool tự tạo hồ sơ)")
+        raise BrowserError("Chưa có hồ sơ trình duyệt cho tài khoản này — vào Tài khoản & kênh, bấm Đăng nhập")
     pid = choice["profile_id"]
-    ensure_engine()
-    res = _api("POST", f"/profiles/{pid}/start", json={"headless": bool(headless)})
-    ws = (res.get("cdp") or {}).get("web_socket_debugger_url")
+    s = sdk()
+    sess = None
+    ws = _running_cdp(PROFILES_DIR / pid)
     if not ws:
-        raise BrowserError("ShardBrowser không mở được hồ sơ '%s': %s"
-                           % (choice.get("profile_name") or pid, res.get("cdp_error") or "không có địa chỉ CDP"))
+        try:
+            with _quiet():
+                sess = s.launch(s.open_profile(pid), cdp=True, headless=bool(headless))
+        except Exception as e:
+            raise BrowserError(f"Không mở được hồ sơ '{choice.get('profile_name') or pid}': {e}") from e
+        ws = sess.cdp_url
+        if not ws:
+            sess.stop()
+            raise BrowserError("Nhân trình duyệt ShardX không mở cổng điều khiển (CDP) — thử lại, hoặc Cài lại thư viện")
     browser = pw.chromium.connect_over_cdp(ws)       # chỉ dùng giao thức CDP của Playwright, không chạy Chromium riêng
     ctx = browser.contexts[0] if browser.contexts else browser.new_context()
 
@@ -388,9 +330,10 @@ def attach(pw, acc_dir: Path, headless: bool):
             browser.close()          # chỉ ngắt kết nối Playwright
         except Exception:
             pass
-        try:
-            _api("POST", f"/profiles/{pid}/stop")
-        except BrowserError:
-            pass
+        if sess is not None:
+            try:
+                sess.stop()          # đóng nhân như ShardBrowser đóng hồ sơ (CDP Browser.close -> lưu cookie)
+            except Exception:
+                pass
     ctx.close = close                # nơi gọi vẫn dùng ctx.close() như trước
     return ctx

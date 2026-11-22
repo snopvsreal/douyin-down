@@ -3,18 +3,18 @@
 {% block body %}
 <div class="head">
   <div><h1>Tài khoản & kênh</h1>
-    <p class="sub">Bấm <b>Đăng nhập</b> ở tài khoản: lần đầu dytool tự tạo 1 hồ sơ ShardBrowser riêng cho tài khoản đó rồi mở ra
+    <p class="sub">Bấm <b>Đăng nhập</b> ở tài khoản: lần đầu dytool tự tạo 1 hồ sơ trình duyệt riêng cho tài khoản đó rồi mở ra
       để bạn đăng nhập. Không cần tạo hay liên kết hồ sơ bằng tay.</p></div>
 </div>
 {% if logging_in %}<div hx-get="/partials/accounts" hx-trigger="every 3s" hx-swap="none"></div>{% endif %}
 
 {% from "_macros.html" import profile_line with context %}
 
-{# chưa kết nối được ShardBrowser -> 1 dòng nhắc, phần cài đặt nằm ở trang Cài đặt #}
-{% if not shard.has_token or shard.error %}
+{# vừa chuyển từ app ShardBrowser sang trình duyệt nhúng -> các tài khoản cũ phải đăng nhập lại 1 lần #}
+{% if relogin %}
 <div class="notice warn" role="alert" style="margin-bottom:16px">
-  {% if not shard.installed %}Chưa cài ShardBrowser — trình duyệt dytool dùng để đăng nhập và đăng bài.{% else %}Chưa kết nối được ShardBrowser{% if shard.error %}: {{ shard.error }}{% endif %}.{% endif %}
-  <a href="/settings#trinh-duyet">Mở Cài đặt › Trình duyệt</a></div>
+  dytool giờ dùng trình duyệt nhúng sẵn (không cần app ShardBrowser). Bấm <b>Đăng nhập</b> lại 1 lần ở các tài
+  khoản có nhãn <b>Cần đăng nhập lại</b> — lịch đăng của những tài khoản này chờ tới khi đăng nhập xong.</div>
 {% endif %}
 
 {% macro account_card(a, platform) %}
@@ -24,6 +24,8 @@
     <h3>{{ a.name }}</h3>
     {% if a.id in logging_in %}
       <span class="pill warn">Đang chờ đăng nhập</span>
+    {% elif a.id in relogin %}
+      <span class="pill warn">Cần đăng nhập lại</span>
     {% elif a.status == 'da_dang_nhap' %}
       <span class="pill ok">Đã đăng nhập</span>
     {% else %}

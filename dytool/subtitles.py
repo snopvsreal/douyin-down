@@ -104,17 +104,10 @@ def translate(lines: list[str], cfg: dict, durations: list[float] | None = None)
 
 
 def _claude(cfg: dict, prompt: str) -> str:
-    import os
-    import anthropic
-    # ưu tiên key trong config.yaml, nếu trống thì dùng biến môi trường ANTHROPIC_API_KEY
-    key = cfg.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        raise RuntimeError("Chưa có Anthropic API key: điền anthropic_api_key (mục edit > subtitles) "
-                           "trong config.yaml rồi bấm Thử lại")
-    client = anthropic.Anthropic(api_key=key)
-    msg = client.messages.create(model=cfg.get("claude_model", "claude-sonnet-5-5"), max_tokens=8192,
-                                 messages=[{"role": "user", "content": prompt}])
-    return "".join(b.text for b in msg.content if b.type == "text")
+    """Hỏi AI. Không dùng API key nữa (người dùng yêu cầu): đi qua CLI đăng nhập bằng tài khoản — Claude / Codex /
+    Gemini CLI, chọn ở Cài đặt › AI (ai.py). Tên hàm giữ nguyên cho các chỗ gọi cũ."""
+    from . import ai
+    return ai.ask(prompt)
 
 
 def _translate_claude(lines: list[str], cfg: dict, limits: list[int] | None = None) -> list[str]:

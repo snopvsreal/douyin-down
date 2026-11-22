@@ -164,25 +164,35 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             store.log("Không tìm thấy VoiceStudio — cài từ https://github.com/debpalash/VoiceStudio/releases", "error")
         return HTMLResponse("", headers={"HX-Trigger": "services-changed"})
 
-    @app.post("/settings/api-key")
-    def save_api_key(key: str = Form("")):
-        """Lưu Anthropic API key (dịch phụ đề / lồng tiếng) vào config.yaml và cấu hình đang chạy."""
-        import re
-        key = key.strip()
-        # chỉ chữ / số / - / _ : ký tự lạ (" \ xuống dòng) ghi vào config.yaml sẽ làm hỏng file -> app không mở được
-        if not re.fullmatch(r"sk-ant-[A-Za-z0-9_-]{10,300}", key):
-            return RedirectResponse("/settings?key_error=1#api-key", 303)
-        path = ROOT / config_path
-        text = path.read_text(encoding="utf-8")
-        text, n = re.subn(r'(?m)^(\s*anthropic_api_key:\s*)"[^"\n]*"', lambda m: f'{m.group(1)}"{key}"', text, count=1)
-        if not n:
-            store.log("Không ghi được API key vào config.yaml (không thấy dòng anthropic_api_key) — "
-                      "key chỉ dùng tới khi tắt app", "error")
-        else:
-            path.write_text(text, encoding="utf-8")
-        _sub_cfg()["anthropic_api_key"] = key      # dùng ngay, không cần khởi động lại
-        store.log("Đã lưu Anthropic API key")
-        return RedirectResponse("/settings?key_saved=1#api-key", 303)
+    # ---------------- AI qua CLI (Claude / Codex / Gemini) — không dùng API key ----------------
+    @app.get("/partials/ai", response_class=HTMLResponse)
+    def ai_partial(request: Request, msg: str = "", msg_err: bool = False):
+        from .. import ai
+        return render(request, "_ai.html", items=ai.status(), msg=msg, msg_err=msg_err)
+
+    @app.post("/ai/{provider}/{action}", response_class=HTMLResponse)
+    def ai_action(request: Request, provider: str, action: str):
+        from .. import ai
+        if provider not in ai.PROVIDERS or action not in ("install", "login", "use", "test"):
+            return PlainTextResponse("Thao tác không hợp lệ", 400)
+        name = ai.PROVIDERS[provider]["name"]
+        try:
+            if action == "install":
+                ai.install(provider)
+                store.log(f"Đang cài {name}…")
+                return ai_partial(request, msg=f"Đang cài {name} (vài phút, tải ~50–150 MB)…")
+            if action == "login":
+                ai.login(provider)
+                return ai_partial(request, msg=ai.PROVIDERS[provider]["login_hint"])
+            if action == "use":
+                ai.choose(provider)
+                store.log(f"Dùng {name} để dịch / lồng tiếng")
+                return ai_partial(request, msg=f"Đã chọn {name}.")
+            t = time.time()
+            out = ai.ask("Trả lời đúng 1 chữ: OK", provider, timeout=180)
+            return ai_partial(request, msg=f"{name} trả lời “{out[:60]}” sau {time.time() - t:.0f} giây — dùng được.")
+        except ai.AIError as e:
+            return ai_partial(request, msg=str(e), msg_err=True)
 
     # ---------------- Hôm nay (trang đầu) ----------------
     @app.get("/", response_class=HTMLResponse)
@@ -192,7 +202,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         from .. import browsers
         from ..cookies import cookie_status
         totals = store.counts()
-        need_key = not (_sub_cfg().get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY"))
+        from .. import ai
+        need_key = not ai.ready()
         # "Cần bạn xử lý": gom mọi việc người dùng phải làm vào 1 chỗ
         todo = []
         if totals.get("review"):
@@ -220,8 +231,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             todo.append({"kind": "vs", "n": dub_wait, "title": "Chờ VoiceStudio", "sub": "Video cần lồng tiếng — app đang tắt",
                          "action": "/services/voicestudio", "btn": "Mở VoiceStudio"})
         if need_key:
-            todo.append({"kind": "key", "n": None, "title": "Thiếu Anthropic API key", "sub": "Chưa dịch / lồng tiếng được",
-                         "href": "/settings#api-key", "btn": "Nhập key"})
+            todo.append({"kind": "key", "n": None, "title": "Chưa cài AI", "sub": "Cài và đăng nhập Claude / Codex / Gemini CLI để dịch, lồng tiếng",
+                         "href": "/settings#ai", "btn": "Cài AI"})
         logs = store.q("SELECT * FROM logs ORDER BY id DESC LIMIT 6")
         return render(request, "home.html", totals=totals, todo=todo, today=plan.today_items(store),
                       chans=plan.channel_today(store, store.page_settings), logs=logs,
@@ -248,7 +259,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                 ("Tài khoản", "/accounts", "Trang"), ("Trình duyệt · hồ sơ", "/browsers", "Trang"),
                 ("Proxy", "/browsers/proxies", "Trang"), ("Cài đặt", "/settings", "Trang"),
                 ("Đăng nhập Douyin", "/settings#douyin", "Lệnh"), ("Thêm tài khoản / kênh", "/accounts", "Lệnh"),
-                ("Nhập Anthropic API key", "/settings#api-key", "Lệnh"), ("Cập nhật dytool", "/settings#cap-nhat", "Lệnh")]
+                ("Cài / đăng nhập AI (Claude, Codex, Gemini)", "/settings#ai", "Lệnh"), ("Cập nhật dytool", "/settings#cap-nhat", "Lệnh")]
         items = [{"label": l, "href": h, "kind": k} for l, h, k in cmds if not ql or ql in l.lower()]
         for p in plan.nav_pages(store):
             if not ql or ql in p["name"].lower():
@@ -437,16 +448,14 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                 "douyin_old": browsers.had_old_profile(data), "engine": browsers.engine_installed(),
                 "dir": str(browsers.SDK_DIR)}
 
-    # ---------------- Cài đặt chung (cập nhật, API key, trình duyệt, Douyin, thông tin) ----------------
+    # ---------------- Cài đặt chung (cập nhật, AI, trình duyệt, Douyin, thông tin) ----------------
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request):
         import os
         from .. import updates
         from ..cookies import cookie_status
-        key = _sub_cfg().get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY") or ""
         # tăng tốc AI: đọc phiên bản torch (bản "+cu…" = có CUDA), không import torch (không khởi động CUDA / tốn VRAM)
         return render(request, "settings.html", shard=_shard_info(),
-                      key_tail=key[-4:] if key else "", key_env=bool(not _sub_cfg().get("anthropic_api_key") and key),
                       douyin=cookie_status(cfg["douyin"].get("cookie", "")), dy_logging_in=_alive("douyin"),
                       version=updates.installed("dytool"), root=str(ROOT), data_dir=str(data),
                       config_file=str(ROOT / config_path), accel=accel)

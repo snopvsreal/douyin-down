@@ -700,3 +700,11 @@ a.chip:hover { background: var(--active); text-decoration: none; }
 .kw-alt { border: 1px solid var(--field-line); background: var(--field); color: var(--t1); border-radius: 6px; padding: 1px 8px;
   font: inherit; font-size: 13px; cursor: default; }
 .kw-alt:hover { border-color: var(--primary); }
+
+/* Cài đặt › AI: 3 thẻ CLI (Claude / Codex / Gemini) */
+.ai-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.ai-card { padding: 12px 14px; border: 1px solid var(--tile-line); border-radius: var(--r-tile); background: var(--tile); }
+.ai-card.on { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-tint); }
+.ai-card b { font-weight: 600; }
+.ai-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+#ai-box .notice { margin-bottom: 10px; }

@@ -44,9 +44,9 @@ edit:
     enabled: true
     whisper_model: small      # tiny | base | small | medium | large-v3 (lớn hơn = chuẩn hơn, chậm hơn)
     source_lang: zh
-    translator: claude        # claude (cần biến môi trường ANTHROPIC_API_KEY, dịch tự nhiên nhất)
+    translator: claude        # claude = dịch bằng AI (CLI chọn ở Cài đặt › AI, dịch tự nhiên nhất)
                               # google (miễn phí nhưng hay bị Google chặn bằng captcha)
-    anthropic_api_key: ""     # dán key Claude (sk-ant-...) vào đây
+    anthropic_api_key: ""     # KHÔNG dùng nữa: dytool dịch bằng Claude / Codex / Gemini CLI (Cài đặt › AI)
     claude_model: claude-sonnet-5-5
     font: Arial
     font_size_pct: 0.040      # cỡ chữ = 4% chiều cao video

@@ -1,0 +1,51 @@
+{# Cài đặt › AI: 3 CLI đăng nhập bằng tài khoản (không API key). Tự làm mới: 2 s khi đang cài, 8 s khi chờ đăng nhập #}
+{% set busy = items|selectattr('job')|selectattr('job.state', 'equalto', 'installing')|list %}
+<div id="ai-box" hx-get="/partials/ai" hx-swap="outerHTML"
+     hx-trigger="every {{ '2s' if busy else '8s' }} [!document.hidden]">
+  {% if msg %}<div class="notice {{ 'warn' if msg_err }}" role="status">{{ msg }}</div>{% endif %}
+  <div class="ai-grid">
+    {% for a in items %}
+    <div class="ai-card {{ 'on' if a.active and a.installed and a.logged_in }}">
+      <div class="row" style="gap:8px">
+        <b>{{ a.name }}</b>
+        {% if a.active and a.installed and a.logged_in %}<span class="pill ok">Đang dùng</span>{% endif %}
+      </div>
+      <p class="small muted" style="margin:2px 0 10px">{{ a.by }}</p>
+      <ul class="ai-steps">
+        <li class="{{ 'done' if a.installed }}">
+          {% if a.job and a.job.state == 'installing' %}<span class="pill info">Đang cài…</span>
+          {% elif a.installed %}<span class="pill ok">Đã cài</span>
+          {% else %}<span class="pill">Chưa cài</span>{% endif %}
+          {% if a.job and a.job.state == 'error' %}<div class="small" style="color:var(--err); margin-top:4px">{{ a.job.msg }}</div>{% endif %}
+        </li>
+        <li class="{{ 'done' if a.logged_in }}">
+          {% if a.logged_in %}<span class="pill ok">Đã đăng nhập</span>{% else %}<span class="pill">Chưa đăng nhập</span>{% endif %}
+        </li>
+      </ul>
+      <div class="row" style="gap:6px; margin-top:10px">
+        {% if not a.installed %}
+          <button class="btn sm primary" hx-post="/ai/{{ a.key }}/install" hx-target="#ai-box" hx-swap="outerHTML"
+                  hx-disabled-elt="this" {{ 'disabled' if a.job and a.job.state == 'installing' }}>Cài</button>
+        {% else %}
+          <button class="btn sm {{ 'primary' if not a.logged_in }}" hx-post="/ai/{{ a.key }}/login" hx-target="#ai-box" hx-swap="outerHTML"
+                  hx-disabled-elt="this">{{ 'Đăng nhập lại' if a.logged_in else 'Đăng nhập' }}</button>
+          {% if a.logged_in and not a.active %}
+            <button class="btn sm" hx-post="/ai/{{ a.key }}/use" hx-target="#ai-box" hx-swap="outerHTML">Dùng cái này</button>
+          {% endif %}
+          {% if a.logged_in %}
+            <button class="btn sm ghost" hx-post="/ai/{{ a.key }}/test" hx-target="#ai-box" hx-swap="outerHTML"
+                    hx-disabled-elt="this" title="Gửi 1 câu hỏi ngắn để chắc CLI trả lời được">Thử</button>
+          {% endif %}
+          {% if a.managed %}
+            <button class="btn sm ghost" hx-post="/ai/{{ a.key }}/install" hx-target="#ai-box" hx-swap="outerHTML"
+                    hx-disabled-elt="this" title="Cài lại bản mới nhất">Cập nhật</button>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="hint">Dùng tài khoản bạn đã có (Claude Pro / Max, ChatGPT Plus / Pro, hoặc tài khoản Google) — không cần API key.
+    Bấm <b>Đăng nhập</b>: 1 cửa sổ mở ra, đăng nhập trong trình duyệt rồi đóng cửa sổ đó; trạng thái ở đây tự cập nhật.
+    Chưa có AI thì dịch từ khoá dùng dịch máy, còn dịch phụ đề / lồng tiếng chưa chạy được.</p>
+</div>

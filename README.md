@@ -10,8 +10,8 @@ Ghi chú cho lập trình viên / Claude: xem [CLAUDE.md](CLAUDE.md).
    Bước cuối tự tải thư viện (~4 GB: Python, torch, FFmpeg, backend Douyin, model AI, trình duyệt chống phát hiện
    ShardX nhúng sẵn — không cần cài ShardBrowser riêng) — lần đầu 15–30 phút,
    xem tiến độ ở cửa sổ màu xanh. Windows SmartScreen có thể cảnh báo vì file chưa ký số: bấm *More info → Run anyway*.
-2. Mở **dytool** (Desktop / Start Menu): app có cửa sổ riêng, không cần trình duyệt. Lần đầu dán Anthropic API key
-   ngay trên trang Tổng quan. VoiceStudio mở bằng nút **Mở** ở thanh bên.
+2. Mở **dytool** (Desktop / Start Menu): app có cửa sổ riêng, không cần trình duyệt. Lần đầu vào **Cài đặt › AI**: bấm Cài và Đăng nhập 1 trong Claude / Codex / Gemini CLI
+   (không cần API key). VoiceStudio mở bằng nút **Mở** ở thanh trên cùng.
 3. **Đóng cửa sổ = thu xuống khay** (cạnh đồng hồ), tool vẫn chạy để edit / đăng theo lịch. Thoát hẳn: chuột phải
    icon dytool ở khay → *Thoát dytool*.
 4. Lỗi thư viện / muốn cập nhật: Start Menu → **dytool - Cài đặt lại thư viện**. Cài bản mới: chạy file Setup mới
@@ -34,7 +34,7 @@ Cài từng bước (thay cho file trên): `powershell -ExecutionPolicy Bypass -
 Sau khi cài:
 
 1. Mở **VoiceStudio** → Model Catalogue → chấp nhận license **OmniVoice** và **higgs-audio-v2-tokenizer**.
-2. Chưa nhập API key lúc cài → điền `anthropic_api_key` trong `config.yaml` (mục `edit > subtitles`).
+2. Dịch / lồng tiếng dùng AI qua CLI (không cần API key): **Cài đặt › AI** → Cài + Đăng nhập Claude, Codex hoặc Gemini CLI.
 3. Cookie Douyin hết hạn → nút **Đăng nhập Douyin** trên giao diện (hoặc `uv run dytool douyin-login`).
 4. Mở tool: shortcut **dytool** trên Desktop (= `scripts\run_ui.bat`) → http://127.0.0.1:8000. **Đóng cửa sổ đen = tắt tool.**
    Tự chạy khi bật máy: tạo shortcut của `run_ui.bat` trong thư mục `shell:startup`.
@@ -53,7 +53,7 @@ cp config.example.yaml config.yaml
 1. **Cookie Douyin**: `uv run dytool douyin-login` (mọi hệ điều hành) hoặc trên macOS `uv run dytool cookie`
    (đọc từ Chrome đã đăng nhập).
 2. **Kênh / từ khóa**: thêm link `https://www.douyin.com/user/<sec_uid>` vào `douyin.channels`, từ khóa (tiếng Trung) vào `douyin.keywords`.
-3. **Dịch phụ đề**: `export ANTHROPIC_API_KEY=...` (Google Translate miễn phí hay bị chặn captcha).
+3. **Dịch phụ đề**: dùng AI chọn ở Cài đặt › AI (Claude / Codex / Gemini CLI đăng nhập bằng tài khoản; Google Translate miễn phí hay bị chặn).
 4. **Facebook**: `facebook.page_id` + `facebook.page_token` (Page Access Token có quyền `pages_manage_posts`, `pages_read_engagement`). Kiểm tra: `uv run dytool fb-check`.
 
 ## Giao diện web (nhiều tài khoản / nhiều Page)

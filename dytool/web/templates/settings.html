@@ -15,30 +15,14 @@
   <h2 style="margin:0">Cập nhật</h2><p class="hint">Đang kiểm tra…</p></div>
 
 {# 2. Dịch & lồng tiếng #}
-<section class="section" id="api-key" aria-labelledby="h-ai">
+<section class="section" id="ai" aria-labelledby="h-ai">
   <h2 id="h-ai">Dịch & lồng tiếng</h2>
   <div class="card">
-    {% if request.query_params.get('key_saved') %}<div class="notice" role="status">Đã lưu Anthropic API key — tool dùng ngay.</div>{% endif %}
     <div class="set-row">
-      <div class="set-label"><b>Anthropic API key</b>
-        <p class="hint">Dùng để dịch phụ đề và viết lời lồng tiếng. Lấy ở
-          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.</p></div>
-      <div>
-        {% if key_tail %}
-          <p class="small" style="margin:0 0 8px"><span class="pill ok">Đã có key</span>
-            <span class="muted">kết thúc bằng …{{ key_tail }}{% if key_env %} (lấy từ biến môi trường){% endif %}</span></p>
-        {% else %}
-          <p class="small" style="margin:0 0 8px"><span class="pill err">Chưa có key</span>
-            <span class="muted">chưa dịch / lồng tiếng được</span></p>
-        {% endif %}
-        <form method="post" action="/settings/api-key" class="inline-add">
-          <input type="password" name="key" required autocomplete="off" spellcheck="false" placeholder="sk-ant-…"
-                 aria-label="Anthropic API key {{ 'mới' if key_tail }}" {% if request.query_params.get('key_error') %}aria-invalid="true"{% endif %}>
-          <button class="btn {{ '' if key_tail else 'primary' }}">{{ 'Đổi key' if key_tail else 'Lưu key' }}</button>
-        </form>
-        {% if request.query_params.get('key_error') %}<p class="hint" role="alert" style="color:var(--err)">Key phải bắt đầu bằng sk-ant- — dán lại key từ console.anthropic.com.</p>{% endif %}
-        <p class="hint">Key chỉ lưu trong file config.yaml trên máy này.</p>
-      </div>
+      <div class="set-label"><b>AI</b>
+        <p class="hint">Dịch phụ đề, viết lời lồng tiếng, viết từ khoá tìm Douyin. Chọn 1 trong 3 CLI, đăng nhập bằng tài khoản
+          của bạn — không cần API key.</p></div>
+      <div hx-get="/partials/ai" hx-trigger="load" hx-swap="outerHTML"><p class="hint">Đang kiểm tra…</p></div>
     </div>
     <div class="set-row">
       <div class="set-label"><b>VoiceStudio</b>

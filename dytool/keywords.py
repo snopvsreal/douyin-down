@@ -1,6 +1,6 @@
 """Từ khoá tìm Douyin: người dùng gõ tiếng Việt -> cụm từ tiếng Trung (giản thể) mà người Trung hay gõ để tìm.
 
-Claude (có API key) viết cụm tìm kiếm tự nhiên + 2 gợi ý khác; không có key / lỗi -> dịch máy Google, rồi MyMemory.
+AI (Claude / Codex / Gemini CLI, ai.py) viết cụm tìm kiếm tự nhiên + 2 gợi ý khác; chưa có AI / lỗi -> dịch máy Google, rồi MyMemory.
 Gõ sẵn tiếng Trung thì giữ nguyên. Nhớ kết quả trong bộ nhớ: xem trước lúc gõ và lúc bấm Thêm nguồn dùng chung 1 lần
 dịch (không gọi lại, kết quả không đổi giữa 2 lần)."""
 
@@ -22,7 +22,7 @@ def _norm(text: str) -> str:
 
 
 def translate(text: str, cfg: dict) -> dict:
-    """-> {"zh": "…", "alt": ["…", …], "by": "claude"|"google"|"", "error": "…"}. Tiếng Trung sẵn -> giữ nguyên."""
+    """-> {"zh": "…", "alt": ["…", …], "by": "ai"|"google"|"mymemory"|"", "error": "…"}. Tiếng Trung sẵn -> giữ nguyên."""
     q = _norm(text)
     if not q:
         return {"zh": "", "alt": [], "by": "", "error": ""}
@@ -73,8 +73,8 @@ def _mymemory(q: str) -> str:
 
 
 def _claude(q: str, cfg: dict) -> dict | None:
-    import os
-    if not (cfg.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")):
+    from . import ai
+    if not ai.ready():                     # chưa cài / đăng nhập CLI AI nào -> dịch máy
         return None
     from .subtitles import _claude as ask
     prompt = (
@@ -91,4 +91,4 @@ def _claude(q: str, cfg: dict) -> dict | None:
     if not is_chinese(zh):
         return None
     alt = [_norm(str(a)) for a in data.get("alt", []) if is_chinese(str(a)) and _norm(str(a)) != zh][:2]
-    return {"zh": zh, "alt": alt, "by": "claude", "error": ""}
+    return {"zh": zh, "alt": alt, "by": "ai", "error": ""}

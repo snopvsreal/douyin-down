@@ -18,7 +18,7 @@
 {# hx-boost: bấm menu / gửi form không tải lại cả trang (không nháy trắng) — giống app thật #}
 <body hx-boost="true">
 <a class="skip" href="#main">Bỏ qua menu, tới nội dung chính</a>
-<div class="app">
+<div class="app" data-css="{{ css_v() }}">
   <nav class="side" aria-label="Menu chính">
     <div class="brand" translate="no"><img src="/static/icon.png" alt=""><span>dytool</span></div>
     {% set p = request.url.path %}
@@ -76,6 +76,13 @@
 {# Vùng đọc to cho trình đọc màn hình: chỉ được cập nhật (hx-swap-oob) khi bước đăng nhập đổi, không theo từng giây #}
 <div id="sr-live" class="sr-only" aria-live="polite"></div>
 <script>
+  // Chuyển trang kiểu boost chỉ thay <body>, giữ <head> cũ -> khi app.css đổi (cập nhật / sửa giao diện), cửa sổ đang
+  // mở vẫn dùng CSS cũ và trang mới vỡ bố cục. Trang mới mang số phiên bản CSS (data-css): khác thì nạp lại CSS ngay.
+  (() => {
+    const v = document.querySelector('.app')?.dataset.css;
+    const link = document.querySelector('link[rel=stylesheet][href*="/static/app.css"]');
+    if (v && link && !link.getAttribute('href').endsWith('v=' + v)) link.setAttribute('href', '/static/app.css?v=' + v);
+  })();
   // Sáng / tối / theo máy (cuối menu). Lưu localStorage; "theo máy" = bỏ data-theme -> theo Windows.
   if (!window.__dyTheme) {
     window.__dyTheme = true;

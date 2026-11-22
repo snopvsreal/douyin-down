@@ -1,134 +1,85 @@
 {% extends "base.html" %}
-{% block title %}Hộp duyệt{% endblock %}
-{% block crumb %}Làm việc › <b>Hộp duyệt</b>{% if cur %} · video {{ idx + 1 }} / {{ videos|length }}{% endif %}{% endblock %}
+{% block title %}Duyệt video{% endblock %}
 {% block body %}
-{% set qs = ('&page=' ~ cur_page) if cur_page else '' %}
-<div class="rv-head">
-  <h1>Hộp duyệt</h1>
-  {% if by_page|length > 1 %}
-  <nav class="filters" aria-label="Lọc theo kênh" style="margin:0; border:0">
-    <a class="pill {{ 'on' if not cur_page }}" href="/review">Tất cả {{ by_page|sum(attribute='n') }}</a>
-    {% for b in by_page %}<a class="pill {{ 'on' if cur_page == b.id }}" href="/review?page={{ b.id }}">{{ b.name }} {{ b.n }}</a>{% endfor %}
-  </nav>
-  {% endif %}
+<div class="head">
+  <div><h1>Duyệt video</h1>
+    <p class="sub">Xem video đã edit, sửa caption rồi duyệt. Video đã duyệt được đăng theo giới hạn và khung giờ của kênh,
+      hoặc chọn giờ riêng.</p></div>
 </div>
-{% if msg %}<div class="notice" role="status">{{ msg }}</div>{% endif %}
+{% if pages|length > 1 %}
+<nav class="filters" aria-label="Lọc theo kênh">
+  <a class="pill {{ 'on' if not cur_page }}" href="/review">Tất cả kênh</a>
+  {% for p in pages %}<a class="pill {{ 'on' if cur_page == p.id }}" href="/review?page={{ p.id }}">{{ p.name }}{{ ' · TikTok' if p.platform == 'tiktok' }}</a>{% endfor %}
+</nav>
+{% endif %}
 
-{% if not cur %}
-  <div class="all-clear" style="margin-top:8px"><span class="todo-ic ok"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12.5 4 4 8-9"/></svg></span>
-    <div><b>Không còn video nào chờ duyệt</b><div class="small muted">Video edit xong sẽ hiện ở đây. Xem lịch sắp đăng ở <a href="/calendar">Lịch đăng</a>.</div></div></div>
-{% else %}
-{% set key = cur.page_id ~ ':' ~ cur.id %}
-<div class="rv" id="rv">
-  {# --- hàng chờ --- #}
-  <nav class="rv-queue" aria-label="Hàng chờ duyệt">
-    {% for v in videos %}{% set k = v.page_id ~ ':' ~ v.id %}
-    <a class="rv-item {{ 'on' if k == key }}" href="/review?v={{ k }}{{ qs }}" {{ 'aria-current=true' if k == key }}>
-      <span class="rv-thumb" style="box-shadow: inset 3px 0 0 {{ colors.get(v.page_id, '#535efd') }}"><video src="/media/edited/p{{ v.page_id }}_{{ v.id }}.mp4#t=1" preload="none" muted></video></span>
-      <span class="rv-meta"><b class="trunc">{{ v.caption or v.desc or v.id }}</b>
-        <span class="small muted">{{ v.page_name }} · {{ (v.duration or 0)|round|int }}s · ♥ {{ '{:,}'.format(v.likes or 0) }}</span></span>
-    </a>
-    {% endfor %}
-  </nav>
-
-  {# --- xem video --- #}
-  <div class="rv-stage">
-    <div class="seg" role="group" aria-label="Xem bản">
-      <button type="button" data-view="edit" aria-pressed="true">Đã edit</button>
-      <button type="button" data-view="raw" {{ 'disabled title="Không còn file gốc"' if not raw }}>Bản gốc</button>
-      <button type="button" data-view="both" {{ 'disabled' if not raw }}>Cạnh nhau</button>
+<div class="videos">
+  {% for v in videos %}
+  <article class="card vcard" id="v-{{ v.page_id }}-{{ v.id }}">
+    <video src="/media/edited/p{{ v.page_id }}_{{ v.id }}.mp4" controls preload="metadata" playsinline></video>
+    <div class="meta">
+      <b style="color:var(--text)">{{ v.page_name }}</b>{% if v.platform == 'tiktok' %} <span class="tag tt">TikTok</span>{% endif %}
+      <span class="spacer"></span>
+      <span class="num">❤ {{ '{:,}'.format(v.likes or 0) }}</span>
+      <span class="num">{{ (v.duration or 0)|round|int }}s</span>
+      <a href="https://www.douyin.com/video/{{ v.id }}" target="_blank" rel="noopener">gốc ↗</a>
     </div>
-    <div class="rv-players" data-show="edit">
-      <video class="rv-video" id="rv-edit" src="/media/edited/p{{ cur.page_id }}_{{ cur.id }}.mp4" controls preload="metadata" playsinline></video>
-      {% if raw %}<video class="rv-video" id="rv-raw" src="/media/raw/{{ cur.id }}" controls preload="none" playsinline></video>{% endif %}
-    </div>
-    <p class="small muted" style="text-align:center">
-      <a href="https://www.douyin.com/video/{{ cur.id }}" target="_blank" rel="noopener">Xem trên Douyin ↗</a>
-      {% if cur.error %}<br><span style="color:var(--err)">{{ cur.error }}</span>{% endif %}</p>
-  </div>
-
-  {# --- duyệt --- #}
-  <form class="rv-side" method="post" action="/review/act" id="rv-form" hx-disabled-elt="find button">
-    <input type="hidden" name="pid" value="{{ cur.page_id }}">
-    <input type="hidden" name="vid" value="{{ cur.id }}">
-    <input type="hidden" name="page" value="{{ cur_page or '' }}">
-    <input type="hidden" name="nxt" value="{{ nxt }}">
-    <div>
-      <div class="cap-label">Kênh</div>
-      <div class="row" style="gap:8px; margin-top:4px"><span class="chan-dot" style="background:{{ colors.get(cur.page_id, '#535efd') }}"></span>
-        <a href="/pages/{{ cur.page_id }}"><b>{{ cur.page_name }}</b></a>
-        <span class="small muted">{{ 'TikTok' if cur.platform == 'tiktok' else 'Facebook' }}{% if mirror %} · đăng kèm {{ mirror.name }}{% endif %}</span></div>
-    </div>
-    <div>
-      <label for="rv-cap" style="margin-top:0">Caption</label>
-      <textarea id="rv-cap" name="caption" rows="5" autocomplete="off">{{ cur.caption or '' }}</textarea>
-      <div class="small muted" style="text-align:right"><span id="rv-cnt">{{ (cur.caption or '')|length }}</span> ký tự</div>
-    </div>
-    <fieldset class="when">
-      <legend class="cap-label">Đăng lúc</legend>
-      {% if slot %}
-      <label class="opt"><input type="radio" name="mode" value="slot" checked>
-        <span><b>Khung giờ trống tiếp theo</b><span class="small muted">{{ slot_label }}</span></span></label>
-      {% endif %}
-      <label class="opt"><input type="radio" name="mode" value="approve" {{ 'checked' if not slot }}>
-        <span><b>Theo cài đặt kênh</b><span class="small muted">Đăng khi kênh còn lượt trong ngày (hoặc tự xếp lịch nếu kênh bật)</span></span></label>
-      <label class="opt"><input type="radio" name="mode" value="now">
-        <span><b>Đăng ngay</b><span class="small muted">Bỏ qua giới hạn giờ đăng</span></span></label>
-      <label class="opt"><input type="radio" name="mode" value="at">
-        <span><b>Chọn giờ…</b><input type="datetime-local" name="when" value="{{ suggest }}" aria-label="Giờ đăng" style="margin-top:6px"></span></label>
-    </fieldset>
-    <div class="rv-actions">
-      <button class="btn primary lg" type="submit" name="go" value="1">Duyệt <kbd>A</kbd></button>
-      <div class="row" style="flex-wrap:nowrap">
-        {% if nxt %}<a class="btn" style="flex:1" href="/review?v={{ nxt }}{{ qs }}" id="rv-skip">Để sau <kbd>S</kbd></a>{% endif %}
-        {# yêu cầu riêng (không phải submit của form): hx-confirm chỉ chạy trên phần tử tự gửi yêu cầu #}
-        <button class="btn danger" style="flex:1" type="button" id="rv-reject" hx-post="/review/act" hx-vals='{"act": "reject"}'
-                hx-target="body" hx-swap="innerHTML"
-                hx-confirm="Bỏ video này? Video sẽ không được đăng (vẫn xem lại được ở mục Video).">Bỏ <kbd>X</kbd></button>
+    {% if v.error %}<p class="small" style="color:var(--err)">{{ v.error }}</p>{% endif %}
+    <form hx-target="#v-{{ v.page_id }}-{{ v.id }} .act" hx-swap="innerHTML">
+      <textarea name="caption" aria-label="Caption" autocomplete="off">{{ v.caption or '' }}</textarea>
+      {# aria-live: kết quả bấm nút (Đã duyệt / Đã lưu…) thay vào vùng này; hx-disabled-elt chống bấm 2 lần #}
+      <div class="act" style="margin-top:8px" aria-live="polite">
+        <button class="btn ok sm" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/approve" hx-disabled-elt="this"
+                title="Đăng theo giới hạn bài/ngày của kênh (hoặc xếp vào khung giờ nếu kênh bật Tự lên lịch)">✓ Duyệt</button>
+        <button class="btn sm" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/publish_now" hx-disabled-elt="this"
+                hx-confirm="Đăng ngay lên {{ v.page_name }} (bỏ qua giới hạn giờ đăng)?">Đăng ngay</button>
+        <span class="spacer"></span>
+        <button class="btn sm ghost" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/save" hx-disabled-elt="this">Lưu caption</button>
+        <button class="btn sm ghost danger" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/reject" hx-disabled-elt="this"
+                hx-confirm="Bỏ video này? Video sẽ không được đăng (vẫn xem lại được ở Tiến trình).">Bỏ</button>
       </div>
-    </div>
-  </form>
+      <details class="fold" style="margin-top:8px">
+        <summary class="small" style="font-weight:500">Lên lịch giờ khác</summary>
+        <div class="sched">
+          <input type="datetime-local" name="when" value="{{ suggest(v.page_id) }}" aria-label="Giờ đăng">
+          <button class="btn primary sm" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/schedule" hx-disabled-elt="this">Lên lịch</button>
+        </div>
+        <p class="sched-msg small" role="alert" style="color:var(--err); margin-top:6px"></p>
+      </details>
+    </form>
+  </article>
+  {% else %}
+  <div class="card empty" style="grid-column: 1 / -1">Không có video nào chờ duyệt. Video edit xong sẽ hiện ở đây.</div>
+  {% endfor %}
 </div>
-<div class="keys" aria-label="Phím tắt"><span><kbd>J</kbd> <kbd>K</kbd> video sau / trước</span><span><kbd>Space</kbd> phát / dừng</span>
-  <span><kbd>A</kbd> duyệt</span><span><kbd>S</kbd> để sau</span><span><kbd>X</kbd> bỏ</span><span><kbd>E</kbd> sửa caption</span>
-  <span class="spacer"></span><span>Duyệt xong tự mở video tiếp theo</span></div>
 
-<script>
-  (() => {
-    const keys = {{ keys|tojson }}, i = {{ idx }}, qs = {{ qs|tojson }};
-    const go = (k) => { if (k) htmx.ajax('GET', '/review?v=' + encodeURIComponent(k) + qs, { target: 'body', select: 'body', pushUrl: true }); };
-    // xem bản edit / gốc / cạnh nhau
-    document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {
-      document.querySelectorAll('[data-view]').forEach(x => x.setAttribute('aria-pressed', x === b));
-      document.querySelector('.rv-players').dataset.show = b.dataset.view;
-      const raw = document.getElementById('rv-raw'); if (raw && b.dataset.view !== 'edit') raw.preload = 'metadata';
-    }));
-    const cap = document.getElementById('rv-cap'), cnt = document.getElementById('rv-cnt');
-    cap?.addEventListener('input', () => { cnt.textContent = cap.value.length; });
-    // chọn "Chọn giờ…" khi bấm vào ô giờ
-    document.querySelector('input[name=when]')?.addEventListener('focus', () => { document.querySelector('input[name=mode][value=at]').checked = true; });
-    // phím tắt (không chạy khi đang gõ trong ô nhập); gắn lại mỗi lần vẽ trang, gỡ cái cũ
-    if (window.__dyReviewKeys) document.removeEventListener('keydown', window.__dyReviewKeys);
-    window.__dyReviewKeys = (e) => {
-      if (!document.getElementById('rv') || e.ctrlKey || e.metaKey || e.altKey) return;
-      const tag = (e.target.tagName || '').toLowerCase();
-      if (tag === 'textarea' || (tag === 'input' && e.target.type !== 'radio') || document.getElementById('palette')?.open) {
-        if (e.key === 'Escape') e.target.blur();
-        return;
-      }
-      const v = document.querySelector('.rv-players[data-show=raw]') ? document.getElementById('rv-raw') : document.getElementById('rv-edit');
-      const k = e.key.toLowerCase();
-      if (k === 'j') { e.preventDefault(); go(keys[i + 1]); }
-      else if (k === 'k') { e.preventDefault(); go(keys[i - 1]); }
-      else if (k === 's') { e.preventDefault(); go(keys[i + 1] || keys[i - 1]); }
-      else if (k === 'a') { e.preventDefault(); document.querySelector('#rv-form button[type=submit][name=go]').click(); }
-      else if (k === 'x') { e.preventDefault(); document.getElementById('rv-reject').click(); }
-      else if (k === 'e') { e.preventDefault(); cap.focus(); }
-      else if (e.key === ' ' && v) { e.preventDefault(); v.paused ? v.play() : v.pause(); }
-    };
-    document.addEventListener('keydown', window.__dyReviewKeys);
-    document.querySelector('.rv-item.on')?.scrollIntoView({ block: 'nearest' });
-  })();
-</script>
+{% if sched %}
+<details class="card fold section table-card" style="padding:0" open>
+  <summary style="padding:16px 18px 0">Lịch đăng <span class="pill num">{{ sched|length }}</span>
+    <span class="small muted" style="font-weight:400">— lịch đã gửi lên nền tảng sẽ tự đăng, máy không cần bật</span></summary>
+  <table>
+    <tr><th>Giờ đăng</th><th>Kênh</th><th>Caption</th><th>Trạng thái</th><th></th></tr>
+    {% for v in sched %}
+    <tr>
+      <td class="num" style="white-space:nowrap"><b>{{ vnt(v.scheduled_at, '%H:%M') }}</b>
+        <span class="small muted">{{ vnt(v.scheduled_at, '%d/%m') }}</span></td>
+      <td class="small">{{ v.page_name }}{% if v.platform == 'tiktok' %} <span class="tag tt">TikTok</span>{% endif %}</td>
+      <td class="small"><div class="trunc">{{ v.caption }}</div></td>
+      <td><span class="pill {{ 'ok' if v.status == 'scheduled' else 'info' }}">{{ STATUS_VI[v.status] }}</span></td>
+      <td style="white-space:nowrap; text-align:right">
+        {% if v.status == 'schedule_pending' %}
+          <button class="btn sm ghost danger" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/unschedule" hx-swap="outerHTML"
+                  hx-disabled-elt="this" hx-confirm="Huỷ lịch đăng lúc {{ vnt(v.scheduled_at, '%H:%M %d/%m') }}? Video quay lại mục Chờ duyệt.">Huỷ lịch</button>
+        {% elif v.platform == 'tiktok' %}
+          <a class="btn sm ghost" target="_blank" rel="noopener" href="https://www.tiktok.com/tiktokstudio/content">TikTok Studio ↗</a>
+        {% else %}
+          <a class="btn sm ghost" target="_blank" rel="noopener"
+             href="https://business.facebook.com/latest/content_calendar?asset_id={{ v.asset_id }}">Lịch trên Facebook ↗</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</details>
 {% endif %}
 {% endblock %}

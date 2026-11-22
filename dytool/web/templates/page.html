@@ -1,272 +1,260 @@
 {% extends "base.html" %}
 {% block title %}{{ page.name }}{% endblock %}
-{% block crumb %}Kênh › <b>{{ page.name }}</b>{% endblock %}
 {% block body %}
 {% set tt = page.platform == 'tiktok' %}
-{% set gender_vi = {'auto': 'tự nhận nam / nữ', 'male': 'luôn giọng nam', 'female': 'luôn giọng nữ'} %}
-<div class="ch-head">
-  <span class="ch-av lg" style="background:{{ color }}" aria-hidden="true">{{ page.name[:1]|upper }}</span>
-  <div style="min-width:0">
-    <div class="row" style="gap:10px"><h1 class="trunc" style="max-width:none">{{ page.name }}</h1>
-      {% if page.enabled %}<span class="pill ok">Đang chạy</span>{% else %}<span class="pill">Đang tắt</span>{% endif %}</div>
+<div class="head">
+  <div>
+    <p class="small"><a href="/accounts">← Tài khoản & kênh</a></p>
+    <h1>{{ page.name }} {% if tt %}<span class="tag tt">TikTok</span>{% endif %}</h1>
     <p class="sub">
-      {% if tt %}Kênh TikTok · tài khoản {{ page.acc_name }}{% if page.profile_id %} · <a href="https://www.tiktok.com/@{{ page.profile_id }}" target="_blank" rel="noopener">mở kênh ↗</a>{% endif %}
-      {% else %}Facebook Page · tài khoản {{ page.acc_name }} · <a href="https://www.facebook.com/profile.php?id={{ page.profile_id }}" target="_blank" rel="noopener">mở Page ↗</a>{% endif %}
+      {% if tt %}Tài khoản TikTok {{ page.acc_name }}{% if page.profile_id %}, <a href="https://www.tiktok.com/@{{ page.profile_id }}" target="_blank" rel="noopener">mở kênh ↗</a>{% endif %}
+      {% else %}Page của tài khoản {{ page.acc_name }}, <a href="https://www.facebook.com/profile.php?id={{ page.profile_id }}" target="_blank" rel="noopener">mở Page ↗</a>{% endif %}
     </p>
   </div>
   <div class="spacer"></div>
+  {% if page.enabled %}<span class="pill ok">Đang bật</span>{% else %}<span class="pill">Đang tắt</span>{% endif %}
   <form method="post" action="/pages/{{ page.id }}/scan"><button class="btn">Quét nguồn ngay</button></form>
-  <label class="ch-switch">{{ 'Bật kênh' }}
-    <input type="checkbox" class="switch" role="switch" name="enabled" form="settings" {{ 'checked' if page.enabled }}
-           aria-label="Bật kênh {{ page.name }} — tool tự quét, edit, lồng tiếng và đăng"></label>
 </div>
-{% if request.query_params.get('copied') %}<div class="notice" role="status">Đã chép cài đặt sang kênh này.</div>{% endif %}
-{% if request.query_params.get('saved') %}<div class="notice" role="status">Đã lưu.</div>{% endif %}
+{% if request.query_params.get('saved') %}<div class="notice" role="status">Đã lưu cài đặt.</div>{% endif %}
+{% if request.query_params.get('bad') %}
+  {% set names = {'max_posts_per_day': 'Số bài tối đa / ngày', 'min_gap_minutes': 'Khoảng cách tối thiểu (phút)',
+                  'poll_minutes': 'Quét lại sau (phút)', 'min_likes': 'Lượt thích tối thiểu', 'min_duration': 'Độ dài tối thiểu',
+                  'max_duration': 'Độ dài tối đa', 'tint_opacity': 'Độ đậm màu phủ', 'rotate_deg': 'Nghiêng (độ)',
+                  'voice_seed': 'Seed giọng', 'tiktok_mirror': 'Đăng kèm TikTok'} %}
+  <div class="notice warn" role="alert">Chưa lưu — ô sau không phải số:
+    {% for k in request.query_params.get('bad').split(',') %}<b>{{ names.get(k, k) }}</b>{{ ', ' if not loop.last }}{% endfor %}.
+    Sửa lại rồi bấm Lưu.</div>
+{% endif %}
 
 <nav class="flow f4" aria-label="Video của kênh này">
   <a href="/review?page={{ page.id }}" class="{{ 'is-hot' if stats.get('review') }}"><span class="n">{{ stats.get('review', 0) }}</span><span class="l">Chờ duyệt</span></a>
-  <a href="/calendar?page={{ page.id }}"><span class="n">{{ week_n }}</span><span class="l">Lịch 7 ngày tới</span></a>
-  <a href="/queue?status=uploaded&ch={{ page.id }}" class="is-fin"><span class="n">{{ month_n }}</span><span class="l">Đã đăng 30 ngày</span></a>
-  <a href="/queue?status=failed&ch={{ page.id }}"><span class="n" style="{{ 'color:var(--err)' if stats.get('failed') }}">{{ stats.get('failed', 0) }}</span><span class="l">Lỗi</span></a>
+  <a href="/review?page={{ page.id }}"><span class="n">{{ stats.get('approved', 0) + stats.get('schedule_pending', 0) + stats.get('scheduled', 0) }}</span><span class="l">Chờ đăng / đã lên lịch</span></a>
+  <a href="/queue?status=uploaded" class="is-fin"><span class="n">{{ stats.get('uploaded', 0) }}</span><span class="l">Đã đăng</span></a>
+  <a href="/queue?status=failed"><span class="n" style="{{ 'color:var(--err)' if stats.get('failed') }}">{{ stats.get('failed', 0) }}</span><span class="l">Lỗi</span></a>
 </nav>
 
-<nav class="tabs" role="tablist" aria-label="Cài đặt kênh">
-  <button type="button" role="tab" data-tab="nguon" aria-selected="true">Nguồn video</button>
-  <button type="button" role="tab" data-tab="lich">Đăng &amp; lịch</button>
-  <button type="button" role="tab" data-tab="edit">Edit &amp; lồng tiếng</button>
-  <button type="button" role="tab" data-tab="caption">Caption</button>
-  {% if not tt %}<button type="button" role="tab" data-tab="kem">Đăng kèm · nhóm</button>{% endif %}
-  <button type="button" role="tab" data-tab="loc">Lọc video</button>
-  <span class="spacer"></span>
-  <span id="save-status" class="small muted" aria-live="polite">Thay đổi được tự lưu</span>
-</nav>
+<div class="settings">
+  <nav class="toc" aria-label="Các mục cài đặt">
+    <a href="#nguon">Nguồn video</a>
+    <a href="#chay">Bật & lịch đăng</a>
+    <a href="#caption">Caption</a>
+    {% if not tt %}<a href="#tiktok">Đăng kèm TikTok</a><a href="#nhom">Chia sẻ vào nhóm</a>{% endif %}
+    <a href="#loc">Lọc video</a>
+    <a href="#edit">Mẫu edit</a>
+    <a href="#giong">Giọng lồng tiếng</a>
+  </nav>
 
-<div class="ch-body">
-<div>
-  {# ---------- Nguồn: các form riêng, nằm ngoài form cài đặt ---------- #}
-  <section class="card tabpanel" data-panel="nguon" role="tabpanel">
-    <div class="row" style="align-items:baseline"><h2 style="margin:0">Nguồn Douyin</h2>
-      <span class="small muted">quét lại mỗi {{ s.poll_minutes|int }} phút</span></div>
-    {% macro source_fields(kind='keyword', value='', prm={}, uid='new') %}
-      <div class="row" style="flex-wrap:nowrap; margin-top:8px">
-        <select name="kind" style="max-width:120px" aria-label="Loại nguồn">
-          <option value="keyword" {{ 'selected' if kind == 'keyword' }}>Từ khoá</option>
-          <option value="channel" {{ 'selected' if kind == 'channel' }}>Kênh</option></select>
-        <input type="text" autocomplete="off" name="value" required value="{{ value }}" aria-label="Từ khoá hoặc link kênh"
-               placeholder="Từ khoá tiếng Trung (vd 猫咪) hoặc link douyin.com/user/…">
-      </div>
-      {% set mr = prm.get('max_results', 20) %}{% set pt = prm.get('publish_time', 1) %}
-      {% set so = prm.get('sort_type', 1) %}{% set ad = prm.get('max_age_days', 3) %}
-      <div class="grid g4" style="gap:0 12px">
-        <div><label for="f-max_results-{{ uid }}">Số video mỗi lần</label><input id="f-max_results-{{ uid }}" type="number" name="max_results" value="{{ mr }}" min="5"></div>
-        <div><label for="f-publish_time-{{ uid }}">Đăng trong</label><select id="f-publish_time-{{ uid }}" name="publish_time">
-          {% for v, l in [(1,'1 ngày'),(7,'1 tuần'),(180,'6 tháng'),(0,'mọi lúc')] %}
-            <option value="{{ v }}" {{ 'selected' if pt == v }}>{{ l }}</option>{% endfor %}</select></div>
-        <div><label for="f-sort_type-{{ uid }}">Sắp xếp</label><select id="f-sort_type-{{ uid }}" name="sort_type">
-          {% for v, l in [(1,'nhiều like'),(2,'mới nhất'),(0,'tổng hợp')] %}
-            <option value="{{ v }}" {{ 'selected' if so == v }}>{{ l }}</option>{% endfor %}</select></div>
-        <div><label for="f-max_age_days-{{ uid }}">Kênh: video trong (ngày)</label><input id="f-max_age_days-{{ uid }}" type="number" name="max_age_days" value="{{ ad }}" step="0.5"></div>
-      </div>
-    {% endmacro %}
+  <div>
+    {# ---------- Nguồn: các form riêng, nằm ngoài form cài đặt ---------- #}
+    <section class="card group" id="nguon">
+      <h2>Nguồn video Douyin</h2>
+      <p class="hint">Tool quét các từ khoá / kênh này theo chu kỳ để tìm video mới.</p>
+      {% macro source_fields(kind='keyword', value='', prm={}, uid='new') %}
+        <div class="row" style="flex-wrap:nowrap">
+          <select name="kind" style="max-width:120px" aria-label="Loại nguồn">
+            <option value="keyword" {{ 'selected' if kind == 'keyword' }}>Từ khoá</option>
+            <option value="channel" {{ 'selected' if kind == 'channel' }}>Kênh</option></select>
+          <input type="text" autocomplete="off" name="value" required value="{{ value }}" aria-label="Từ khoá hoặc link kênh"
+                 placeholder="Từ khoá tiếng Trung (vd 猫咪) hoặc link douyin.com/user/…">
+        </div>
+        {% set mr = prm.get('max_results', 20) %}{% set pt = prm.get('publish_time', 1) %}
+        {% set so = prm.get('sort_type', 1) %}{% set ad = prm.get('max_age_days', 3) %}
+        <div class="grid g4" style="gap:0 12px">
+          <div><label for="f-max_results-{{ uid }}">Số video mỗi lần</label><input id="f-max_results-{{ uid }}" type="number" name="max_results" value="{{ mr }}" min="5"></div>
+          <div><label for="f-publish_time-{{ uid }}">Đăng trong</label><select id="f-publish_time-{{ uid }}" name="publish_time">
+            {% for v, l in [(1,'1 ngày'),(7,'1 tuần'),(180,'6 tháng'),(0,'mọi lúc')] %}
+              <option value="{{ v }}" {{ 'selected' if pt == v }}>{{ l }}</option>{% endfor %}</select></div>
+          <div><label for="f-sort_type-{{ uid }}">Sắp xếp</label><select id="f-sort_type-{{ uid }}" name="sort_type">
+            {% for v, l in [(1,'nhiều like'),(2,'mới nhất'),(0,'tổng hợp')] %}
+              <option value="{{ v }}" {{ 'selected' if so == v }}>{{ l }}</option>{% endfor %}</select></div>
+          <div><label for="f-max_age_days-{{ uid }}">Kênh: video trong (ngày)</label><input id="f-max_age_days-{{ uid }}" type="number" name="max_age_days" value="{{ ad }}" step="0.5"></div>
+        </div>
+      {% endmacro %}
 
-    {% for src in sources %}{% set prm = json.loads(src.params) %}
-    <div class="src-row {{ 'off' if not src.enabled }}">
-      <span class="pill {{ 'info' if src.kind == 'keyword' }}">{{ 'Từ khoá' if src.kind == 'keyword' else 'Kênh' }}</span>
-      <div style="min-width:0">
-        <b class="trunc" style="max-width:100%; display:block">{{ src.value }}</b>
-        <div class="small muted">{% if src.kind == 'keyword' %}{{ prm.max_results }} video mỗi lần, đăng trong {{ {0:'mọi lúc',1:'1 ngày',7:'1 tuần',180:'6 tháng'}[prm.publish_time] }}, xếp theo {{ {0:'tổng hợp',1:'nhiều like',2:'mới nhất'}[prm.sort_type] }}{% else %}video trong {{ prm.max_age_days }} ngày{% endif %}{% if not src.enabled %} · đang tắt{% endif %}</div>
-        <details class="fold" style="margin-top:6px">
-          <summary class="small" style="font-weight:500">Sửa</summary>
-          <form method="post" action="/sources/{{ src.id }}/update">
-            {{ source_fields(src.kind, src.value, prm, src.id) }}
-            <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if src.enabled }}> Đang dùng nguồn này</label>
-            <button class="btn primary sm">Lưu nguồn</button>
-          </form>
-        </details>
-      </div>
-      <form method="post" action="/sources/{{ src.id }}/toggle">
-        <button class="tgl {{ 'on' if src.enabled }}" role="switch" aria-checked="{{ 'true' if src.enabled else 'false' }}"
-                aria-label="{{ 'Tắt' if src.enabled else 'Bật' }} nguồn {{ src.value }}"><span></span></button></form>
-      <form method="post" action="/sources/{{ src.id }}/delete" hx-confirm="Xoá nguồn {{ src.value }}?">
-        <button class="btn sm ghost danger" aria-label="Xoá nguồn {{ src.value }}">Xoá</button></form>
-    </div>
-    {% else %}<p class="empty">Chưa có nguồn — thêm ít nhất 1 từ khoá hoặc kênh Douyin bên dưới.</p>{% endfor %}
-
-    <details class="fold add-src" {{ 'open' if not sources }}>
-      <summary>Thêm nguồn</summary>
-      <form method="post" action="/pages/{{ page.id }}/sources">
-        {{ source_fields() }}
-        <button class="btn primary" style="margin-top:12px">Thêm nguồn</button>
-      </form>
-    </details>
-  </section>
-
-  {# ---------- Form cài đặt: tự lưu khi sửa (hx-trigger autosave từ script cuối trang) ---------- #}
-  <form method="post" action="/pages/{{ page.id }}/settings" id="settings"
-        hx-post="/pages/{{ page.id }}/settings" hx-trigger="autosave" hx-target="#save-status" hx-swap="innerHTML" hx-sync="this:queue last">
-    <section class="card tabpanel" data-panel="lich" role="tabpanel" hidden>
-      <h2>Đăng &amp; lịch</h2>
-      {% if tt %}<p class="hint" style="margin-top:0">Kênh chỉ dùng để đăng kèm theo 1 Page Facebook thì không cần bật.</p>{% endif %}
-      <label class="check"><input type="checkbox" name="auto_publish" {{ 'checked' if s.auto_publish }}>
-        <span>Tự đăng, không cần duyệt</span></label>
-      <label class="check"><input type="checkbox" name="auto_schedule" {{ 'checked' if s.auto_schedule }}>
-        <span>Tự lên lịch: video đã duyệt tự xếp vào khung giờ trống tiếp theo{% if tt %} (TikTok nhận lịch trong 10 ngày tới){% endif %}</span></label>
-      <label for="slots">Khung giờ đăng mỗi ngày</label>
-      <input type="text" autocomplete="off" id="slots" name="schedule_slots" value="{{ s.schedule_slots }}" placeholder="07:00, 11:30, 19:30, 21:00">
-      <p class="hint">Giờ Việt Nam, cách nhau bằng dấu phẩy — cũng là các hàng của Lịch đăng. Tick cả 2 ô trên là hoàn toàn tự động.</p>
-      <div class="grid g3" style="gap:0 12px">
-        <div><label for="f-max_posts_per_day">Tối đa bài mỗi ngày</label><input id="f-max_posts_per_day" type="number" name="max_posts_per_day" value="{{ s.max_posts_per_day }}" min="1"></div>
-        <div><label for="f-min_gap_minutes">Cách nhau ít nhất (phút)</label><input id="f-min_gap_minutes" type="number" name="min_gap_minutes" value="{{ s.min_gap_minutes }}" min="0"></div>
-        <div><label for="f-poll_minutes">Quét nguồn mỗi (phút)</label><input id="f-poll_minutes" type="number" name="poll_minutes" value="{{ s.poll_minutes }}" min="5"></div>
-      </div>
-    </section>
-
-    <section class="card tabpanel" data-panel="caption" role="tabpanel" hidden>
-      <h2>Caption</h2>
-      <label for="cap" style="margin-top:0">Mẫu caption — <code>{desc_vi}</code> là mô tả gốc đã dịch</label>
-      <textarea autocomplete="off" id="cap" name="caption_template">{{ s.caption_template }}</textarea>
-    </section>
-
-    {% if not tt %}
-    <section class="card tabpanel" data-panel="kem" role="tabpanel" hidden>
-      <h2>Đăng kèm lên TikTok</h2>
-      <p class="hint" style="margin-top:0">Mỗi video đăng hoặc lên lịch trên Page này cũng được đăng lên kênh TikTok, cùng giờ và cùng caption.</p>
-      <select name="tiktok_mirror" aria-label="Kênh TikTok đăng kèm" style="margin-top:8px">
-        <option value="0">Không đăng kèm</option>
-        {% for t in tiktoks %}<option value="{{ t.id }}" {{ 'selected' if s.tiktok_mirror|int == t.id }}>{{ t.name }} ({{ t.acc_name }})</option>{% endfor %}
-      </select>
-      {% if not tiktoks %}<p class="hint">Chưa có kênh TikTok — thêm ở <a href="/accounts#tiktok">Tài khoản</a>.</p>{% endif %}
-      {% if mirror %}
-      <table style="margin-top:10px">
-        {% for c in mirror %}
-        <tr class="small">
-          <td><a href="https://www.douyin.com/video/{{ c.video_id }}" target="_blank" rel="noopener">{{ c.video_id }}</a>
-            <span class="muted">→ {{ c.dst_name }}</span></td>
-          <td class="num">{% if c.scheduled_at %}{{ vnt(c.scheduled_at, '%H:%M %d/%m') }}{% else %}đăng ngay{% endif %}</td>
-          <td>{% set cls = {'uploaded':'ok','scheduled':'ok','failed':'err','pending':'info'}[c.status] %}
-            <span class="pill {{ cls }}">{{ {'pending':'Chờ đăng','scheduled':'Đã hẹn giờ','uploaded':'Đã đăng','failed':'Lỗi'}[c.status] }}</span>
-            {% if c.error %}<div style="color:var(--err)">{{ c.error[:160] }}</div>{% endif %}</td>
-          <td style="text-align:right; padding-right:0">{% if c.status == 'failed' %}
-            <button type="button" class="btn sm" hx-post="/crossposts/{{ c.src_page_id }}/{{ c.dst_page_id }}/{{ c.video_id }}/retry"
-                    hx-swap="outerHTML" hx-target="this">Thử lại</button>{% endif %}</td>
+      {% if sources %}
+      <table class="src-table" style="margin-top:6px">
+        {% for src in sources %}{% set prm = json.loads(src.params) %}
+        <tr style="{{ 'opacity:.55' if not src.enabled }}">
+          <td style="padding-left:0"><span class="pill {{ 'info' if src.kind == 'keyword' }}">{{ 'Từ khoá' if src.kind == 'keyword' else 'Kênh' }}</span></td>
+          <td>
+            <div class="trunc" style="max-width:100%"><b>{{ src.value }}</b>{% if not src.enabled %} <span class="pill">tạm tắt</span>{% endif %}</div>
+            <div class="small muted">{% if src.kind == 'keyword' %}{{ prm.max_results }} video mỗi lần, đăng trong {{ {0:'mọi lúc',1:'1 ngày',7:'1 tuần',180:'6 tháng'}[prm.publish_time] }}, xếp theo {{ {0:'tổng hợp',1:'nhiều like',2:'mới nhất'}[prm.sort_type] }}{% else %}video trong {{ prm.max_age_days }} ngày{% endif %}</div>
+            <details class="fold" style="margin-top:6px">
+              <summary class="small" style="font-weight:500">Sửa</summary>
+              <form method="post" action="/sources/{{ src.id }}/update">
+                {{ source_fields(src.kind, src.value, prm, src.id) }}
+                <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if src.enabled }}> Đang dùng nguồn này</label>
+                <button class="btn primary sm">Lưu nguồn</button>
+              </form>
+            </details>
+          </td>
+          <td class="src-actions">
+            <form method="post" action="/sources/{{ src.id }}/toggle" style="display:inline">
+              <button class="btn sm ghost">{{ 'Tạm tắt' if src.enabled else 'Bật lại' }}</button></form>
+            <form method="post" action="/sources/{{ src.id }}/delete" style="display:inline"
+                  hx-confirm="Xoá nguồn {{ src.value }}?"><button class="btn sm ghost danger">Xoá</button></form>
+          </td>
         </tr>
         {% endfor %}
       </table>
+      {% else %}<p class="empty">Chưa có nguồn — thêm ít nhất 1 từ khoá hoặc kênh Douyin bên dưới.</p>{% endif %}
+
+      <details class="fold" style="margin-top:12px" {{ 'open' if not sources }}>
+        <summary>Thêm nguồn</summary>
+        <form method="post" action="/pages/{{ page.id }}/sources">
+          {{ source_fields() }}
+          <button class="btn primary" style="margin-top:12px">Thêm nguồn</button>
+        </form>
+      </details>
+    </section>
+
+    {# ---------- Form cài đặt ---------- #}
+    <form method="post" action="/pages/{{ page.id }}/settings" id="settings">
+      <section class="card group" id="chay">
+        <h2>Bật & lịch đăng</h2>
+        <div class="switch-row">
+          <label class="check"><input type="checkbox" class="switch" role="switch" name="enabled" {{ 'checked' if page.enabled }}>
+            {{ 'Bật kênh riêng này' if tt else 'Bật Page này' }}</label>
+          <span class="small muted">Tool sẽ tự quét nguồn, edit, lồng tiếng và đăng.</span>
+        </div>
+        {% if tt %}<p class="hint">Không cần bật nếu kênh này chỉ dùng để đăng kèm theo 1 Page Facebook.</p>{% endif %}
+        <label class="check"><input type="checkbox" name="auto_publish" {{ 'checked' if s.auto_publish }}>
+          <span>Tự đăng, không cần duyệt</span></label>
+        <label class="check"><input type="checkbox" name="auto_schedule" {{ 'checked' if s.auto_schedule }}>
+          <span>Tự lên lịch: video đã duyệt tự xếp vào khung giờ trống tiếp theo{% if tt %} (TikTok nhận lịch trong 10 ngày tới){% endif %}</span></label>
+        <label for="slots">Khung giờ đăng mỗi ngày</label>
+        <input type="text" autocomplete="off" id="slots" name="schedule_slots" value="{{ s.schedule_slots }}" placeholder="07:00, 11:30, 19:30, 21:00">
+        <p class="hint">Giờ Việt Nam, cách nhau bằng dấu phẩy. Tick cả 2 ô trên là hoàn toàn tự động.</p>
+        <div class="grid g3" style="gap:0 12px">
+          <div><label for="f-max_posts_per_day">Tối đa bài mỗi ngày</label><input id="f-max_posts_per_day" type="number" name="max_posts_per_day" value="{{ s.max_posts_per_day }}" min="1"></div>
+          <div><label for="f-min_gap_minutes">Cách nhau ít nhất (phút)</label><input id="f-min_gap_minutes" type="number" name="min_gap_minutes" value="{{ s.min_gap_minutes }}" min="0"></div>
+          <div><label for="f-poll_minutes">Quét nguồn mỗi (phút)</label><input id="f-poll_minutes" type="number" name="poll_minutes" value="{{ s.poll_minutes }}" min="5"></div>
+        </div>
+      </section>
+
+      <section class="card group" id="caption">
+        <h2>Caption</h2>
+        <label for="cap">Mẫu caption — <code>{desc_vi}</code> là mô tả gốc đã dịch</label>
+        <textarea autocomplete="off" id="cap" name="caption_template">{{ s.caption_template }}</textarea>
+      </section>
+
+      {% if not tt %}
+      <section class="card group" id="tiktok">
+        <h2>Đăng kèm lên TikTok</h2>
+        <p class="hint">Mỗi video đăng hoặc lên lịch trên Page này cũng được đăng lên kênh TikTok, cùng giờ và cùng caption.</p>
+        <select name="tiktok_mirror" aria-label="Kênh TikTok đăng kèm">
+          <option value="0">Không đăng kèm</option>
+          {% for t in tiktoks %}<option value="{{ t.id }}" {{ 'selected' if s.tiktok_mirror|int == t.id }}>{{ t.name }} ({{ t.acc_name }})</option>{% endfor %}
+        </select>
+        {% if not tiktoks %}<p class="hint">Chưa có kênh TikTok — thêm ở <a href="/accounts#tiktok">Tài khoản & kênh</a>.</p>{% endif %}
+        {% if mirror %}
+        <table style="margin-top:10px">
+          {% for c in mirror %}
+          <tr class="small">
+            <td style="padding-left:0"><a href="https://www.douyin.com/video/{{ c.video_id }}" target="_blank" rel="noopener">{{ c.video_id }}</a>
+              <span class="muted">→ {{ c.dst_name }}</span></td>
+            <td class="num">{% if c.scheduled_at %}{{ vnt(c.scheduled_at, '%H:%M %d/%m') }}{% else %}đăng ngay{% endif %}</td>
+            <td>{% set cls = {'uploaded':'ok','scheduled':'ok','failed':'err','pending':'info'}[c.status] %}
+              <span class="pill {{ cls }}">{{ {'pending':'Chờ đăng','scheduled':'Đã hẹn giờ','uploaded':'Đã đăng','failed':'Lỗi'}[c.status] }}</span>
+              {% if c.error %}<div style="color:var(--err)">{{ c.error[:160] }}</div>{% endif %}</td>
+            <td style="text-align:right; padding-right:0">{% if c.status == 'failed' %}
+              <button type="button" class="btn sm" hx-post="/crossposts/{{ c.src_page_id }}/{{ c.dst_page_id }}/{{ c.video_id }}/retry"
+                      hx-swap="outerHTML">Thử lại</button>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% endif %}
+      </section>
+
+      <section class="card group" id="nhom">
+        <h2>Chia sẻ vào nhóm</h2>
+        <p class="hint">Mỗi lần đăng hoặc lên lịch, bài cũng được chia sẻ vào các nhóm này. Nhóm lỗi thì bài vẫn lên Page.</p>
+        <label for="groups">Tên nhóm (tối đa 3, cách nhau bằng dấu phẩy) — Page phải đã tham gia nhóm</label>
+        <input type="text" autocomplete="off" id="groups" name="share_groups" value="{{ s.share_groups }}" placeholder="vd: Hội Yêu Mèo Việt Nam, Mèo Ngố Club">
+        <label for="gtext">Lời đăng trong nhóm (để trống thì dùng caption)</label>
+        <textarea autocomplete="off" id="gtext" name="group_text" style="min-height:60px">{{ s.group_text }}</textarea>
+      </section>
       {% endif %}
-      <h2 style="margin-top:22px">Chia sẻ vào nhóm</h2>
-      <p class="hint" style="margin-top:0">Mỗi lần đăng hoặc lên lịch, bài cũng được chia sẻ vào các nhóm này. Nhóm lỗi thì bài vẫn lên Page.</p>
-      <label for="groups">Tên nhóm (tối đa 3, cách nhau bằng dấu phẩy) — Page phải đã tham gia nhóm</label>
-      <input type="text" autocomplete="off" id="groups" name="share_groups" value="{{ s.share_groups }}" placeholder="vd: Hội Yêu Mèo Việt Nam, Mèo Ngố Club">
-      <label for="gtext">Lời đăng trong nhóm (để trống thì dùng caption)</label>
-      <textarea autocomplete="off" id="gtext" name="group_text" style="min-height:60px">{{ s.group_text }}</textarea>
-    </section>
-    {% endif %}
 
-    <section class="card tabpanel" data-panel="loc" role="tabpanel" hidden>
-      <h2>Lọc video</h2>
-      <p class="hint" style="margin-top:0">Video không đạt sẽ bị bỏ qua ngay khi quét.</p>
-      <div class="grid g3" style="gap:0 12px">
-        <div><label for="f-min_likes">Like tối thiểu</label><input id="f-min_likes" type="number" name="min_likes" value="{{ s.min_likes }}"></div>
-        <div><label for="f-min_duration">Dài tối thiểu (giây)</label><input id="f-min_duration" type="number" name="min_duration" value="{{ s.min_duration }}"></div>
-        <div><label for="f-max_duration">Dài tối đa (giây)</label><input id="f-max_duration" type="number" name="max_duration" value="{{ s.max_duration }}"></div>
+      <section class="card group" id="loc">
+        <h2>Lọc video</h2>
+        <p class="hint">Video không đạt sẽ bị bỏ qua ngay khi quét.</p>
+        <div class="grid g3" style="gap:0 12px">
+          <div><label for="f-min_likes">Like tối thiểu</label><input id="f-min_likes" type="number" name="min_likes" value="{{ s.min_likes }}"></div>
+          <div><label for="f-min_duration">Dài tối thiểu (giây)</label><input id="f-min_duration" type="number" name="min_duration" value="{{ s.min_duration }}"></div>
+          <div><label for="f-max_duration">Dài tối đa (giây)</label><input id="f-max_duration" type="number" name="max_duration" value="{{ s.max_duration }}"></div>
+        </div>
+      </section>
+
+      <section class="card group" id="edit">
+        <h2>Mẫu edit</h2>
+        <div class="grid g3" style="gap:0 12px; align-items:end">
+          <div><label for="f-tint_color">Màu phủ</label><input id="f-tint_color" type="color" name="tint_color" value="{{ s.tint_color }}"></div>
+          <div><label for="f-tint_opacity">Độ đậm phủ: <output id="op">{{ (s.tint_opacity * 100)|round|int }}%</output></label>
+            <input id="f-tint_opacity" type="range" name="tint_opacity" min="0" max="0.4" step="0.01" value="{{ s.tint_opacity }}"
+                   oninput="op.value=Math.round(this.value*100)+'%'"></div>
+          <div><label for="f-rotate_deg">Nghiêng (độ)</label><input id="f-rotate_deg" type="number" name="rotate_deg" value="{{ s.rotate_deg }}" step="0.5"></div>
+        </div>
+        <label class="check"><input type="checkbox" name="hflip" {{ 'checked' if s.hflip }}> Lật ngang</label>
+        <label class="check"><input type="checkbox" name="subs_enabled" {{ 'checked' if s.subs_enabled }}> Phụ đề tiếng Việt</label>
+        <label class="check"><input type="checkbox" name="dub_enabled" {{ 'checked' if s.dub_enabled }}> Lồng tiếng Việt (cần mở VoiceStudio)</label>
+        <label class="check"><input type="checkbox" name="dub_text_only" {{ 'checked' if s.dub_text_only }}>
+          <span>Lồng tiếng cả video chỉ có chữ, không có lời (đọc phụ đề thành giọng)</span></label>
+        <label for="tsrc">Lấy lời để dịch từ</label>
+        <select id="tsrc" name="text_source">
+          <option value="auto" {{ 'selected' if s.text_source == 'auto' }}>Tự động: có phụ đề trên video thì đọc phụ đề, không có thì nghe giọng</option>
+          <option value="ocr" {{ 'selected' if s.text_source == 'ocr' }}>Luôn đọc phụ đề trên video</option>
+          <option value="asr" {{ 'selected' if s.text_source == 'asr' }}>Luôn nghe giọng nói</option>
+        </select>
+      </section>
+
+      <section class="card group" id="giong">
+        <h2>Giọng lồng tiếng</h2>
+        <div class="grid g2" style="gap:0 12px">
+          <div><label for="gender">Chọn giọng</label>
+            <select id="gender" name="gender">
+              <option value="auto" {{ 'selected' if s.gender == 'auto' }}>Tự nhận nam / nữ theo giọng gốc</option>
+              <option value="male" {{ 'selected' if s.gender == 'male' }}>Luôn giọng nam</option>
+              <option value="female" {{ 'selected' if s.gender == 'female' }}>Luôn giọng nữ</option>
+            </select></div>
+          <div><label for="seed">Seed (đổi số để ra giọng khác)</label>
+            <input type="number" id="seed" name="voice_seed" value="{{ s.voice_seed }}"></div>
+        </div>
+        <label for="vm">Mô tả giọng nam</label>
+        <input type="text" autocomplete="off" id="vm" name="voice_male" value="{{ s.voice_male }}">
+        <label for="vf">Mô tả giọng nữ</label>
+        <input type="text" autocomplete="off" id="vf" name="voice_female" value="{{ s.voice_female }}">
+        <p class="hint">Viết bằng tiếng Anh: male / female; child, teenager, young adult, middle-aged, elderly; low / moderate / high pitch.</p>
+      </section>
+
+      <div class="savebar">
+        <button class="btn primary">Lưu cài đặt</button>
+        <span class="small muted" id="save-note" aria-live="polite">Áp dụng cho video edit từ lúc lưu trở đi.</span>
       </div>
-    </section>
-
-    <section class="card tabpanel" data-panel="edit" role="tabpanel" hidden>
-      <h2>Mẫu edit</h2>
-      <div class="grid g3" style="gap:0 12px; align-items:end">
-        <div><label for="f-tint_color">Màu phủ</label><input id="f-tint_color" type="color" name="tint_color" value="{{ s.tint_color }}"></div>
-        <div><label for="f-tint_opacity">Độ đậm phủ: <output id="op">{{ (s.tint_opacity * 100)|round|int }}%</output></label>
-          <input id="f-tint_opacity" type="range" name="tint_opacity" min="0" max="0.4" step="0.01" value="{{ s.tint_opacity }}"
-                 oninput="op.value=Math.round(this.value*100)+'%'"></div>
-        <div><label for="f-rotate_deg">Nghiêng (độ)</label><input id="f-rotate_deg" type="number" name="rotate_deg" value="{{ s.rotate_deg }}" step="0.5"></div>
-      </div>
-      <label class="check"><input type="checkbox" name="hflip" {{ 'checked' if s.hflip }}> Lật ngang</label>
-      <label class="check"><input type="checkbox" name="subs_enabled" {{ 'checked' if s.subs_enabled }}> Phụ đề tiếng Việt</label>
-      <label class="check"><input type="checkbox" name="dub_enabled" {{ 'checked' if s.dub_enabled }}> Lồng tiếng Việt (cần mở VoiceStudio)</label>
-      <label class="check"><input type="checkbox" name="dub_text_only" {{ 'checked' if s.dub_text_only }}>
-        <span>Lồng tiếng cả video chỉ có chữ, không có lời (đọc phụ đề thành giọng)</span></label>
-      <label for="tsrc">Lấy lời để dịch từ</label>
-      <select id="tsrc" name="text_source">
-        <option value="auto" {{ 'selected' if s.text_source == 'auto' }}>Tự động: có phụ đề trên video thì đọc phụ đề, không có thì nghe giọng</option>
-        <option value="ocr" {{ 'selected' if s.text_source == 'ocr' }}>Luôn đọc phụ đề trên video</option>
-        <option value="asr" {{ 'selected' if s.text_source == 'asr' }}>Luôn nghe giọng nói</option>
-      </select>
-
-      <h2 style="margin-top:22px">Giọng lồng tiếng</h2>
-      <div class="grid g2" style="gap:0 12px">
-        <div><label for="gender">Chọn giọng</label>
-          <select id="gender" name="gender">
-            <option value="auto" {{ 'selected' if s.gender == 'auto' }}>Tự nhận nam / nữ theo giọng gốc</option>
-            <option value="male" {{ 'selected' if s.gender == 'male' }}>Luôn giọng nam</option>
-            <option value="female" {{ 'selected' if s.gender == 'female' }}>Luôn giọng nữ</option>
-          </select></div>
-        <div><label for="seed">Seed (đổi số để ra giọng khác)</label>
-          <input type="number" id="seed" name="voice_seed" value="{{ s.voice_seed }}"></div>
-      </div>
-      <label for="vm">Mô tả giọng nam</label>
-      <input type="text" autocomplete="off" id="vm" name="voice_male" value="{{ s.voice_male }}">
-      <label for="vf">Mô tả giọng nữ</label>
-      <input type="text" autocomplete="off" id="vf" name="voice_female" value="{{ s.voice_female }}">
-      <p class="hint">Viết bằng tiếng Anh: male / female; child, teenager, young adult, middle-aged, elderly; low / moderate / high pitch.</p>
-    </section>
-  </form>
-</div>
-
-{# ---------- cột phải: tóm tắt + sao chép ---------- #}
-<aside class="ch-aside">
-  <section class="card" aria-labelledby="h-sum">
-    <h2 id="h-sum">Kênh này chạy thế nào</h2>
-    <dl class="kv">
-      <dt>Đăng</dt><dd>tối đa {{ s.max_posts_per_day|int }} bài / ngày</dd>
-      <dt>Khung giờ</dt><dd>{{ s.schedule_slots or '—' }}</dd>
-      <dt>Duyệt</dt><dd>{{ 'tự đăng, không duyệt' if s.auto_publish else 'bạn duyệt từng video' }}{{ ' · tự xếp lịch' if s.auto_schedule }}</dd>
-      <dt>Edit</dt><dd>{{ ['lật ngang' if s.hflip, 'nghiêng ' ~ s.rotate_deg ~ '°' if s.rotate_deg, 'phủ màu' if s.tint_opacity, 'phụ đề' if s.subs_enabled]|select|join(' · ') or 'không' }}</dd>
-      <dt>Lồng tiếng</dt><dd>{{ gender_vi.get(s.gender, s.gender) if s.dub_enabled else 'tắt' }}</dd>
-      <dt>Lọc</dt><dd>{{ s.min_duration|int }}–{{ s.max_duration|int }} giây · ≥ {{ '{:,}'.format(s.min_likes|int) }} like</dd>
-    </dl>
-  </section>
-  {% if others %}
-  <section class="card" aria-labelledby="h-copy">
-    <h2 id="h-copy">Sao chép cài đặt</h2>
-    <form method="post" action="/pages/{{ page.id }}/copy-settings"
-          hx-confirm="Chép cài đặt (lịch, edit, giọng, caption, lọc) của {{ page.name }} sang kênh đã chọn? Cài đặt cũ của kênh đó bị thay.">
-      <label for="cp-to" style="margin-top:0">Chép sang kênh</label>
-      <select id="cp-to" name="to">{% for o in others %}<option value="{{ o.id }}">{{ o.name }}{{ ' · TikTok' if o.platform == 'tiktok' }}</option>{% endfor %}</select>
-      <label class="check"><input type="checkbox" name="with_sources"> Kèm các nguồn video</label>
-      <button class="btn sm">Sao chép</button>
-      <p class="hint">Không chép đăng kèm TikTok và nhóm (riêng từng Page).</p>
     </form>
-  </section>
-  {% endif %}
-</aside>
+  </div>
 </div>
-
 <script>
+  // Có thay đổi chưa lưu: báo ở thanh Lưu và hỏi lại trước khi rời trang — cả khi đóng / tải lại (beforeunload)
+  // lẫn khi bấm menu (chuyển trang kiểu htmx boost không gây beforeunload).
   (() => {
-    // tab: nhớ tab đang mở trên URL (#lich…) để tải lại / quay lại vẫn đúng tab
-    const tabs = [...document.querySelectorAll('[data-tab]')], panels = [...document.querySelectorAll('[data-panel]')];
-    const show = (name) => {
-      if (!tabs.some(t => t.dataset.tab === name)) name = 'nguon';
-      tabs.forEach(t => t.setAttribute('aria-selected', t.dataset.tab === name));
-      panels.forEach(p => p.hidden = p.dataset.panel !== name);
-    };
-    tabs.forEach(t => t.addEventListener('click', () => { show(t.dataset.tab); history.replaceState(null, '', '#' + t.dataset.tab); }));
-    show((location.hash || '#nguon').slice(1));
-    // tự lưu: ô chữ / số lưu sau khi ngừng gõ 0,7 s; ô tick / chọn lưu ngay
-    const form = document.getElementById('settings'), status = document.getElementById('save-status');
-    let t = null;
-    const save = (delay) => {
-      clearTimeout(t); status.textContent = 'Đang lưu…';
-      t = setTimeout(() => htmx.trigger(form, 'autosave'), delay);
-    };
-    // gắn vào chính form (+ công tắc Bật kênh ở đầu trang, thuộc form qua form="settings") — không gắn lên document:
-    // chuyển trang kiểu boost chạy lại script này, gắn lên document sẽ nhân đôi mỗi lần
-    form.addEventListener('input', (e) => { if (/text|number|textarea|range|color/.test(e.target.type)) save(700); });
-    form.addEventListener('change', (e) => { if (!/text|number|textarea/.test(e.target.type)) save(0); });
-    document.querySelector('input[form=settings][name=enabled]')?.addEventListener('change', () => save(0));
-    form.addEventListener('submit', (e) => { e.preventDefault(); save(0); });     // Enter trong ô -> lưu, không tải lại trang
-    form.addEventListener('htmx:responseError', () => { status.textContent = 'Chưa lưu — xem thông báo'; });
+    const form = document.getElementById('settings'), note = document.getElementById('save-note');
+    window.__dyDirty = false;
+    const mark = () => { if (!window.__dyDirty) { window.__dyDirty = true; note.textContent = 'Có thay đổi chưa lưu.'; note.style.color = 'var(--warn)'; } };
+    form.addEventListener('input', mark);
+    form.addEventListener('change', mark);
+    form.addEventListener('submit', () => { window.__dyDirty = false; });
+    if (!window.__dyDirtyGuard) {
+      window.__dyDirtyGuard = true;
+      addEventListener('beforeunload', (e) => { if (window.__dyDirty && document.getElementById('settings')) { e.preventDefault(); e.returnValue = ''; } });
+      document.addEventListener('htmx:beforeRequest', (e) => {
+        const leaving = e.detail.boosted && e.detail.elt.tagName === 'A';
+        if (leaving && window.__dyDirty && document.getElementById('settings')) {
+          if (confirm('Có thay đổi chưa lưu ở Cài đặt kênh. Rời trang và bỏ thay đổi?')) window.__dyDirty = false;
+          else e.preventDefault();
+        }
+      });
+    }
   })();
 </script>
 {% endblock %}

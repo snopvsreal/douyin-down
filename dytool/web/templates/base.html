@@ -21,69 +21,44 @@
 <div class="app">
   <nav class="side" aria-label="Menu chính">
     <div class="brand" translate="no"><img src="/static/icon.png" alt=""><span>dytool</span></div>
-    <button type="button" class="search-btn" data-palette-open aria-label="Tìm hoặc ra lệnh (Ctrl+K)">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
-      <span>Tìm hoặc ra lệnh…</span><kbd>Ctrl K</kbd></button>
     {% set p = request.url.path %}
     {% macro nav(href, label, on, key, icon, extra='') %}
-      <a href="{{ href }}" class="nav-item {{ 'on' if on }} {{ extra }}" {{ 'aria-current=page' if on }} title="{{ label }}{{ ' (Ctrl+' ~ key ~ ')' if key }}"
-         {% if key %}data-key="{{ key }}"{% endif %}>
+      <a href="{{ href }}" class="nav-item {{ 'on' if on }} {{ extra }}" {{ 'aria-current=page' if on }} title="{{ label }} (Ctrl+{{ key }})"
+         data-key="{{ key }}">
         <svg viewBox="0 0 24 24" aria-hidden="true">{{ icon|safe }}</svg>
         <span class="label">{{ label }}</span>{{ caller() if caller }}</a>
     {% endmacro %}
     <p class="nav-sec">Làm việc</p>
-    {{ nav('/', 'Hôm nay', p == '/', 1,
+    {{ nav('/', 'Tổng quan', p == '/', 1,
            '<path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/>') }}
-    {% call nav('/review', 'Hộp duyệt', p.startswith('/review'), 2,
+    {% call nav('/review', 'Duyệt video', p.startswith('/review'), 2,
                 '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m8.5 12.2 2.4 2.3 4.6-4.7"/>') %}
       {% if navc.get('review') %}<span class="badge">{{ navc.review }}<span class="sr-only"> video chờ duyệt</span></span>{% endif %}
     {% endcall %}
-    {{ nav('/calendar', 'Lịch đăng', p.startswith('/calendar'), 3,
-           '<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>') }}
-    {% call nav('/queue', 'Video', p.startswith('/queue'), 4,
-                '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="m10 9 5 3-5 3z"/>') %}
+    {% call nav('/queue', 'Tiến trình', p.startswith('/queue'), 3,
+                '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/>') %}
       {% if navc.get('failed') %}<span class="badge err">{{ navc.failed }}<span class="sr-only"> video lỗi</span></span>{% endif %}
     {% endcall %}
-
     <p class="nav-sec">Kênh</p>
-    {% for ch in nav_pages %}
-      <a href="/pages/{{ ch.id }}" class="nav-item nav-chan {{ 'on' if p == '/pages/' ~ ch.id }}" {{ 'aria-current=page' if p == '/pages/' ~ ch.id }}
-         title="{{ ch.name }} — {{ 'đang bật' if ch.enabled else 'đang tắt' }}">
-        <span class="chan-dot" style="background:{{ ch.color if ch.enabled else 'var(--t-dis)' }}" aria-hidden="true"></span>
-        <span class="label">{{ ch.name }}</span><span class="ptag">{{ 'TT' if ch.tt else 'FB' }}</span></a>
-    {% endfor %}
-    <a href="/accounts" class="nav-item nav-add" title="Đăng nhập tài khoản để thêm Page / kênh TikTok">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="label">{{ 'Thêm kênh' if nav_pages else 'Thêm kênh đầu tiên' }}</span></a>
-
-    <p class="nav-sec">Hệ thống</p>
-    {{ nav('/accounts', 'Tài khoản', p.startswith('/accounts'), 5,
+    {{ nav('/accounts', 'Tài khoản & kênh', p.startswith('/accounts') or p.startswith('/pages'), 4,
            '<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5c.8-3.1 3-4.8 5.5-4.8s4.7 1.7 5.5 4.8"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15.9 14.8c2 .3 3.5 1.7 4.1 4"/>') }}
-    {{ nav('/browsers', 'Trình duyệt', p.startswith('/browsers'), 6,
-           '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M3 9h18"/><circle cx="12" cy="14.3" r="2.6"/>') }}
-    {{ nav('/settings', 'Cài đặt', p.startswith('/settings'), 7,
-           '<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/>') }}
-
+    {{ nav('/browsers', 'Hồ sơ trình duyệt', p.startswith('/browsers'), 5,
+           '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M3 9h18"/><circle cx="6.2" cy="6.8" r=".6"/><circle cx="8.4" cy="6.8" r=".6"/><circle cx="12" cy="14.3" r="2.6"/>') }}
+    {# cuối menu: Cài đặt, chọn sáng / tối, phiên bản (như ShardBrowser) #}
     <div class="nav-bottom-wrap">
-      {# thẻ Chạy tự động: công tắc + việc đang làm (poll 3s) #}
-      <div class="run-card" id="runcard" hx-get="/partials/runcard" hx-trigger="load, every 3s [!document.hidden]" hx-swap="innerHTML">
-        <div class="run-head"><b>Chạy tự động</b></div></div>
-      <div class="theme-seg" role="group" aria-label="Giao diện">
-        <button type="button" data-theme-set="light" title="Sáng"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/></svg><span>Sáng</span></button>
-        <button type="button" data-theme-set="dark" title="Tối"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.6 5.6 0 0 1 6.4 2.5a5.6 5.6 0 1 0 7.1 7.1z"/></svg><span>Tối</span></button>
-        <button type="button" data-theme-set="auto" title="Theo máy (Windows)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="8.5" rx="1.5"/><path d="M6 14h4"/></svg><span>Tự động</span></button>
-      </div>
-      <div class="app-ver"><span>dytool {{ app_ver() or '' }}</span><span>Ctrl+1–7 · Ctrl+K</span></div>
+    {{ nav('/settings', 'Cài đặt', p.startswith('/settings'), 6,
+           '<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/>',
+           'nav-bottom') }}
+    <div class="theme-seg" role="group" aria-label="Giao diện">
+      <button type="button" data-theme-set="light" title="Sáng"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/></svg><span>Sáng</span></button>
+      <button type="button" data-theme-set="dark" title="Tối"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.6 5.6 0 0 1 6.4 2.5a5.6 5.6 0 1 0 7.1 7.1z"/></svg><span>Tối</span></button>
+      <button type="button" data-theme-set="auto" title="Theo máy (Windows)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="8.5" rx="1.5"/><path d="M6 14h4"/></svg><span>Tự động</span></button>
+    </div>
+    <div class="app-ver"><img src="/static/icon.png" alt=""><div><b>dytool {{ app_ver() or '' }}</b><span>Ctrl + 1–6 chuyển trang</span></div></div>
     </div>
   </nav>
 
-  <div class="content" id="main" tabindex="-1">
-    {# thanh trên cùng: đường dẫn trang + trạng thái dịch vụ (Douyin / Tải Douyin / VoiceStudio / cập nhật), poll 5s #}
-    <header class="topbar">
-      <div class="crumb">{% block crumb %}{{ self.title() }}{% endblock %}</div>
-      <div class="svc-chips" hx-get="/partials/services" hx-swap="innerHTML"
-           hx-trigger="load, every 5s [!document.hidden], visibilitychange[!document.hidden] from:document"></div>
-    </header>
-    <main>
+  <div class="content" id="main" tabindex="-1"><main>
     {% if setup_failed and request.url.path in ('/', '/settings') %}
     {# cập nhật im lặng mà bước cài thư viện lỗi: trước không ai biết, app chạy hỏng ngầm #}
     <div class="notice warn" role="alert">Lần cài thư viện gần nhất chưa xong ({{ setup_failed.splitlines()|last|truncate(140) }}).
@@ -91,21 +66,13 @@
       <button class="btn sm" hx-post="/settings/reinstall-libs" hx-swap="outerHTML" hx-disabled-elt="this"
               hx-confirm="Cài lại thư viện? dytool sẽ tự đóng, cửa sổ cài hiện tiến độ, xong thì tự mở lại.">Cài lại thư viện</button></div>
     {% endif %}
-    {% block body %}{% endblock %}</main>
-  </div>
+    {% block body %}{% endblock %}</main></div>
+
+  {# thanh trạng thái: chạy tự động / việc đang làm / Douyin / tải Douyin / VoiceStudio (làm mới 5s) #}
+  <footer class="statusbar" hx-get="/partials/services" hx-trigger="load, every 5s [!document.hidden], visibilitychange[!document.hidden] from:document" hx-swap="innerHTML">
+    <div class="sb-group"><span class="sb-item"><span class="dot"></span>Đang kiểm tra…</span></div>
+  </footer>
 </div>
-
-{# Ctrl+K: tìm trang / kênh / video, chạy lệnh nhanh #}
-<dialog class="palette" id="palette" aria-label="Tìm hoặc ra lệnh">
-  <div class="pal-box">
-    <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
-    <input type="text" id="pal-q" name="q" placeholder="Tìm trang, kênh, video… hoặc gõ lệnh" autocomplete="off" spellcheck="false"
-           aria-label="Tìm" hx-get="/partials/palette" hx-trigger="input changed delay:120ms, focus" hx-target="#pal-list" hx-swap="innerHTML">
-    <kbd>Esc</kbd>
-  </div>
-  <div id="pal-list" class="pal-list" role="listbox"></div>
-</dialog>
-
 {# Vùng đọc to cho trình đọc màn hình: chỉ được cập nhật (hx-swap-oob) khi bước đăng nhập đổi, không theo từng giây #}
 <div id="sr-live" class="sr-only" aria-live="polite"></div>
 <script>
@@ -126,53 +93,29 @@
     document.addEventListener('htmx:afterSettle', mark);
     mark();
   }
-  // Phím tắt: Ctrl+1..7 chuyển trang, Ctrl+K tìm / lệnh nhanh. Chỉ gắn 1 lần (boost chạy lại script này).
+  // Phím tắt như app: Ctrl+1..6 chuyển trang; sau mỗi lần chuyển trang (boost) cuộn nội dung về đầu.
+  // Chỉ gắn 1 lần: khi chuyển trang kiểu boost, htmx chạy lại script này.
   if (!window.__dyShell) {
     window.__dyShell = true;
-    const pal = () => document.getElementById('palette');
-    const openPal = () => {
-      const d = pal(); if (!d || d.open) return;
-      d.showModal(); const q = document.getElementById('pal-q'); q.value = ''; q.focus();
-      htmx.trigger(q, 'focus');
-    };
     document.addEventListener('keydown', (e) => {
-      if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); openPal(); return; }
       if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
       const a = document.querySelector('.nav-item[data-key="' + e.key + '"]');
       if (a) { e.preventDefault(); a.click(); }
     });
-    document.addEventListener('click', (e) => {
-      if (e.target.closest('[data-palette-open]')) { openPal(); return; }
-      const d = pal();
-      if (d && d.open && e.target === d) d.close();                 // bấm ra ngoài hộp -> đóng
-      if (d && d.open && e.target.closest('.pal-item')) d.close();   // chọn 1 mục -> đóng (link tự chuyển trang)
-    });
-    // mũi tên lên / xuống chọn mục, Enter mở
-    document.addEventListener('keydown', (e) => {
-      const d = pal(); if (!d || !d.open) return;
-      const items = [...d.querySelectorAll('.pal-item')]; if (!items.length) return;
-      let i = items.findIndex(x => x.classList.contains('sel'));
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault(); items[i]?.classList.remove('sel');
-        i = e.key === 'ArrowDown' ? (i + 1) % items.length : (i - 1 + items.length) % items.length;
-        items[i].classList.add('sel'); items[i].scrollIntoView({ block: 'nearest' });
-      } else if (e.key === 'Enter') { e.preventDefault(); (items[i] || items[0]).click(); }
-    });
     document.addEventListener('htmx:afterSettle', (e) => {
       if (e.detail.boosted) document.getElementById('main')?.scrollTo(0, 0);
-      if (e.target.id === 'pal-list') e.target.querySelector('.pal-item')?.classList.add('sel');
     });
     // htmx bỏ qua phản hồi lỗi (4xx/5xx) và lỗi mạng -> trước đây bấm nút xong không thấy gì. Hiện thông báo nổi.
-    const toast = window.__dyToast = (msg, ok) => {
+    const toast = (msg) => {
       let t = document.getElementById('dy-toast');
       if (!t) { t = document.createElement('div'); t.id = 'dy-toast'; t.setAttribute('role', 'alert'); document.body.appendChild(t); }
-      t.textContent = msg; t.classList.toggle('ok', !!ok); t.classList.add('show');
-      clearTimeout(window.__dyToastT); window.__dyToastT = setTimeout(() => t.classList.remove('show'), ok ? 3500 : 7000);
+      t.textContent = msg; t.classList.add('show');
+      clearTimeout(window.__dyToastT); window.__dyToastT = setTimeout(() => t.classList.remove('show'), 7000);
     };
     document.addEventListener('htmx:responseError', (e) => {
       const x = e.detail.xhr, body = (x.responseText || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
       const poll = (e.detail.elt.getAttribute('hx-trigger') || '').includes('every');   // poll lỗi lẻ tẻ: bỏ qua
-      if (!poll) toast((body && body.length < 220 ? body : 'Lỗi ' + x.status + ' — xem Nhật ký ở Hôm nay'));
+      if (!poll) toast('Lỗi ' + x.status + (body && body.length < 200 ? ': ' + body : ' — xem Nhật ký ở Tổng quan'));
     });
     document.addEventListener('htmx:sendError', (e) => {
       const poll = (e.detail.elt.getAttribute('hx-trigger') || '').includes('every');

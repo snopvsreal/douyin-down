@@ -1,20 +1,43 @@
-{# Chip trạng thái trên thanh trên cùng (poll 5s): cập nhật · Douyin · Tải Douyin · VoiceStudio #}
-{% if n_updates %}
-  <a class="chip warn" href="/settings#cap-nhat" title="Có bản mới — bấm để xem và cập nhật"><span class="dot warn"></span>{{ n_updates }} bản cập nhật</a>
-{% endif %}
-{% if dy_logging_in %}
-  <span class="chip"><span class="dot warn"></span>Douyin: đang đăng nhập…</span>
-{% elif douyin.logged_in %}
-  {% set soon = douyin.days_left is not none and douyin.days_left < 7 %}
-  <span class="chip" title="{% if douyin.expires %}Đăng nhập Douyin hết hạn {{ vnt(douyin.expires, '%d/%m/%Y') }}{% endif %}">
-    <span class="dot {{ 'warn' if soon else 'ok' }}"></span>Douyin{% if douyin.days_left is not none %} · còn {{ douyin.days_left }} ngày{% endif %}
-    {% if soon %}<form method="post" action="/services/douyin-login"><button class="chip-btn">Gia hạn</button></form>{% endif %}</span>
-{% else %}
-  <span class="chip"><span class="dot err"></span>Douyin {{ 'hết hạn' if douyin.expired else 'chưa đăng nhập' }}
-    <form method="post" action="/services/douyin-login"><button class="chip-btn">Đăng nhập</button></form></span>
-{% endif %}
-<span class="chip" title="Backend tải video Douyin (TikTokDownloader) — tool tự bật khi cần"><span class="dot {{ 'ok' if health.tdl else '' }}"></span>Tải Douyin{{ '' if health.tdl else ' tắt' }}
-  {% if not health.tdl %}<form method="post" action="/services/tdl"><button class="chip-btn" title="Bật ngay">Bật</button></form>{% endif %}</span>
-<span class="chip" title="App lồng tiếng Việt"><span class="dot {{ 'ok' if health.voicestudio else 'err' }}"></span>VoiceStudio{{ '' if health.voicestudio else (' tắt' if vs_installed else ' chưa cài') }}
-  {% if not health.voicestudio and vs_installed %}
-    <button class="chip-btn" hx-post="/services/voicestudio" hx-swap="none" hx-disabled-elt="this" title="Mở app VoiceStudio (khởi động mất 1–3 phút)">Mở</button>{% endif %}</span>
+{# Thanh trạng thái dưới đáy cửa sổ (poll 5s): bên trái = tool đang làm gì, bên phải = 3 dịch vụ ngoài #}
+<div class="sb-group">
+  <span class="sb-item"><span class="dot {{ 'run' if worker.running else '' }}"></span>
+    <b>{{ 'Chạy tự động' if worker.running else 'Đang tạm dừng' }}</b></span>
+  {% if task %}
+    <span class="sb-item" title="{{ task.title }}{% if task.page %} — {{ task.page }}{% endif %}">
+      <span class="trunc">{{ task.title }}{% if task.page %} — {{ task.page }}{% endif %}</span></span>
+  {% elif worker.running %}
+    <span class="sb-item sb-hide-narrow">Đang chờ việc mới</span>
+  {% endif %}
+</div>
+
+<div class="sb-group right">
+  {% if n_updates %}
+    <a class="sb-item sb-update" href="/settings#cap-nhat" title="Có bản mới — bấm để xem và cập nhật">
+      <span class="dot warn"></span>Có {{ n_updates }} bản cập nhật</a>
+  {% endif %}
+  {% if dy_logging_in %}
+    <span class="sb-item"><span class="dot warn"></span>Douyin: đang đăng nhập…</span>
+  {% elif douyin.logged_in %}
+    <span class="sb-item" title="{% if douyin.expires %}Đăng nhập Douyin hết hạn {{ vnt(douyin.expires, '%d/%m/%Y') }}{% endif %}">
+      <span class="dot {{ 'warn' if douyin.days_left is not none and douyin.days_left < 7 else 'ok' }}"></span>
+      Douyin{% if douyin.days_left is not none %}: còn {{ douyin.days_left }} ngày{% endif %}
+      {% if douyin.days_left is not none and douyin.days_left < 7 %}
+        <form method="post" action="/services/douyin-login"><button class="btn">Gia hạn</button></form>{% endif %}
+    </span>
+  {% else %}
+    <span class="sb-item"><span class="dot err"></span>Douyin: {{ 'hết hạn' if douyin.expired else 'chưa đăng nhập' }}
+      <form method="post" action="/services/douyin-login"><button class="btn">Đăng nhập</button></form></span>
+  {% endif %}
+
+  <span class="sb-item" title="Backend tải video Douyin (TikTokDownloader)"><span class="dot {{ 'ok' if health.tdl else '' }}"></span>
+    Tải Douyin: {{ 'chạy' if health.tdl else 'tắt' }}
+    {% if not health.tdl %}<form method="post" action="/services/tdl"><button class="btn" title="Tool tự bật khi cần — bấm để bật ngay">Bật</button></form>{% endif %}
+  </span>
+
+  <span class="sb-item" title="App lồng tiếng Việt"><span class="dot {{ 'ok' if health.voicestudio else 'err' }}"></span>
+    VoiceStudio: {{ 'chạy' if health.voicestudio else ('chưa mở' if vs_installed else 'chưa cài') }}
+    {% if not health.voicestudio and vs_installed %}
+      <button class="btn" hx-post="/services/voicestudio" hx-swap="none" hx-disabled-elt="this"
+              title="Mở app VoiceStudio (khởi động mất 1–3 phút)">Mở</button>{% endif %}
+  </span>
+</div>

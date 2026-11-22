@@ -96,9 +96,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
 
     def render(request: Request, name: str, **ctx):
         # navc: số video theo trạng thái cho huy hiệu trên menu (Chờ duyệt / Lỗi)
-        from . import plan
         return tpl.TemplateResponse(request, name, {"worker": worker, "navc": store.counts(),
-                                                    "nav_pages": plan.nav_pages(store),
                                                     "setup_failed": _setup_failed(), **ctx})
 
     @app.post("/settings/reinstall-libs")
@@ -184,84 +182,15 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         store.log("Đã lưu Anthropic API key")
         return RedirectResponse("/settings?key_saved=1#api-key", 303)
 
-    # ---------------- Hôm nay (trang đầu) ----------------
+    # ---------------- Tổng quan ----------------
     @app.get("/", response_class=HTMLResponse)
     def home(request: Request):
         import os
-        from . import plan
-        from .. import browsers
-        from ..cookies import cookie_status
-        totals = store.counts()
+        pages = store.q("SELECT p.*, a.name acc_name FROM pages p JOIN accounts a ON a.id=p.account_id "
+                        "WHERE p.enabled=1 ORDER BY p.id")
+        stats = {p["id"]: store.counts(p["id"]) for p in pages}
         need_key = not (_sub_cfg().get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY"))
-        # "Cần bạn xử lý": gom mọi việc người dùng phải làm vào 1 chỗ
-        todo = []
-        if totals.get("review"):
-            by = store.q("SELECT p.name, COUNT(*) n FROM videos v JOIN pages p ON p.id=v.page_id WHERE v.status='review' "
-                         "GROUP BY p.id ORDER BY n DESC")
-            todo.append({"kind": "review", "n": totals["review"], "title": "Video chờ duyệt",
-                         "sub": " · ".join(f"{r['name']} {r['n']}" for r in by[:3]), "href": "/review",
-                         "btn": "Mở hộp duyệt", "primary": True})
-        if totals.get("failed"):
-            todo.append({"kind": "err", "n": totals["failed"], "title": "Video lỗi", "sub": "Xem lý do rồi bấm Thử lại",
-                         "href": "/queue?status=failed", "btn": "Xem video lỗi"})
-        relog = [a for a in store.q("SELECT * FROM accounts ORDER BY id")
-                 if a["status"] != "da_dang_nhap" or browsers.had_old_profile(store.account_dir(data, a["id"]))]
-        if relog:
-            todo.append({"kind": "acc", "n": len(relog), "title": "Tài khoản cần đăng nhập",
-                         "sub": ", ".join(a["name"] for a in relog[:3]), "href": "/accounts", "btn": "Đăng nhập"})
-        dy = cookie_status(cfg["douyin"].get("cookie", ""))
-        if not dy["logged_in"] or (dy["days_left"] is not None and dy["days_left"] < 7):
-            todo.append({"kind": "dy", "n": None, "title": "Đăng nhập Douyin" if not dy["logged_in"] else "Douyin sắp hết hạn",
-                         "sub": "Cần để tìm và tải video" if not dy["logged_in"] else f"Còn {dy['days_left']} ngày",
-                         "href": "/settings#douyin", "btn": "Đăng nhập Douyin"})
-        dub_wait = store.one("SELECT COUNT(*) n FROM videos v JOIN pages p ON p.id=v.page_id WHERE v.status='downloaded' "
-                             "AND p.enabled=1 AND p.settings LIKE '%\"dub_enabled\": true%'")["n"]
-        if dub_wait and not health().get("voicestudio"):
-            todo.append({"kind": "vs", "n": dub_wait, "title": "Chờ VoiceStudio", "sub": "Video cần lồng tiếng — app đang tắt",
-                         "action": "/services/voicestudio", "btn": "Mở VoiceStudio"})
-        if need_key:
-            todo.append({"kind": "key", "n": None, "title": "Thiếu Anthropic API key", "sub": "Chưa dịch / lồng tiếng được",
-                         "href": "/settings#api-key", "btn": "Nhập key"})
-        logs = store.q("SELECT * FROM logs ORDER BY id DESC LIMIT 6")
-        return render(request, "home.html", totals=totals, todo=todo, today=plan.today_items(store),
-                      chans=plan.channel_today(store, store.page_settings), logs=logs,
-                      today_label=vn_fmt(time.time(), "%d/%m"))
-
-    @app.get("/partials/runcard", response_class=HTMLResponse)
-    def runcard(request: Request):
-        from .. import progress
-        return render(request, "_runcard.html", task=progress.snapshot())
-
-    @app.post("/worker/toggle", response_class=HTMLResponse)
-    def worker_toggle(request: Request):
-        worker.stop() if worker.running else worker.start()
-        store.log("Đã bật chạy tự động" if worker.running else "Đã tạm dừng chạy tự động")
-        return runcard(request)
-
-    # ---------------- Ctrl+K: tìm / lệnh nhanh ----------------
-    @app.get("/partials/palette", response_class=HTMLResponse)
-    def palette(request: Request, q: str = ""):
-        from . import plan
-        ql = q.strip().lower()
-        cmds = [("Hôm nay", "/", "Trang"), ("Hộp duyệt", "/review", "Trang"), ("Lịch đăng", "/calendar", "Trang"),
-                ("Video", "/queue", "Trang"), ("Video lỗi", "/queue?status=failed", "Trang"),
-                ("Tài khoản", "/accounts", "Trang"), ("Trình duyệt · hồ sơ", "/browsers", "Trang"),
-                ("Proxy", "/browsers/proxies", "Trang"), ("Cài đặt", "/settings", "Trang"),
-                ("Đăng nhập Douyin", "/settings#douyin", "Lệnh"), ("Thêm tài khoản / kênh", "/accounts", "Lệnh"),
-                ("Nhập Anthropic API key", "/settings#api-key", "Lệnh"), ("Cập nhật dytool", "/settings#cap-nhat", "Lệnh")]
-        items = [{"label": l, "href": h, "kind": k} for l, h, k in cmds if not ql or ql in l.lower()]
-        for p in plan.nav_pages(store):
-            if not ql or ql in p["name"].lower():
-                items.append({"label": p["name"], "href": f"/pages/{p['id']}", "kind": "Kênh", "color": p["color"]})
-        if len(ql) >= 2:
-            like = f"%{q.strip()}%"
-            for v in store.q("SELECT v.id, v.page_id, v.desc, v.caption, v.status, p.name page_name FROM videos v "
-                             "JOIN pages p ON p.id=v.page_id WHERE v.id LIKE ? OR v.desc LIKE ? OR v.caption LIKE ? "
-                             "ORDER BY v.updated_at DESC LIMIT 8", (like, like, like)):
-                href = f"/review?v={v['page_id']}:{v['id']}" if v["status"] == "review" else f"/queue?q={v['id']}"
-                items.append({"label": (v["caption"] or v["desc"] or v["id"])[:80], "href": href,
-                              "kind": STATUS_VI.get(v["status"], v["status"]), "sub": v["page_name"]})
-        return render(request, "_palette.html", items=items[:20], q=q)
+        return render(request, "home.html", pages=pages, stats=stats, totals=store.counts(), need_key=need_key)
 
     @app.get("/partials/services", response_class=HTMLResponse)
     def services_partial(request: Request):
@@ -955,15 +884,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         sources = store.q("SELECT * FROM sources WHERE page_id=? ORDER BY id", (pid,))
         mirror = store.q("SELECT c.*, p.name dst_name FROM crossposts c JOIN pages p ON p.id=c.dst_page_id "
                          "WHERE c.src_page_id=? ORDER BY c.updated_at DESC LIMIT 10", (pid,))
-        from . import plan
-        others = store.q("SELECT id, name, platform FROM pages WHERE id<>? ORDER BY platform, id", (pid,))
-        week_n = store.one("SELECT COUNT(*) n FROM videos WHERE page_id=? AND status IN ('schedule_pending','scheduled') "
-                           "AND scheduled_at BETWEEN ? AND ?", (pid, int(time.time()), int(time.time()) + 7 * 86400))["n"]
-        month_n = store.one("SELECT COUNT(*) n FROM videos WHERE page_id=? AND uploaded_at>=?",
-                            (pid, int(time.time()) - 30 * 86400))["n"]
         return render(request, "page.html", page=page, s=store.page_settings(page), sources=sources,
-                      stats=store.counts(pid), json=json, tiktoks=store.tiktok_channels(), mirror=mirror,
-                      others=others, week_n=week_n, month_n=month_n, color=plan.colors(store).get(pid, plan.PALETTE[0]))
+                      stats=store.counts(pid), json=json, tiktoks=store.tiktok_channels(), mirror=mirror)
 
     @app.post("/crossposts/{src}/{dst}/{vid}/retry")
     def crosspost_retry(src: int, dst: int, vid: str):
@@ -998,46 +920,14 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                         bad.append(k)
                 else:
                     s[k] = v
-        auto = request.headers.get("HX-Request") == "true"      # tự lưu khi sửa (trang kênh mới)
         if bad:
             # không lưu gì cả, báo đúng ô sai (trước đây: lỗi 500, người dùng không thấy gì và mất thay đổi)
-            if auto:
-                return PlainTextResponse("Chưa lưu — ô sau không phải số: " + ", ".join(bad), 400)
             from urllib.parse import quote
             return RedirectResponse(f"/pages/{pid}?bad={quote(','.join(bad))}", 303)
         store.save_page_settings(pid, s)
-        was = page["enabled"]
         store.x("UPDATE pages SET enabled=? WHERE id=?", (1 if form.get("enabled") == "on" else 0, pid))
-        if auto:
-            if (form.get("enabled") == "on") != bool(was):
-                store.log(f"{'Bật' if form.get('enabled') == 'on' else 'Tắt'} kênh {page['name']}", page_id=pid)
-            return HTMLResponse(f'<span class="saved">Đã tự lưu lúc {vn_fmt(time.time(), "%H:%M:%S")}</span>')
         store.log(f"Đã lưu cài đặt Page #{pid}", page_id=pid)
         return RedirectResponse(f"/pages/{pid}?saved=1", 303)
-
-    @app.post("/pages/{pid}/copy-settings")
-    def copy_settings(pid: int, to: int = Form(...), with_sources: str = Form(None)):
-        """Sao chép cài đặt kênh (lịch, edit, giọng, caption, lọc) sang kênh khác. Không chép đăng kèm TikTok / nhóm
-        (riêng từng Page)."""
-        src = store.one("SELECT * FROM pages WHERE id=?", (pid,))
-        dst = store.one("SELECT * FROM pages WHERE id=?", (to,))
-        if not src or not dst or src["id"] == dst["id"]:
-            return PlainTextResponse("Chọn 1 kênh khác để chép sang", 400)
-        s, d = store.page_settings(src), store.page_settings(dst)
-        for k, v in s.items():
-            if k not in ("tiktok_mirror", "share_groups", "group_text"):
-                d[k] = v
-        store.save_page_settings(to, d)
-        n = 0
-        if with_sources == "on":
-            have = {(r["kind"], r["value"]) for r in store.q("SELECT kind, value FROM sources WHERE page_id=?", (to,))}
-            for r in store.q("SELECT * FROM sources WHERE page_id=?", (pid,)):
-                if (r["kind"], r["value"]) not in have:
-                    store.x("INSERT INTO sources(page_id, kind, value, params, enabled) VALUES (?,?,?,?,?)",
-                            (to, r["kind"], r["value"], r["params"], r["enabled"]))
-                    n += 1
-        store.log(f"Chép cài đặt {src['name']} -> {dst['name']}" + (f" (+{n} nguồn)" if n else ""), page_id=to)
-        return RedirectResponse(f"/pages/{to}?copied={pid}", 303)
 
     @app.post("/pages/{pid}/sources")
     def add_source(pid: int, kind: str = Form(...), value: str = Form(...), max_results: int = Form(20),
@@ -1084,138 +974,21 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         store.log(f"Yêu cầu quét ngay Page #{pid}", page_id=pid)
         return RedirectResponse(f"/pages/{pid}", 303)
 
-    # ---------------- Hộp duyệt ----------------
+    # ---------------- Duyệt video ----------------
     @app.get("/review", response_class=HTMLResponse)
-    def review(request: Request, page: int | None = None, v: str = "", msg: str = ""):
-        from . import plan
+    def review(request: Request, page: int | None = None):
         sql = ("SELECT v.*, p.name page_name, p.platform FROM videos v JOIN pages p ON p.id=v.page_id "
-               "WHERE v.status='review'" + (" AND v.page_id=?" if page else "") + " ORDER BY v.likes DESC, v.updated_at DESC")
+               "WHERE v.status='review'" + (" AND v.page_id=?" if page else "") + " ORDER BY v.updated_at DESC")
         vids = store.q(sql, (page,) if page else ())
-        keys = [f"{x['page_id']}:{x['id']}" for x in vids]
-        i = keys.index(v) if v in keys else 0
-        cur = vids[i] if vids else None
-        slot = slot_label = None
-        mirror = None
-        if cur:
-            pg = store.one("SELECT * FROM pages WHERE id=?", (cur["page_id"],))
-            s = store.page_settings(pg)
-            slot = store.next_free_slot(pg["id"], s["schedule_slots"], int(s["max_posts_per_day"]))
-            slot_label = vn_fmt(slot, "%H:%M %d/%m") if slot else None
-            if int(s.get("tiktok_mirror") or 0):
-                mirror = store.one("SELECT name FROM pages WHERE id=?", (int(s["tiktok_mirror"]),))
-        by_page = store.q("SELECT p.id, p.name, COUNT(*) n FROM videos v JOIN pages p ON p.id=v.page_id "
-                          "WHERE v.status='review' GROUP BY p.id ORDER BY n DESC")
-        nxt = keys[i + 1] if cur and i + 1 < len(keys) else (keys[i - 1] if cur and i > 0 else "")
-        return render(request, "review.html", videos=vids, cur=cur, idx=i, keys=keys, cur_page=page, by_page=by_page,
-                      slot=slot, slot_label=slot_label, suggest=suggest_slot(cur["page_id"]) if cur else "",
-                      raw=bool(cur and (data / "raw" / f"{cur['id']}.mp4").exists()), msg=msg, nxt=nxt,
-                      mirror=mirror, colors=plan.colors(store))
-
-    @app.post("/review/act")
-    def review_act(pid: int = Form(...), vid: str = Form(...), mode: str = Form("slot"), when: str = Form(""),
-                   caption: str = Form(None), page: str = Form(""), nxt: str = Form(""), act: str = Form("")):
-        """Nút Duyệt / Bỏ ở Hộp duyệt. mode: slot = khung giờ trống tiếp theo, approve = theo cài đặt kênh,
-        now = đăng ngay, at = giờ tự chọn, reject = bỏ. Xong -> mở video kế tiếp."""
-        import datetime as dt
-        from urllib.parse import urlencode
-        from ..store import vn_ts
-        if act == "reject":
-            mode = "reject"
-        fields = {"caption": caption} if caption is not None else {}
-        msg = ""
-        if mode in ("slot", "at"):
-            if mode == "slot":
-                pg = store.one("SELECT * FROM pages WHERE id=?", (pid,))
-                s = store.page_settings(pg) if pg else {}
-                ts = store.next_free_slot(pid, s.get("schedule_slots", ""), int(s.get("max_posts_per_day", 1))) if pg else None
-                if ts is None:
-                    return PlainTextResponse("Kênh không còn khung giờ trống trong 30 ngày — chọn Đăng theo cài đặt kênh "
-                                             "hoặc tự chọn giờ", 400)
-            else:
-                try:
-                    ts = vn_ts(dt.datetime.strptime(when, "%Y-%m-%dT%H:%M"))
-                except ValueError:
-                    return PlainTextResponse("Chưa chọn đủ ngày và giờ đăng", 400)
-                if ts < time.time() + 20 * 60:
-                    return PlainTextResponse("Giờ đăng phải sau ít nhất 20 phút nữa", 400)
-            ok = store.set_video_if(vid, pid, ("review",), status="schedule_pending", scheduled_at=ts, error=None, **fields)
-            msg = f"Đã lên lịch {vn_fmt(ts)}"
-            if ok:
-                store.x("DELETE FROM crossposts WHERE video_id=? AND src_page_id=? AND status='pending'", (vid, pid))
-                store.log(f"Duyệt + lên lịch {vid} lúc {vn_fmt(ts)}", page_id=pid)
-        else:
-            new = {"approve": "approved", "now": "publish_now", "reject": "rejected"}.get(mode)
-            if not new:
-                return PlainTextResponse("Thao tác không hợp lệ", 400)
-            ok = store.set_video_if(vid, pid, ("review",), status=new, error=None, **fields)
-            msg = {"approved": "Đã duyệt — đăng theo cài đặt kênh", "publish_now": "Đã duyệt — đăng ngay",
-                   "rejected": "Đã bỏ video"}[new]
-            if ok and new == "rejected":
-                store.x("DELETE FROM crossposts WHERE video_id=? AND src_page_id=? AND status='pending'", (vid, pid))
-        if not ok:
-            msg = "Video không còn ở mục chờ duyệt (đã được xử lý)"
-        q = {k: v for k, v in (("page", page), ("v", nxt), ("msg", msg)) if v}
-        return RedirectResponse("/review?" + urlencode(q), 303)
-
-    @app.get("/media/raw/{vid}")
-    def media_raw(vid: str):
-        """Video gốc (trước edit) để so sánh ở Hộp duyệt. Chỉ phục vụ data/raw/<số>.mp4 — không mount cả thư mục."""
-        import re
-        from fastapi.responses import FileResponse
-        if not re.fullmatch(r"\d{6,30}", vid) or not (data / "raw" / f"{vid}.mp4").is_file():
-            return PlainTextResponse("Không có video gốc", 404)
-        return FileResponse(data / "raw" / f"{vid}.mp4", media_type="video/mp4")
-
-    # ---------------- Lịch đăng ----------------
-    @app.get("/calendar", response_class=HTMLResponse)
-    def calendar(request: Request, week: str = "", page: int | None = None, view: str = "week", msg: str = ""):
-        from . import plan
-        start = plan.week_start(week)
-        w = plan.week(store, store.page_settings, start, page)
-        listing = []
-        if view == "list":
-            listing = store.q("SELECT v.*, p.name page_name, p.asset_id, p.platform FROM videos v JOIN pages p ON p.id=v.page_id "
-                              "WHERE v.status IN ('schedule_pending','scheduled')" + (" AND v.page_id=?" if page else "")
-                              + " ORDER BY v.scheduled_at", (page,) if page else ())
-        return render(request, "calendar.html", w=w, start=start.isoformat(), cur_page=page, view=view, msg=msg,
-                      pending=plan.unscheduled(store, page), listing=listing,
-                      chans=[p for p in plan.nav_pages(store)])
-
-    @app.post("/calendar/move")
-    def calendar_move(pid: int = Form(...), vid: str = Form(...), date: str = Form(...), hm: str = Form(...),
-                      week: str = Form(""), page: str = Form("")):
-        """Kéo bài (chờ gửi lịch) hoặc video đã duyệt vào 1 ô của lịch -> đặt giờ đăng đó."""
-        import datetime as dt
-        from ..store import vn_ts
-        try:
-            ts = vn_ts(dt.datetime.strptime(f"{date} {hm}", "%Y-%m-%d %H:%M"))
-        except ValueError:
-            return PlainTextResponse("Ô lịch không hợp lệ", 400)
-        if ts < time.time() + 20 * 60:
-            return PlainTextResponse("Chỉ xếp được vào giờ sau ít nhất 20 phút nữa", 400)
-        clash = store.one("SELECT id FROM videos WHERE page_id=? AND id<>? AND status IN ('schedule_pending','scheduled','uploading') "
-                          "AND scheduled_at=?", (pid, vid, ts))
-        if clash:
-            return PlainTextResponse(f"Kênh này đã có bài lúc {vn_fmt(ts)} — chọn ô khác", 400)
-        if not store.set_video_if(vid, pid, ("approved", "schedule_pending"), status="schedule_pending",
-                                  scheduled_at=ts, error=None):
-            return PlainTextResponse("Bài này đã gửi lịch lên nền tảng / đã đăng — không đổi giờ ở đây được", 400)
-        store.x("DELETE FROM crossposts WHERE video_id=? AND src_page_id=? AND status='pending'", (vid, pid))
-        store.log(f"Đổi giờ đăng {vid} -> {vn_fmt(ts)}", page_id=pid)
-        from urllib.parse import urlencode
-        return RedirectResponse("/calendar?" + urlencode({k: v for k, v in (("week", week), ("page", page)) if v}), 303)
-
-    @app.post("/calendar/auto")
-    def calendar_auto(week: str = Form(""), page: str = Form("")):
-        from urllib.parse import urlencode
-        from . import plan
-        done, full = plan.auto_place(store, store.page_settings, int(page) if page.isdigit() else None)
-        msg = f"Đã xếp {done} video" + (f", {full} video không còn khung giờ trống trong 30 ngày" if full else "")
-        store.log("Tự xếp lịch: " + msg)
-        return RedirectResponse("/calendar?" + urlencode({k: v for k, v in (("week", week), ("page", page), ("msg", msg)) if v}), 303)
+        sched = store.q("SELECT v.*, p.name page_name, p.asset_id, p.platform FROM videos v JOIN pages p ON p.id=v.page_id "
+                        "WHERE v.status IN ('schedule_pending','scheduled')" + (" AND v.page_id=?" if page else "")
+                        + " ORDER BY v.scheduled_at", (page,) if page else ())
+        return render(request, "review.html", videos=vids, sched=sched, suggest=suggest_slot,
+                      pages=store.q("SELECT * FROM pages WHERE enabled=1"), cur_page=page)
 
     def suggest_slot(page_id: int) -> str:
         """Giờ gợi ý: sau giờ đã lên lịch muộn nhất của Page + khoảng cách tối thiểu, ít nhất 30 phút nữa."""
+        import datetime as dt
         page = store.one("SELECT * FROM pages WHERE id=?", (page_id,))
         gap = float(store.page_settings(page)["min_gap_minutes"]) * 60
         last = store.one("SELECT COALESCE(MAX(scheduled_at),0) t FROM videos WHERE page_id=? AND "
@@ -1293,25 +1066,15 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
 
     # ---------------- Tiến trình ----------------
     @app.get("/queue", response_class=HTMLResponse)
-    def queue(request: Request, status: str | None = None, page: int = 1, q: str = "", ch: int | None = None):
+    def queue(request: Request, status: str | None = None, page: int = 1):
         per = 100       # chia trang thay vì vẽ 300 dòng một lúc
         page = max(1, page)
-        conds, args = [], []
-        if status:
-            conds.append("v.status=?"); args.append(status)
-        if ch:
-            conds.append("v.page_id=?"); args.append(ch)
-        if q.strip():
-            like = f"%{q.strip()}%"
-            conds.append("(v.id LIKE ? OR v.desc LIKE ? OR v.caption LIKE ?)"); args += [like, like, like]
-        where, args = (" WHERE " + " AND ".join(conds) if conds else ""), tuple(args)
+        where, args = (" WHERE v.status=?", (status,)) if status else ("", ())
         total = store.one("SELECT COUNT(*) n FROM videos v" + where, args)["n"]
         sql = ("SELECT v.*, p.name page_name FROM videos v JOIN pages p ON p.id=v.page_id" + where
                + " ORDER BY v.updated_at DESC LIMIT ? OFFSET ?")
-        from . import plan
         return render(request, "queue.html", videos=store.q(sql, (*args, per, (page - 1) * per)),
-                      totals=store.counts(), cur=status, page=page, pages=max(1, -(-total // per)), total=total,
-                      q=q, ch=ch, chans=plan.nav_pages(store))
+                      totals=store.counts(), cur=status, page=page, pages=max(1, -(-total // per)), total=total)
 
     return app
 

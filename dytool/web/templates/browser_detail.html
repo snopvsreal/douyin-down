@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block title %}{{ prof.name }} · Hồ sơ trình duyệt{% endblock %}
-{% block crumb %}Hệ thống › <a href="/browsers">Trình duyệt</a> › <b>{{ prof.name }}</b>{% endblock %}
 {% block body %}
 {% set active = 'profiles' %}{% include "_btabs.html" %}
 {% set saved = request.query_params.get('saved') %}

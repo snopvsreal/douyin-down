@@ -36,6 +36,10 @@ class NCCALCSIZE_PARAMS(ctypes.Structure):
     _fields_ = [("rgrc", wintypes.RECT * 3), ("lppos", ctypes.c_void_p)]
 
 
+class MARGINS(ctypes.Structure):
+    _fields_ = [("left", ctypes.c_int), ("right", ctypes.c_int), ("top", ctypes.c_int), ("bottom", ctypes.c_int)]
+
+
 class MONITORINFO(ctypes.Structure):
     _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
                 ("dwFlags", wintypes.DWORD)]
@@ -96,6 +100,9 @@ def install(form) -> None:
     u.SetWindowLongPtrW(hwnd, GWL_STYLE, style | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)
     if not c.SetWindowSubclass(hwnd, cb, 0xD7, 0):
         raise OSError("SetWindowSubclass lỗi")
+    # Windows 10 vẽ 1 đường viền trắng 1px quanh cửa sổ có khung (WS_THICKFRAME) -> lề khung DWM = 0 thì hết
+    # (đo: lề 1 hoặc -1 vẫn còn viền trắng)
+    ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(wintypes.HWND(hwnd), ctypes.byref(MARGINS(0, 0, 0, 0)))
     u.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FLAGS)
 
     def pad(*_):

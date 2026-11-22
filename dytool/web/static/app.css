@@ -689,3 +689,14 @@ a.chip:hover { background: var(--active); text-decoration: none; }
   .run-card { padding: 8px 4px; align-items: center; }
   .topbar { padding: 10px 16px; }
 }
+
+/* xem trước từ khoá tiếng Việt -> tiếng Trung (trang kênh, tab Nguồn) */
+.kw-slot:empty { display: none; }
+.kw-prev { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; padding: 8px 12px; border-radius: var(--r-ctl);
+  background: var(--primary-tint); font-size: 13px; }
+.kw-prev.warn { background: var(--warn-tint); color: var(--warn-text); }
+.kw-zh { font-size: 15px; font-weight: 600; color: var(--t1); }
+.kw-alts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.kw-alt { border: 1px solid var(--field-line); background: var(--field); color: var(--t1); border-radius: 6px; padding: 1px 8px;
+  font: inherit; font-size: 13px; cursor: default; }
+.kw-alt:hover { border-color: var(--primary); }

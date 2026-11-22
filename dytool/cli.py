@@ -27,7 +27,12 @@ def cmd_server(cfg, args):
     # Ghi settings: tự chọn mục "Web API 模式" (mục 7) và cookie
     settings_path = VENDOR / "Volume" / "settings.json"
     settings_path.parent.mkdir(exist_ok=True)
-    settings = json.loads(settings_path.read_text("utf-8")) if settings_path.exists() else {}
+    # utf-8-sig: file có thể bị ghi kèm BOM (sửa bằng Notepad / PowerShell) -> "utf-8" thường báo lỗi và backend tải
+    # không bao giờ bật được. File hỏng hẳn -> làm lại từ đầu thay vì chết.
+    try:
+        settings = json.loads(settings_path.read_text("utf-8-sig")) if settings_path.exists() else {}
+    except ValueError:
+        settings = {}
     settings["run_command"] = "7"
     if cfg["douyin"].get("cookie"):
         settings["cookie"] = cfg["douyin"]["cookie"]

@@ -1039,27 +1039,65 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         store.log(f"Chép cài đặt {src['name']} -> {dst['name']}" + (f" (+{n} nguồn)" if n else ""), page_id=to)
         return RedirectResponse(f"/pages/{to}?copied={pid}", 303)
 
+    def _keyword(kind: str, value: str, zh: str, params: dict):
+        """Từ khoá tiếng Việt -> tìm Douyin bằng cụm tiếng Trung (keywords.translate, dùng lại kết quả lúc xem trước).
+        zh = cụm người dùng chọn ở phần xem trước. Trả (từ khoá lưu vào nguồn, lỗi). Giữ câu gốc ở params['vi']."""
+        from .. import keywords
+        value = " ".join(value.split())
+        params.pop("vi", None)
+        if kind != "keyword" or not value or keywords.is_chinese(value):
+            return value, None
+        pick = " ".join((zh or "").split())
+        if not keywords.is_chinese(pick):
+            r = keywords.translate(value, _sub_cfg())
+            if not r["zh"]:
+                return None, f"Chưa dịch được '{value}' sang tiếng Trung ({r['error'][:120]}) — nhập thẳng từ khoá tiếng Trung"
+            pick = r["zh"]
+        params["vi"] = value[:120]
+        return pick[:120], None
+
+    @app.get("/partials/kw-translate", response_class=HTMLResponse)
+    def kw_translate(request: Request, value: str = "", kind: str = "keyword", uid: str = "new"):
+        """Xem trước lúc gõ: từ khoá tiếng Việt sẽ được tìm trên Douyin bằng cụm tiếng Trung nào."""
+        from .. import keywords
+        import re
+        uid = uid if re.fullmatch(r"[\w-]{1,20}", uid) else "new"
+        q = " ".join(value.split())
+        if kind != "keyword" or not q or keywords.is_chinese(q):
+            return HTMLResponse("")
+        r = keywords.translate(q, _sub_cfg())
+        return render(request, "_kw_preview.html", r=r, uid=uid)
+
     @app.post("/pages/{pid}/sources")
     def add_source(pid: int, kind: str = Form(...), value: str = Form(...), max_results: int = Form(20),
-                   publish_time: int = Form(1), sort_type: int = Form(1), max_age_days: float = Form(3)):
+                   publish_time: int = Form(1), sort_type: int = Form(1), max_age_days: float = Form(3),
+                   zh: str = Form("")):
         params = ({"max_age_days": max_age_days} if kind == "channel"
                   else {"max_results": max_results, "publish_time": publish_time, "sort_type": sort_type})
+        value, err = _keyword(kind, value, zh, params)
+        if err:
+            return PlainTextResponse(err, 400)
         store.x("INSERT INTO sources(page_id, kind, value, params) VALUES (?,?,?,?)",
-                (pid, kind, value.strip(), json.dumps(params)))
+                (pid, kind, value, json.dumps(params, ensure_ascii=False)))
+        if params.get("vi"):
+            store.log(f"Thêm nguồn '{params['vi']}' → tìm Douyin bằng '{value}'", page_id=pid)
         return RedirectResponse(f"/pages/{pid}", 303)
 
     @app.post("/sources/{sid}/update")
     def update_source(sid: int, kind: str = Form(...), value: str = Form(...), max_results: int = Form(20),
                       publish_time: int = Form(1), sort_type: int = Form(1), max_age_days: float = Form(3),
-                      enabled: str = Form(None)):
+                      enabled: str = Form(None), zh: str = Form("")):
         row = store.one("SELECT page_id FROM sources WHERE id=?", (sid,))
         if not row:
             return RedirectResponse("/accounts", 303)
         params = ({"max_age_days": max_age_days} if kind == "channel"
                   else {"max_results": max_results, "publish_time": publish_time, "sort_type": sort_type})
+        value, err = _keyword(kind, value, zh, params)
+        if err:
+            return PlainTextResponse(err, 400)
         store.x("UPDATE sources SET kind=?, value=?, params=?, enabled=? WHERE id=?",
-                (kind, value.strip(), json.dumps(params), 1 if enabled == "on" else 0, sid))
-        store.log(f"Đã sửa nguồn '{value.strip()}'", page_id=row["page_id"])
+                (kind, value, json.dumps(params, ensure_ascii=False), 1 if enabled == "on" else 0, sid))
+        store.log(f"Đã sửa nguồn '{params.get('vi') or value}'", page_id=row["page_id"])
         return RedirectResponse(f"/pages/{row['page_id']}?saved=1", 303)
 
     @app.post("/sources/{sid}/toggle")

@@ -1,0 +1,17 @@
+{# Xem trước: từ khoá tiếng Việt sẽ được tìm trên Douyin bằng cụm tiếng Trung nào (bấm gợi ý khác để đổi) #}
+{% if r.zh %}
+<div class="kw-prev" role="status">
+  <span class="muted">Tìm trên Douyin bằng</span>
+  <b class="kw-zh" lang="zh">{{ r.zh }}</b>
+  <span class="small muted">{{ {'claude': '· Claude viết', 'google': '· dịch máy (Google) — có Anthropic API key thì Claude viết cụm tự nhiên hơn', 'mymemory': '· dịch máy (MyMemory) — có Anthropic API key thì Claude viết cụm tự nhiên hơn'}.get(r.by, '') }}</span>
+  <input type="hidden" name="zh" value="{{ r.zh }}">
+  {% if r.alt %}
+  <span class="kw-alts">
+    <span class="small muted">Cụm khác:</span>
+    {% for a in r.alt %}<button type="button" class="kw-alt" lang="zh" data-zh="{{ a }}">{{ a }}</button>{% endfor %}
+  </span>
+  {% endif %}
+</div>
+{% else %}
+<div class="kw-prev warn" role="alert">Chưa dịch được sang tiếng Trung — nhập thẳng từ khoá tiếng Trung, hoặc kiểm tra mạng / API key.</div>
+{% endif %}

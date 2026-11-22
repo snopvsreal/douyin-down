@@ -49,12 +49,18 @@
       <span class="small muted">quét lại mỗi {{ s.poll_minutes|int }} phút</span></div>
     {% macro source_fields(kind='keyword', value='', prm={}, uid='new') %}
       <div class="row" style="flex-wrap:nowrap; margin-top:8px">
-        <select name="kind" style="max-width:120px" aria-label="Loại nguồn">
+        <select name="kind" style="max-width:120px" aria-label="Loại nguồn"
+                hx-get="/partials/kw-translate" hx-trigger="change" hx-include="closest form" hx-vals='{"uid": "{{ uid }}"}'
+                hx-target="#kwp-{{ uid }}" hx-swap="innerHTML">
           <option value="keyword" {{ 'selected' if kind == 'keyword' }}>Từ khoá</option>
           <option value="channel" {{ 'selected' if kind == 'channel' }}>Kênh</option></select>
+        {# gõ tiếng Việt -> xem trước cụm tiếng Trung sẽ dùng để tìm (keywords.translate); lưu thì lưu cụm tiếng Trung #}
         <input type="text" autocomplete="off" name="value" required value="{{ value }}" aria-label="Từ khoá hoặc link kênh"
-               placeholder="Từ khoá tiếng Trung (vd 猫咪) hoặc link douyin.com/user/…">
+               placeholder="Từ khoá tiếng Việt hoặc tiếng Trung (vd: mèo hài hước), hoặc link douyin.com/user/…"
+               hx-get="/partials/kw-translate" hx-trigger="input changed delay:800ms" hx-include="closest form"
+               hx-vals='{"uid": "{{ uid }}"}' hx-target="#kwp-{{ uid }}" hx-swap="innerHTML" hx-sync="this:replace">
       </div>
+      <div id="kwp-{{ uid }}" class="kw-slot" aria-live="polite"></div>
       {% set mr = prm.get('max_results', 20) %}{% set pt = prm.get('publish_time', 1) %}
       {% set so = prm.get('sort_type', 1) %}{% set ad = prm.get('max_age_days', 3) %}
       <div class="grid g4" style="gap:0 12px">
@@ -73,7 +79,7 @@
     <div class="src-row {{ 'off' if not src.enabled }}">
       <span class="pill {{ 'info' if src.kind == 'keyword' }}">{{ 'Từ khoá' if src.kind == 'keyword' else 'Kênh' }}</span>
       <div style="min-width:0">
-        <b class="trunc" style="max-width:100%; display:block">{{ src.value }}</b>
+        <b class="trunc" style="max-width:100%; display:block"><span lang="zh">{{ src.value }}</span>{% if prm.vi %} <span class="muted" style="font-weight:400">· {{ prm.vi }}</span>{% endif %}</b>
         <div class="small muted">{% if src.kind == 'keyword' %}{{ prm.max_results }} video mỗi lần, đăng trong {{ {0:'mọi lúc',1:'1 ngày',7:'1 tuần',180:'6 tháng'}[prm.publish_time] }}, xếp theo {{ {0:'tổng hợp',1:'nhiều like',2:'mới nhất'}[prm.sort_type] }}{% else %}video trong {{ prm.max_age_days }} ngày{% endif %}{% if not src.enabled %} · đang tắt{% endif %}</div>
         <details class="fold" style="margin-top:6px">
           <summary class="small" style="font-weight:500">Sửa</summary>
@@ -243,6 +249,16 @@
 </div>
 
 <script>
+  // bấm 1 "cụm khác" ở phần xem trước từ khoá -> dùng cụm đó (gắn 1 lần cho mọi trang kênh)
+  if (!window.__dyKwAlt) {
+    window.__dyKwAlt = true;
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest('.kw-alt'); if (!b) return;
+      const box = b.closest('.kw-prev'), cur = box.querySelector('.kw-zh'), hid = box.querySelector('input[name=zh]');
+      const old = cur.textContent; cur.textContent = b.dataset.zh; hid.value = b.dataset.zh;
+      b.dataset.zh = old; b.textContent = old;
+    });
+  }
   (() => {
     // tab: nhớ tab đang mở trên URL (#lich…) để tải lại / quay lại vẫn đúng tab
     const tabs = [...document.querySelectorAll('[data-tab]')], panels = [...document.querySelectorAll('[data-panel]')];

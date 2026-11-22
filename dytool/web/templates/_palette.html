@@ -1,0 +1,9 @@
+{# Kết quả Ctrl+K: trang, lệnh, kênh, video (tìm theo mã / mô tả / caption) #}
+{% for it in items %}
+  <a class="pal-item" href="{{ it.href }}" role="option">
+    {% if it.color %}<span class="chan-dot" style="background:{{ it.color }}" aria-hidden="true"></span>{% endif %}
+    <span class="pal-label">{{ it.label }}{% if it.sub %} <span class="muted">· {{ it.sub }}</span>{% endif %}</span>
+    <span class="pal-kind">{{ it.kind }}</span></a>
+{% else %}
+  <p class="pal-empty">Không thấy “{{ q }}”. Thử tên kênh, mã video Douyin hoặc 1 từ trong caption.</p>
+{% endfor %}

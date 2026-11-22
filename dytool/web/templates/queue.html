@@ -1,19 +1,32 @@
 {% extends "base.html" %}
-{% block title %}Tiến trình{% endblock %}
+{% block title %}Video{% endblock %}
+{% block crumb %}Làm việc › <b>Video</b>{% endblock %}
 {% block body %}
+{% set keep = ('&q=' ~ q|urlencode if q else '') ~ ('&ch=' ~ ch if ch else '') %}
 <div class="head">
-  <div><h1>Tiến trình</h1>
+  <div><h1>Video</h1>
     <p class="sub">Mọi video và bước đang ở: tìm thấy, tải, edit, chờ duyệt, đăng.</p></div>
+  <div class="spacer"></div>
+  <form method="get" action="/queue" class="row" style="gap:6px" role="search">
+    {% if cur %}<input type="hidden" name="status" value="{{ cur }}">{% endif %}
+    <label for="vq" class="sr-only">Tìm video</label>
+    <input type="text" id="vq" name="q" value="{{ q }}" placeholder="Tìm mã video, mô tả, caption…" style="width:240px" autocomplete="off">
+    <label for="vch" class="sr-only">Kênh</label>
+    <select id="vch" name="ch" style="width:auto"><option value="">Mọi kênh</option>
+      {% for c in chans %}<option value="{{ c.id }}" {{ 'selected' if ch == c.id }}>{{ c.name }}</option>{% endfor %}</select>
+    <button class="btn">Lọc</button>
+  </form>
 </div>
 
 {% set main = ['review', 'failed', 'scheduled', 'uploaded'] %}
 <div class="filters" role="navigation" aria-label="Lọc theo trạng thái">
-  <a class="pill {{ 'on' if not cur }}" href="/queue">Tất cả</a>
+  <a class="pill {{ 'on' if not cur }}" href="/queue?{{ keep[1:] }}">Tất cả</a>
   {% for k in main %}
-    <a class="pill {{ 'on' if cur == k }}" href="/queue?status={{ k }}">{{ STATUS_VI[k] }} <span class="num">{{ totals.get(k, 0) }}</span></a>
+    <a class="pill {{ 'on' if cur == k }}" href="/queue?status={{ k }}{{ keep }}">{{ STATUS_VI[k] }} <span class="num">{{ totals.get(k, 0) }}</span></a>
   {% endfor %}
   {# không tự gửi khi đổi: dùng phím mũi tên trong ô chọn sẽ không nhảy trang liên tục #}
   <form method="get" action="/queue" class="row" style="gap:6px">
+    {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}{% if ch %}<input type="hidden" name="ch" value="{{ ch }}">{% endif %}
     <select name="status" aria-label="Trạng thái khác">
       <option value="">Trạng thái khác…</option>
       {% for k, label in STATUS_VI.items() if k not in main %}
@@ -34,7 +47,7 @@
       <div class="small muted num">❤ {{ '{:,}'.format(v.likes or 0) }}, {{ (v.duration or 0)|round|int }}s,
         <a href="https://www.douyin.com/video/{{ v.id }}" target="_blank" rel="noopener">xem gốc</a>
         {% if v.source %}<span title="{{ v.source }}">— {{ v.source.split(':', 1)[-1][:24] }}</span>{% endif %}</div></td>
-    <td class="small">{{ v.page_name }}</td>
+    <td class="small" style="white-space:nowrap">{{ v.page_name }}</td>
     <td style="max-width:300px"><span class="pill {{ cls }}">{{ STATUS_VI.get(v.status, v.status) }}</span>
       {% if v.error %}<div class="small" style="color:var(--err); margin-top:3px">{{ v.error[:160] }}</div>{% endif %}
       {% if v.fb_url and v.status == 'uploaded' %}<div class="small"><a href="{{ v.fb_url }}" target="_blank" rel="noopener">xem bài ↗</a></div>{% endif %}</td>
@@ -44,16 +57,16 @@
     {% endif %}</td>
   </tr>
   {% else %}
-  <tr><td colspan="5" class="empty" style="padding:18px">{% if cur %}Không có video nào ở trạng thái này.{% else %}Chưa có video — bật 1 kênh và thêm nguồn ở <a href="/accounts">Tài khoản & kênh</a>.{% endif %}</td></tr>
+  <tr><td colspan="5" class="empty" style="padding:18px">{% if cur or q or ch %}Không có video nào khớp bộ lọc.{% else %}Chưa có video — bấm 1 kênh ở menu trái, thêm nguồn rồi bật kênh.{% endif %}</td></tr>
   {% endfor %}
 </table>
 </div>
 {% if pages > 1 %}
-{% set q = '&status=' ~ cur if cur else '' %}
+{% set qq = ('&status=' ~ cur if cur else '') ~ keep %}
 <nav class="row" aria-label="Chuyển trang" style="margin-top:14px">
-  {% if page > 1 %}<a class="btn sm" href="/queue?page={{ page - 1 }}{{ q }}">← Trang trước</a>{% endif %}
+  {% if page > 1 %}<a class="btn sm" href="/queue?page={{ page - 1 }}{{ qq }}">← Trang trước</a>{% endif %}
   <span class="small muted num">Trang {{ page }} / {{ pages }}, tổng {{ total }} video</span>
-  {% if page < pages %}<a class="btn sm" href="/queue?page={{ page + 1 }}{{ q }}">Trang sau →</a>{% endif %}
+  {% if page < pages %}<a class="btn sm" href="/queue?page={{ page + 1 }}{{ qq }}">Trang sau →</a>{% endif %}
 </nav>
 {% endif %}
 {% endblock %}

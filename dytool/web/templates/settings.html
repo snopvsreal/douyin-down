@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% from "_macros.html" import profile_line with context %}
 {% block title %}Cài đặt{% endblock %}
+{% block crumb %}Hệ thống › <b>Cài đặt</b>{% endblock %}
 {% block body %}
 <div class="settings-page">
 <div class="head">
   <div><h1>Cài đặt</h1>
     <p class="sub">Cài đặt chung của dytool. Cài đặt riêng từng Page / kênh (nguồn, mẫu edit, giọng, lịch đăng) nằm ở
-      <a href="/accounts">Tài khoản & kênh</a> → <b>Cài đặt</b> cạnh mỗi kênh.</p></div>
+      trang của kênh đó (bấm tên kênh ở menu trái).</p></div>
 </div>
 
 {# 1. Cập nhật — khung tự làm mới (_updates.html) #}

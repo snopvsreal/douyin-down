@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Lịch đăng{% endblock %}
+{% block crumb %}Làm việc › <b>Lịch đăng</b>{% endblock %}
+{% block body %}
+{% set pq = ('&page=' ~ cur_page) if cur_page else '' %}
+<div class="cal-bar">
+  <h1>Lịch đăng</h1>
+  <div class="row" style="gap:6px">
+    <a class="btn icon" href="/calendar?week={{ w.prev }}{{ pq }}&view={{ view }}" aria-label="Tuần trước">‹</a>
+    <b class="cal-range num">{{ w.label }}</b>
+    <a class="btn icon" href="/calendar?week={{ w.next }}{{ pq }}&view={{ view }}" aria-label="Tuần sau">›</a>
+    <a class="btn sm" href="/calendar?view={{ view }}{{ pq }}">Hôm nay</a>
+  </div>
+  <div class="seg" role="group" aria-label="Kiểu xem">
+    <a href="/calendar?week={{ start }}{{ pq }}" aria-pressed="{{ 'true' if view != 'list' else 'false' }}">7 ngày</a>
+    <a href="/calendar?view=list{{ pq }}" aria-pressed="{{ 'true' if view == 'list' else 'false' }}">Danh sách</a>
+  </div>
+  <div class="spacer"></div>
+  <div class="row" style="gap:6px" aria-label="Lọc theo kênh">
+    <a class="fchip {{ 'on' if not cur_page }}" href="/calendar?week={{ start }}&view={{ view }}">Tất cả</a>
+    {% for c in chans %}
+      <a class="fchip {{ 'on' if cur_page == c.id }}" href="/calendar?week={{ start }}&view={{ view }}&page={{ c.id }}">
+        <span class="chan-dot" style="background:{{ c.color }}" aria-hidden="true"></span>{{ c.name }}</a>
+    {% endfor %}
+  </div>
+</div>
+{% if msg %}<div class="notice" role="status">{{ msg }}</div>{% endif %}
+
+{% if view == 'list' %}
+{# ---- danh sách lịch sắp đăng (thay cho bảng Lịch đăng cũ ở trang Duyệt video) ---- #}
+<div class="card table-card">
+  <table>
+    <tr><th>Giờ đăng</th><th>Kênh</th><th>Caption</th><th>Trạng thái</th><th></th></tr>
+    {% for v in listing %}
+    <tr>
+      <td class="num" style="white-space:nowrap"><b>{{ vnt(v.scheduled_at, '%H:%M') }}</b> <span class="small muted">{{ vnt(v.scheduled_at, '%d/%m') }}</span></td>
+      <td class="small">{{ v.page_name }}{% if v.platform == 'tiktok' %} <span class="tag tt">TikTok</span>{% endif %}</td>
+      <td class="small"><div class="trunc">{{ v.caption }}</div></td>
+      <td><span class="pill {{ 'ok' if v.status == 'scheduled' else 'info' }}">{{ STATUS_VI[v.status] }}</span></td>
+      <td style="white-space:nowrap; text-align:right">
+        {% if v.status == 'schedule_pending' %}
+          <button class="btn sm ghost danger" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/unschedule" hx-swap="outerHTML"
+                  hx-disabled-elt="this" hx-confirm="Huỷ lịch đăng lúc {{ vnt(v.scheduled_at, '%H:%M %d/%m') }}? Video quay lại Hộp duyệt.">Huỷ lịch</button>
+        {% elif v.platform == 'tiktok' %}
+          <a class="btn sm ghost" target="_blank" rel="noopener" href="https://www.tiktok.com/tiktokstudio/content">TikTok Studio ↗</a>
+        {% else %}
+          <a class="btn sm ghost" target="_blank" rel="noopener" href="https://business.facebook.com/latest/content_calendar?asset_id={{ v.asset_id }}">Lịch trên Facebook ↗</a>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="empty" style="padding:18px">Chưa có bài nào hẹn giờ. Duyệt video ở <a href="/review">Hộp duyệt</a>.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+<p class="hint">Lịch đã gửi lên Facebook / TikTok sẽ tự đăng, máy không cần bật. Muốn đổi giờ bài đó thì sửa trên nền tảng.</p>
+
+{% else %}
+{# ---- lưới tuần ---- #}
+<div class="cal-wrap">
+  <div class="cal-scroll">
+    {% if not w.rows %}
+      <div class="all-clear"><div><b>Chưa có khung giờ đăng nào</b>
+        <div class="small muted">Đặt khung giờ ở trang kênh (tab Đăng &amp; lịch), vd 07:00, 11:30, 19:30, 21:00.</div></div></div>
+    {% else %}
+    <div class="cal-grid" role="table" aria-label="Lịch đăng tuần {{ w.label }}">
+      <div class="cal-hd" role="columnheader"></div>
+      {% for d in w.days %}<div class="cal-hd {{ 'today' if d.today }}" role="columnheader"><span>{{ d.dow }}</span><b class="num">{{ d.day }}</b></div>{% endfor %}
+      {% for r in w.rows %}
+        <div class="cal-slot num" role="rowheader">{{ r.time }}</div>
+        {% for c in r.cells %}
+        <div class="cal-cell {{ 'today' if c.today }} {{ 'past' if c.past }}" role="cell"
+             {% if not c.past %}data-drop data-date="{{ c.date }}" data-hm="{{ c.time }}"{% endif %}>
+          {% for p in c.posts %}
+          <div class="cal-post {{ 'done' if p.done }}" style="--c:{{ p.color }}" title="{{ p.title }} — {{ p.page }}, {{ p.when }} · {{ STATUS_VI.get(p.status, p.status) }}"
+               {% if p.movable %}draggable="true" data-pid="{{ p.page_id }}" data-vid="{{ p.id }}"{% endif %}>
+            <b class="trunc">{{ p.title }}</b><span>{{ p.page }}{% if p.status == 'scheduled' %} · đã hẹn trên {{ 'TikTok' if p.tt else 'FB' }}{% elif p.status == 'uploaded' %} · đã đăng{% endif %}</span>
+          </div>
+          {% endfor %}
+          {% if not c.posts and not c.past %}<span class="cal-empty">Trống</span>{% endif %}
+        </div>
+        {% endfor %}
+      {% endfor %}
+    </div>
+    {% endif %}
+    <p class="hint">Hàng = khung giờ đăng của các kênh (giờ Việt Nam), viền màu = kênh. Kéo bài <b>chờ gửi lịch</b> hoặc video
+      ở cột phải vào ô khác để đổi giờ. Bài đã hẹn trên Facebook / TikTok thì đổi giờ ngay trên nền tảng.</p>
+  </div>
+
+  <aside class="cal-pend" aria-labelledby="h-pend">
+    <div class="row" style="align-items:baseline"><b id="h-pend">Chưa xếp lịch</b><span class="small muted">{{ pending|length }} video đã duyệt</span></div>
+    {% for v in pending %}
+      <div class="cal-post" style="--c:{{ v.color }}" draggable="true" data-pid="{{ v.page_id }}" data-vid="{{ v.id }}" title="{{ v.title }}">
+        <b class="trunc">{{ v.title }}</b><span>{{ v.page }}</span></div>
+    {% else %}
+      <p class="small muted">Không có video nào đang chờ xếp giờ.</p>
+    {% endfor %}
+    {% if pending %}
+    <form method="post" action="/calendar/auto" hx-disabled-elt="find button">
+      <input type="hidden" name="week" value="{{ start }}"><input type="hidden" name="page" value="{{ cur_page or '' }}">
+      <button class="btn primary" style="width:100%">Tự xếp {{ pending|length }} video</button></form>
+    <p class="hint">Điền vào khung giờ trống gần nhất của từng kênh, theo giới hạn bài/ngày.</p>
+    {% endif %}
+  </aside>
+</div>
+
+<form id="cal-move" method="post" action="/calendar/move" hidden>
+  <input type="hidden" name="pid"><input type="hidden" name="vid"><input type="hidden" name="date"><input type="hidden" name="hm">
+  <input type="hidden" name="week" value="{{ start }}"><input type="hidden" name="page" value="{{ cur_page or '' }}">
+</form>
+<script>
+  // kéo thả: thả bài vào 1 ô -> gửi form ẩn (boost) -> /calendar/move -> vẽ lại lịch
+  (() => {
+    let drag = null;
+    document.querySelectorAll('.cal-post[draggable=true]').forEach(el => {
+      el.addEventListener('dragstart', (e) => { drag = el; el.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+      el.addEventListener('dragend', () => { el.classList.remove('dragging'); document.querySelectorAll('.drop-on').forEach(x => x.classList.remove('drop-on')); });
+    });
+    document.querySelectorAll('[data-drop]').forEach(cell => {
+      cell.addEventListener('dragover', (e) => { if (drag) { e.preventDefault(); cell.classList.add('drop-on'); } });
+      cell.addEventListener('dragleave', () => cell.classList.remove('drop-on'));
+      cell.addEventListener('drop', (e) => {
+        e.preventDefault(); cell.classList.remove('drop-on'); if (!drag) return;
+        const f = document.getElementById('cal-move');
+        f.pid.value = drag.dataset.pid; f.vid.value = drag.dataset.vid; f.date.value = cell.dataset.date; f.hm.value = cell.dataset.hm;
+        f.requestSubmit(); drag = null;
+      });
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

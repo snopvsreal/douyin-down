@@ -6,7 +6,9 @@
   <meta name="theme-color" content="#f5f5f5" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
   {# sáng / tối chọn ở cuối menu (localStorage); đặt trước khi vẽ để không nháy màu #}
-  <script>try { const t = localStorage.getItem('dy-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <script>try { const t = localStorage.getItem('dy-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  {# trong cửa sổ app desktop (không thanh tiêu đề Windows): hiện 3 nút cửa sổ ngay, không đợi pywebview sẵn sàng #}
+  try { if (localStorage.getItem('dy-app') === '1') document.documentElement.classList.add('in-app'); } catch (e) {}</script>
   <title>{% block title %}dytool{% endblock %} · dytool</title>
   <link rel="icon" type="image/png" href="/static/favicon.png">
   {# tải trước font (chữ Latin + tiếng Việt) -> chữ hiện đúng font ngay, không nháy từ font hệ thống sang Inter #}
@@ -83,6 +85,16 @@
       <div class="crumb">{% block crumb %}{{ self.title() }}{% endblock %}</div>
       <div class="svc-chips" hx-get="/partials/services" hx-swap="innerHTML"
            hx-trigger="load, every 5s [!document.hidden], visibilitychange[!document.hidden] from:document"></div>
+      {# app desktop: thanh này là thanh tiêu đề (kéo / nhấp đúp phóng to), 3 nút cửa sổ ở góc (desktop.py WindowApi) #}
+      <div class="winctl" role="group" aria-label="Cửa sổ">
+        <button type="button" data-win="min" title="Thu nhỏ" aria-label="Thu nhỏ">
+          <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M0 5.5h10"/></svg></button>
+        <button type="button" data-win="max" title="Phóng to" aria-label="Phóng to">
+          <svg class="i-max" viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><rect x=".5" y=".5" width="9" height="9" rx="1"/></svg>
+          <svg class="i-restore" viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><rect x=".5" y="2.5" width="7" height="7" rx="1"/><path d="M2.5 2.5V1.5a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-1"/></svg></button>
+        <button type="button" data-win="close" class="close" title="Đóng — dytool vẫn chạy ở khay hệ thống" aria-label="Đóng">
+          <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="m.5.5 9 9M9.5.5l-9 9"/></svg></button>
+      </div>
     </header>
     <main>
     {% if setup_failed and request.url.path in ('/', '/settings') %}
@@ -182,6 +194,39 @@
     });
     document.addEventListener('htmx:afterSettle', mark);
     mark();
+  }
+  // App desktop không thanh tiêu đề: 3 nút cửa sổ + màu viền đổi kích thước theo nền trang (sáng / tối).
+  // pywebview gắn window.pywebview.api sau khi trang tải -> sự kiện pywebviewready. Mở bằng trình duyệt thường: không có gì.
+  if (!window.__dyWin) {
+    window.__dyWin = true;
+    const html = document.documentElement;
+    const api = () => window.pywebview && window.pywebview.api;
+    const setMax = (s) => {
+      if (!s) return;
+      html.classList.toggle('win-max', !!s.max);
+      const b = document.querySelector('[data-win="max"]');
+      if (b) { const t = s.max ? 'Thu về' : 'Phóng to'; b.title = t; b.setAttribute('aria-label', t); }
+    };
+    document.addEventListener('htmx:afterSettle', () => setMax({max: html.classList.contains('win-max')}));
+    const syncBg = () => {
+      const a = api(); if (!a || !a.bg) return;
+      requestAnimationFrame(() => a.bg(getComputedStyle(html).getPropertyValue('--canvas').trim()));
+    };
+    const ready = () => {
+      const a = api(); if (!a || !a.win) return;
+      html.classList.add('in-app');
+      try { localStorage.setItem('dy-app', '1'); } catch (e) {}
+      a.state().then(setMax); syncBg();
+    };
+    window.addEventListener('pywebviewready', ready);
+    ready();
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-win]'); if (!b) return;
+      const a = api(); if (a && a.win) a.win(b.dataset.win).then(setMax);
+      if (b.dataset.win === 'close') b.blur();
+    });
+    document.addEventListener('click', (e) => { if (e.target.closest('[data-theme-set]')) syncBg(); });
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncBg);
   }
   // Phím tắt: Ctrl+1..7 chuyển trang, Ctrl+K tìm / lệnh nhanh. Chỉ gắn 1 lần (boost chạy lại script này).
   if (!window.__dyShell) {

@@ -510,11 +510,33 @@ details.fold[open] > summary { margin-bottom: 10px; }
 .tgl.on span { transform: translateX(16px); }
 /* thanh trên cùng: đường dẫn + chip dịch vụ */
 .topbar { position: sticky; top: 0; z-index: 6; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 24px;
-  background: var(--surface); border-bottom: 1px solid var(--line); border-radius: var(--r-panel) var(--r-panel) 0 0; min-height: 52px; }
+  background: var(--surface); border-bottom: 1px solid var(--line); border-radius: var(--r-panel) var(--r-panel) 0 0; min-height: 52px;
+  flex: none; }  /* không co: chip xuống dòng (cửa sổ hẹp) thì thanh cao lên, không đè lên tiêu đề trang */
 .crumb { font-size: 13px; color: var(--t3); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .crumb b { color: var(--t1); font-weight: 600; }
 .crumb a { color: var(--t3); }
 .svc-chips { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px; }
+/* app desktop không thanh tiêu đề Windows (desktop.py + winchrome.py): kéo cửa sổ ở thanh trên cùng, khe nền quanh
+   2 tấm, logo; mọi thứ bấm được trong vùng kéo phải no-drag. Mở bằng trình duyệt thường: không có html.in-app */
+.winctl { display: none; }
+html.in-app .app, html.in-app .topbar, html.in-app .brand { app-region: drag; }
+html.in-app nav.side, html.in-app .content { app-region: no-drag; }
+html.in-app .topbar a, html.in-app .topbar button, html.in-app .topbar input, html.in-app .svc-chips,
+html.in-app .winctl { app-region: no-drag; }
+/* 3 nút luôn ở góc phải trên (chip dịch vụ có xuống dòng khi cửa sổ hẹp cũng không kéo theo) */
+html.in-app .topbar { padding-right: 144px; }
+html.in-app .winctl { display: flex; gap: 2px; position: absolute; top: 10px; right: 8px; }
+.winctl button { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 32px; padding: 0;
+  border: 0; border-radius: var(--r-ctl); background: transparent; color: var(--t2); cursor: default;
+  transition: background .1s, color .1s; }
+.winctl button:hover { background: var(--hover); color: var(--t1); }
+.winctl button:active { background: var(--active); }
+.winctl button.close:hover { background: #c42b1c; color: #fff; }
+.winctl button.close:active { background: #b22a1b; color: #fff; }
+.winctl button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.winctl svg { fill: none; stroke: currentColor; stroke-width: 1; shape-rendering: geometricPrecision; }
+.winctl .i-restore, html.win-max .winctl .i-max { display: none; }
+html.win-max .winctl .i-restore { display: block; }
 .chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--r-ctl); background: var(--weak);
   font-size: 12px; color: var(--t2); white-space: nowrap; text-decoration: none; }
 .chip form { display: inline; margin: 0; }

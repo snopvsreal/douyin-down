@@ -198,6 +198,69 @@ def _style_window(window) -> None:
         print("Không chỉnh được kiểu cửa sổ:", e, flush=True)
 
 
+class WindowApi:
+    """Gọi từ trang (`window.pywebview.api.…`): 3 nút cửa sổ tự vẽ ở thanh trên cùng (base.html). Thuộc tính bắt đầu
+    bằng `_` không lộ ra JavaScript."""
+
+    def __init__(self):
+        self._window = None
+
+    def win(self, act: str):
+        from . import winchrome
+        w = self._window
+        if act == "min":
+            w.minimize()
+        elif act == "max":
+            w.restore() if winchrome.is_maximized(w.native) else w.maximize()
+        elif act == "close":            # như nút ✕ của Windows: on_closing thu xuống khay
+            from System import Action
+            w.native.Invoke(Action(w.native.Close))
+        return self.state()
+
+    def state(self) -> dict:
+        from . import winchrome
+        try:
+            return {"max": winchrome.is_maximized(self._window.native)}
+        except Exception:
+            return {"max": False}
+
+    def bg(self, color: str):
+        """Màu nền trang (đổi sáng / tối) -> màu viền đổi kích thước quanh trang, cho liền màu."""
+        import re
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", color or ""):
+            return
+        try:
+            from System import Action
+            from System.Drawing import ColorTranslator
+            f = self._window.native
+            f.Invoke(Action(lambda: setattr(f, "BackColor", ColorTranslator.FromHtml(color))))
+        except Exception as e:
+            print("Không đổi được màu viền cửa sổ:", e, flush=True)
+
+    def _push(self):
+        try:
+            self._window.evaluate_js(
+                f"document.documentElement.classList.toggle('win-max', {str(self.state()['max']).lower()})")
+        except Exception:
+            pass
+
+
+def _frameless(window, url: str) -> None:
+    """Sau khi cửa sổ hiện: đổi kích thước bằng mép, snap, phóng to không đè taskbar, kéo bằng app-region (winchrome).
+    Cửa sổ mở với trang trống; bật vùng kéo của WebView2 xong mới tải giao diện (cài đặt này chỉ có hiệu lực từ lần
+    tải trang kế — tải lại trang giữa lúc pywebview đang mở trang đầu thì kẹt ở about:blank)."""
+    try:
+        if sys.platform == "win32":
+            from System import Action
+            from . import winchrome
+            form = window.native
+            window.events.loaded.wait(20)          # trang trống đầu tiên đã vẽ = WebView2 khởi tạo xong
+            form.Invoke(Action(lambda: (winchrome.install(form), winchrome.enable_drag_regions(form))))
+    except Exception as e:                         # thiếu phần này cửa sổ vẫn dùng được (nút tự vẽ vẫn chạy)
+        print("Không bật được khung cửa sổ tự vẽ:", e, flush=True)
+    window.load_url(url)
+
+
 def main() -> None:
     _prepare_env()
     if sys.platform == "win32":
@@ -248,9 +311,14 @@ def main() -> None:
         width, height = min(width, int(scr.width * 0.9)), min(height, int(scr.height * 0.85))
     except Exception:
         pass
-    # màu nền lúc trang chưa vẽ = màu khung app (app.css --base) để không nháy màu khi mở
-    window = webview.create_window(TITLE, URL, width=width, height=height, min_size=(720, 520),
-                                   background_color="#202020" if _windows_dark() else "#f3f3f3", text_select=True)
+    # màu nền lúc trang chưa vẽ = màu nền app (app.css --canvas) để không nháy màu khi mở.
+    # frameless: không có thanh tiêu đề của Windows — thanh trên cùng của trang làm thanh tiêu đề (winchrome.py)
+    api = WindowApi()
+    bg = "#121212" if _windows_dark() else "#f5f5f5"
+    window = webview.create_window(TITLE, html=f'<body style="margin:0;background:{bg}"></body>', width=width,
+                                   height=height, min_size=(720, 520), background_color=bg, text_select=True,
+                                   frameless=True, easy_drag=False, js_api=api)
+    api._window = window
     state = {"quitting": False, "hinted": False}
 
     def show():
@@ -295,6 +363,9 @@ def main() -> None:
         app.state.show_window = show
     window.events.closing += on_closing
     window.events.shown += lambda: _style_window(window)
+    window.events.shown += lambda: threading.Thread(target=_frameless, args=(window, URL), daemon=True).start()
+    window.events.maximized += lambda: api._push()
+    window.events.restored += lambda: api._push()
     window.events.shown += lambda: _allow_close_on_shutdown(state)
 
     menu_items = [pystray.MenuItem("Mở dytool", lambda i, it: show(), default=True)]

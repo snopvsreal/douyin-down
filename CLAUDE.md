@@ -75,6 +75,7 @@ Luồng 1 video: `new` → tải → `downloaded` → edit → `review` (hoặc 
 - **Server cục bộ không có đăng nhập**: `_request_guard` chặn Host lạ (DNS rebinding) và POST có Origin/Referer khác
   dytool (CSRF). Test bằng `TestClient(..., base_url="http://127.0.0.1:8000")`. `/media/edited` là thư mục duy nhất
   được phục vụ tĩnh — đừng mount cả `data/` (cookie FB, app.db). Ghi vào config.yaml: lọc giá trị bằng regex chặt.
+- `hx-boost` chỉ thay `<body>`, giữ `<head>` cũ → cửa sổ đang mở vẫn dùng `app.css` cũ khi CSS đổi (trang mới vỡ bố cục: svg không có kích thước CSS vẽ 300×150). `.app[data-css]` mang phiên bản CSS, script đầu body tự đổi `<link>` khi khác. Svg mới: ghi sẵn `width`/`height`.
 - `onsubmit="return confirm()"` vô tác dụng khi body có `hx-boost` → dùng `hx-confirm`. htmx bỏ qua phản hồi
   4xx/5xx → `base.html` hiện thông báo nổi `#dy-toast` (poll `every …` thì không) — lỗi trả `PlainTextResponse(msg, 400)` để hiện đúng lời nhắn.
 - Trình cài / gỡ cài / "Cài đặt lại thư viện" đóng mọi tiến trình có **đường dẫn file chạy** trong `.venv|.python|vendor|tools`

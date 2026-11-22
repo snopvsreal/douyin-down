@@ -18,7 +18,7 @@
 {# hx-boost: bấm menu / gửi form không tải lại cả trang (không nháy trắng) — giống app thật #}
 <body hx-boost="true">
 <a class="skip" href="#main">Bỏ qua menu, tới nội dung chính</a>
-<div class="app">
+<div class="app" data-css="{{ css_v() }}">
   <nav class="side" aria-label="Menu chính">
     <div class="brand" translate="no"><img src="/static/icon.png" alt=""><span>dytool</span></div>
     <button type="button" class="search-btn" data-palette-open aria-label="Tìm hoặc ra lệnh (Ctrl+K)">
@@ -48,7 +48,7 @@
     {# nhóm Kênh: nút + nhỏ cạnh tiêu đề (không phải 1 mục menu — trước đây trông như nút "thêm tài khoản" giữa menu) #}
     <div class="nav-sec nav-sec-row"><span>Kênh</span>
       <a href="/accounts" class="nav-sec-add" title="Thêm kênh: đăng nhập tài khoản Facebook / TikTok, tool tự tìm Page"
-         aria-label="Thêm kênh"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></a></div>
+         aria-label="Thêm kênh"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></a></div>
     {% for ch in nav_pages %}
       <a href="/pages/{{ ch.id }}" class="nav-item nav-chan {{ 'on' if p == '/pages/' ~ ch.id }}" {{ 'aria-current=page' if p == '/pages/' ~ ch.id }}
          title="{{ ch.name }} — {{ 'đang bật' if ch.enabled else 'đang tắt' }}">
@@ -112,6 +112,13 @@
 {# Vùng đọc to cho trình đọc màn hình: chỉ được cập nhật (hx-swap-oob) khi bước đăng nhập đổi, không theo từng giây #}
 <div id="sr-live" class="sr-only" aria-live="polite"></div>
 <script>
+  // Chuyển trang kiểu boost chỉ thay <body>, giữ <head> cũ -> sau khi app được cập nhật / sửa CSS, cửa sổ đang mở vẫn
+  // dùng app.css cũ và trang mới vỡ bố cục. Trang mới mang số phiên bản CSS (data-css): khác thì nạp lại CSS ngay.
+  (() => {
+    const v = document.querySelector('.app')?.dataset.css;
+    const link = document.querySelector('link[rel=stylesheet][href*="/static/app.css"]');
+    if (v && link && !link.getAttribute('href').endsWith('v=' + v)) link.setAttribute('href', '/static/app.css?v=' + v);
+  })();
   // Sáng / tối / theo máy (cuối menu). Lưu localStorage; "theo máy" = bỏ data-theme -> theo Windows.
   if (!window.__dyTheme) {
     window.__dyTheme = true;

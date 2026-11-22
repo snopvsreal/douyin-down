@@ -73,12 +73,12 @@
     {% if today %}
     <div class="timeline">
       {% for it in today %}
-      <a class="tl-row" href="/pages/{{ it.page_id }}">
+      <div class="tl-row" data-vview="{{ it.page_id }}:{{ it.id }}" tabindex="0" role="button" title="Xem lại video, caption, giờ đăng">
         <span class="tl-time num">{{ it.time }}</span>
         <span class="chan-dot" style="background:{{ it.color }}" aria-hidden="true"></span>
         <span class="tl-main"><b class="trunc">{{ it.title }}</b><span class="small muted">{{ it.page }}{{ ' · TikTok' if it.tt }}</span></span>
         <span class="pill {{ it.cls }}">{{ it.state }}</span>
-      </a>
+      </div>
       {% endfor %}
     </div>
     {% else %}<p class="empty">Hôm nay chưa có bài nào đăng hoặc hẹn giờ.</p>{% endif %}

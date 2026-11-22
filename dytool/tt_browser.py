@@ -140,6 +140,11 @@ def publish(acc_dir: Path, video: Path, caption: str, schedule_at: dt.datetime |
                 tu._post_video = lambda p: print("[dry_run] dừng trước nút Post", flush=True)
             else:
                 progress.step("Bấm " + ("Schedule" if sched else "Post"))
+
+                def post(p):           # nút Dừng: dừng được tới ngay trước khi bấm Post, sau đó thì không
+                    progress.no_return()
+                    return real_post(p)
+                tu._post_video = post
             tu.complete_upload_form(page, str(video.resolve()), caption[:2200], sched, False, num_retries=2,
                                     headless=headless)
             if dry_run:
@@ -151,7 +156,7 @@ def publish(acc_dir: Path, video: Path, caption: str, schedule_at: dt.datetime |
                 page.screenshot(path=str(log_dir / f"{stamp}_{video.stem}_error.png"), full_page=True)
             except Exception:
                 pass
-            if isinstance(e, TTError):
+            if isinstance(e, (TTError, progress.Cancelled)):
                 raise
             raise TTError(f"{type(e).__name__}: {str(e)[:300]} (ảnh lỗi: {log_dir.name}/{stamp}_*)") from e
         finally:

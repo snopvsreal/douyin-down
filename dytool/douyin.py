@@ -6,6 +6,8 @@ from pathlib import Path
 
 import httpx
 
+from . import progress
+
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
 
@@ -117,6 +119,7 @@ class DouyinClient:
                     r.raise_for_status()
                     with tmp.open("wb") as f:
                         for chunk in r.iter_bytes(1 << 20):
+                            progress.check()       # nút Dừng
                             f.write(chunk)
                 if tmp.stat().st_size < 50_000:
                     raise DouyinError("File tải về quá nhỏ, có thể link đã hết hạn")

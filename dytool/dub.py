@@ -24,6 +24,8 @@ def separate(video: Path, work: Path) -> tuple[Path, Path]:
     # dùng chung với VoiceStudio, driver…) -> chạy lại bằng CPU thay vì làm hỏng cả video
     r = subprocess.run(base + [str(wav)], capture_output=True)
     if r.returncode != 0:
+        from . import progress
+        progress.check()               # bị nút Dừng tắt -> không chạy lại bằng CPU
         err = r.stderr.decode("utf-8", "replace")
         if any(w in err for w in ("CUDA", "cuda", "cuDNN", "out of memory")):
             print("Demucs lỗi trên GPU -> chạy lại bằng CPU", flush=True)

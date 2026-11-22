@@ -43,14 +43,17 @@
   {% for v in videos %}
   {% set cls = {'uploaded':'ok','scheduled':'ok','failed':'err','review':'warn','approved':'info','publish_now':'info','schedule_pending':'info'}.get(v.status, '') %}
   <tr>
-    <td><div class="trunc" style="max-width:420px">{{ v.desc or v.id }}</div>
+    <td><button type="button" class="vv-open" data-vview="{{ v.page_id }}:{{ v.id }}" title="Xem lại video, caption, giờ đăng">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7-4.5z"/></svg>
+        <span class="trunc" style="max-width:400px">{{ v.caption.splitlines()[0] if v.caption else (v.desc or v.id) }}</span></button>
       <div class="small muted num">❤ {{ '{:,}'.format(v.likes or 0) }}, {{ (v.duration or 0)|round|int }}s,
         <a href="https://www.douyin.com/video/{{ v.id }}" target="_blank" rel="noopener">xem gốc</a>
         {% if v.source %}<span title="{{ v.source }}">— {{ v.source.split(':', 1)[-1][:24] }}</span>{% endif %}</div></td>
     <td class="small" style="white-space:nowrap">{{ v.page_name }}</td>
     <td style="max-width:300px"><span class="pill {{ cls }}">{{ STATUS_VI.get(v.status, v.status) }}</span>
       {% if v.error %}<div class="small" style="color:var(--err); margin-top:3px">{{ v.error[:160] }}</div>{% endif %}
-      {% if v.fb_url and v.status == 'uploaded' %}<div class="small"><a href="{{ v.fb_url }}" target="_blank" rel="noopener">xem bài ↗</a></div>{% endif %}</td>
+      {% if v.fb_url and v.status == 'uploaded' %}<div class="small"><a href="{{ v.fb_url }}" target="_blank" rel="noopener">xem bài ↗</a></div>{% endif %}
+      {% if v.status == 'scheduled' and v.scheduled_at %}<div class="small muted num">đăng lúc {{ vnt(v.scheduled_at, '%H:%M %d/%m') }}</div>{% endif %}</td>
     <td class="small muted" style="white-space:nowrap">{{ v.updated_at|ago }}</td>
     <td style="text-align:right">{% if v.status == 'failed' %}
       <button class="btn sm" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/retry" hx-swap="outerHTML">Thử lại</button>

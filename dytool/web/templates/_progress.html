@@ -1,7 +1,14 @@
 {% macro dur(s) %}{% if s >= 60 %}{{ (s // 60)|int }} phút {{ (s % 60)|int }}s{% else %}{{ s|int }}s{% endif %}{% endmacro %}
 <div class="row" style="margin-bottom:8px">
   <h2 style="margin:0">Đang làm</h2><div class="spacer"></div>
-  {% if task %}<span class="pill info num">{{ dur(task.elapsed) }}</span>{% endif %}
+  {% if task %}<span class="pill info num">{{ dur(task.elapsed) }}</span>
+    {% if task.stopping %}<span class="pill warn">Đang dừng…</span>
+    {% elif task.no_return %}<span class="pill" title="Đã bấm đăng trên nền tảng — chờ biết bài đã lên chưa rồi mới dừng được">Đang bấm đăng</span>
+    {% else %}<button type="button" class="btn sm" hx-post="/worker/cancel?where=progress" hx-target="closest section"
+        hx-swap="innerHTML" hx-disabled-elt="this" title="Dừng việc đang làm và tạm dừng chạy tự động"
+        hx-confirm="Dừng {{ task.title|lower }}{% if task.page %} ({{ task.page }}){% endif %}? Chạy tự động sẽ tạm dừng; bật lại thì việc này làm lại từ đầu.">
+        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" style="fill:currentColor"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/></svg> Dừng</button>
+    {% endif %}{% endif %}
 </div>
 {% if task %}
   <p style="margin-bottom:8px"><b>{{ task.title }}</b>{% if task.page %} <span class="pill">{{ task.page }}</span>{% endif %}</p>

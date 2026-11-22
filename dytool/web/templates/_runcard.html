@@ -11,6 +11,16 @@
   <div class="run-task" title="{{ task.title }}{% if task.page %} — {{ task.page }}{% endif %}">{{ task.title }}{% if task.page %} · {{ task.page }}{% endif %}</div>
   <div class="run-bar"><div></div></div>
   <div class="run-sub">{% if cur %}{{ cur[0].name }} · {% endif %}{{ (task.elapsed // 60)|int }} phút {{ (task.elapsed % 60)|int }}s</div>
+  {% if task.stopping %}
+    <div class="run-sub run-stopping"><span class="spin" aria-hidden="true"></span> Đang dừng…</div>
+  {% elif task.no_return %}
+    <div class="run-sub" title="Đã bấm đăng trên nền tảng — chờ biết bài đã lên chưa rồi mới dừng được">Đang bấm đăng — chờ xong</div>
+  {% else %}
+    <button type="button" class="btn sm run-stop" hx-post="/worker/cancel" hx-target="#runcard" hx-swap="innerHTML"
+            hx-disabled-elt="this" title="Dừng việc đang làm và tạm dừng chạy tự động. Bật lại thì việc này làm lại từ đầu."
+            hx-confirm="Dừng {{ task.title|lower }}{% if task.page %} ({{ task.page }}){% endif %}? Chạy tự động sẽ tạm dừng; bật lại thì việc này làm lại từ đầu.">
+      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/></svg>Dừng</button>
+  {% endif %}
 {% elif worker.running %}
   <div class="run-sub">Đang chờ việc mới</div>
 {% else %}

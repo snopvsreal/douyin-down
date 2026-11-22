@@ -268,6 +268,7 @@ def publish(data_dir: Path, video: Path, caption: str, cfg: dict, dry_run: bool 
             final = "Lên lịch" if schedule_at else "Chia sẻ"
             progress.step("Xác nhận " + ("lên lịch" if schedule_at else "đăng"))
             before = page.inner_text("body").lower()
+            progress.no_return()       # từ đây không dừng được nữa: bấm rồi thì phải chờ biết bài đã lên chưa
             page.get_by_role("button", name=final, exact=True).last.click()
             # thành công = HIỆN RA câu báo đã đăng / đã lên lịch mà trước khi bấm chưa có trên trang.
             # Không còn coi "rời trang composer" là thành công: bị đá sang trang đăng nhập / checkpoint cũng rời trang

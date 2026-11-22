@@ -498,6 +498,12 @@ details.fold[open] > summary { margin-bottom: 10px; }
 .run-head b { flex: 1; font-weight: 600; font-size: 13px; }
 .run-task { font-size: 12px; line-height: 16px; color: var(--t1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .run-sub { font-size: 12px; line-height: 16px; color: var(--t3); }
+/* nút Dừng việc đang chạy */
+.run-stop { align-self: flex-start; gap: 6px; height: 26px; padding: 0 10px; font-size: 12px; }
+.run-stop svg { fill: currentColor; stroke: none; }
+.run-stop:hover { color: var(--err-text); }
+.run-stopping { display: flex; align-items: center; gap: 6px; color: var(--warn-text); }
+.run-stopping .spin { width: 11px; height: 11px; }
 .run-bar { height: 3px; border-radius: 99px; background: var(--line-strong); overflow: hidden; position: relative; }
 .run-bar div { position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: 99px; background: var(--primary); animation: run-slide 1.6s ease-in-out infinite; }
 @keyframes run-slide { 0% { left: -35%; } 100% { left: 100%; } }
@@ -552,6 +558,22 @@ a.chip:hover { background: var(--active); text-decoration: none; }
 .palette { width: min(620px, 92vw); padding: 0; border: 0; border-radius: var(--r-panel); background: var(--raised); color: var(--t1);
   box-shadow: var(--shadow-float); margin-top: 12vh; }
 .palette::backdrop { background: #0000004d; }
+/* hộp xem lại 1 video (mọi trạng thái) */
+.vview { width: min(860px, 94vw); max-height: 90vh; padding: 0; border: 0; border-radius: var(--r-panel); background: var(--raised);
+  color: var(--t1); box-shadow: var(--shadow-float); overflow: auto; }
+.vview::backdrop { background: #00000066; }
+.vv { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 20px; padding: 18px; }
+.vv-media { background: #000; border-radius: var(--r-tile); overflow: hidden; align-self: start; }
+.vv-video { display: block; width: 100%; max-height: 72vh; aspect-ratio: 9 / 16; background: #000; }
+.vv-none { padding: 40px 16px; text-align: center; background: var(--weak); }
+.vv-cap { white-space: pre-wrap; font-size: 13px; line-height: 20px; padding: 10px 12px; border-radius: var(--r-ctl);
+  background: var(--weak); max-height: 180px; overflow: auto; }
+@media (max-width: 700px) { .vv { grid-template-columns: minmax(0, 1fr); } }
+[data-vview] { cursor: pointer; }
+.vv-open { display: inline-flex; align-items: center; gap: 6px; border: 0; padding: 0; background: none; color: inherit;
+  font: inherit; text-align: left; max-width: 100%; }
+.vv-open:hover .trunc { color: var(--primary-text); text-decoration: underline; }
+.vv-open svg { flex: none; width: 14px; height: 14px; fill: currentColor; color: var(--t3); }
 .pal-box { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .pal-box svg { width: 17px; height: 17px; flex: none; fill: none; stroke: var(--t3); stroke-width: 1.6; stroke-linecap: round; }
 .pal-box input { flex: 1; border: 0; box-shadow: none; background: transparent; min-height: 30px; padding: 0; font-size: 15px; }

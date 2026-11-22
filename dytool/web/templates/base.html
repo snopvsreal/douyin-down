@@ -119,6 +119,9 @@
   <div id="pal-list" class="pal-list" role="listbox"></div>
 </dialog>
 
+{# Xem lại 1 video ở mọi trạng thái: phần tử có data-vview="<page_id>:<video_id>" (trang Video, Lịch đăng…) #}
+<dialog class="vview" id="vview" aria-labelledby="vv-title"></dialog>
+
 {# Vùng đọc to cho trình đọc màn hình: chỉ được cập nhật (hx-swap-oob) khi bước đăng nhập đổi, không theo từng giây #}
 <div id="sr-live" class="sr-only" aria-live="polite"></div>
 <script>
@@ -229,6 +232,32 @@
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncBg);
   }
   // Phím tắt: Ctrl+1..7 chuyển trang, Ctrl+K tìm / lệnh nhanh. Chỉ gắn 1 lần (boost chạy lại script này).
+  // Hộp xem lại video: bấm phần tử có data-vview -> lấy /videos/<page>/<id>/view, mở <dialog>. Đóng = dừng phát.
+  if (!window.__dyVview) {
+    window.__dyVview = true;
+    const dlg = () => document.getElementById('vview');
+    const openView = async (key) => {
+      const [pid, vid] = key.split(':'); const d = dlg(); if (!d) return;
+      const r = await fetch(`/videos/${encodeURIComponent(pid)}/${encodeURIComponent(vid)}/view`);
+      if (!r.ok) { window.__dyToast && window.__dyToast(await r.text()); return; }
+      d.innerHTML = await r.text();
+      if (!d.open) d.showModal();
+    };
+    document.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-vview]');
+      const inner = e.target.closest('a[href], button, input, select');      // nút / link khác nằm trong ô thì để nó chạy
+      if (t && (!inner || inner === t || !t.contains(inner))) { e.preventDefault(); openView(t.dataset.vview); return; }
+      const d = dlg();
+      if (d && d.open && (e.target.closest('[data-vv-close]') || e.target === d)) d.close();   // nút × hoặc bấm nền mờ
+    });
+    document.addEventListener('keydown', (e) => {
+      const t = e.target.closest && e.target.closest('[data-vview]');
+      if (t && (e.key === 'Enter' || e.key === ' ') && t === e.target) { e.preventDefault(); openView(t.dataset.vview); }
+    });
+    document.addEventListener('close', (e) => {
+      if (e.target.id === 'vview') { e.target.querySelectorAll('video').forEach(v => v.pause()); e.target.innerHTML = ''; }
+    }, true);
+  }
   if (!window.__dyShell) {
     window.__dyShell = true;
     const pal = () => document.getElementById('palette');

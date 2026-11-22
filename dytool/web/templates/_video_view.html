@@ -1,0 +1,62 @@
+{# Hộp xem lại 1 video (mọi trạng thái): mở từ trang Video, ô Lịch đăng, danh sách lịch. Nạp vào <dialog id="vview"> (base.html) #}
+{% set tt = v.platform == 'tiktok' %}
+{% set cls = {'uploaded':'ok','scheduled':'ok','failed':'err','review':'warn','approved':'info','publish_now':'info','schedule_pending':'info','uploading':'info'}.get(v.status, '') %}
+<div class="vv">
+  <div class="vv-media">
+    {% if edited %}
+      <video class="vv-video" src="/media/edited/p{{ v.page_id }}_{{ v.id }}.mp4" controls preload="metadata" playsinline></video>
+    {% elif raw %}
+      <video class="vv-video" src="/media/raw/{{ v.id }}" controls preload="metadata" playsinline></video>
+      <p class="small muted" style="margin:6px 0 0">Chưa edit xong — đây là video gốc.</p>
+    {% else %}
+      <div class="vv-none small muted">Video chưa tải về, hoặc đã được dọn khỏi máy (tool tự xoá file cũ sau khi đăng).</div>
+    {% endif %}
+  </div>
+  <div class="vv-info">
+    <div class="row" style="gap:8px; align-items:flex-start">
+      <div style="flex:1; min-width:0">
+        <h2 id="vv-title" style="margin:0 0 4px">{{ v.page_name }}{% if tt %} <span class="tag tt">TikTok</span>{% endif %}</h2>
+        <span class="pill {{ cls }}">{{ STATUS_VI.get(v.status, v.status) }}</span>
+      </div>
+      <button type="button" class="btn icon ghost" data-vv-close aria-label="Đóng">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style="fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+    </div>
+
+    <dl class="kv" style="margin-top:12px">
+      {% if v.scheduled_at and v.status in ('scheduled', 'schedule_pending', 'approved', 'uploading') %}
+        <dt>Giờ đăng</dt><dd><b class="num">{{ vnt(v.scheduled_at, '%H:%M') }}</b> {{ vnt(v.scheduled_at, '%d/%m/%Y') }}</dd>
+      {% endif %}
+      {% if v.uploaded_at %}<dt>Đã đăng</dt><dd class="num">{{ vnt(v.uploaded_at, '%H:%M %d/%m/%Y') }}</dd>{% endif %}
+      <dt>Gốc</dt><dd><a href="https://www.douyin.com/video/{{ v.id }}" target="_blank" rel="noopener">Douyin ↗</a>
+        <span class="small muted num">· ❤ {{ '{:,}'.format(v.likes or 0) }} · {{ (v.duration or 0)|round|int }}s</span></dd>
+    </dl>
+
+    {% if v.error %}<div class="notice {{ 'warn' if v.status != 'failed' }}" style="margin:10px 0 0">{{ v.error }}</div>{% endif %}
+
+    <p class="small muted" style="margin:14px 0 4px">Caption</p>
+    <div class="vv-cap">{{ v.caption or v.desc or '—' }}</div>
+
+    <div class="row" style="gap:6px; margin-top:14px; flex-wrap:wrap">
+      {% if v.status == 'review' %}
+        <a class="btn sm primary" href="/review?v={{ v.page_id }}:{{ v.id }}">Mở ở Hộp duyệt</a>
+      {% endif %}
+      {% if v.status == 'scheduled' %}
+        {% if tt %}
+          <a class="btn sm" target="_blank" rel="noopener" href="https://www.tiktok.com/tiktokstudio/content">Xem trong TikTok Studio ↗</a>
+        {% else %}
+          <a class="btn sm" target="_blank" rel="noopener"
+             href="https://business.facebook.com/latest/posts/scheduled_posts?asset_id={{ v.asset_id }}">Xem bài đã lên lịch trên Facebook ↗</a>
+        {% endif %}
+      {% elif v.status == 'uploaded' and v.fb_url %}
+        <a class="btn sm" target="_blank" rel="noopener" href="{{ v.fb_url }}">Xem bài đã đăng ↗</a>
+      {% elif v.status == 'uploaded' and not tt %}
+        <a class="btn sm" target="_blank" rel="noopener"
+           href="https://business.facebook.com/latest/posts/published_posts?asset_id={{ v.asset_id }}">Bài đã đăng trên Facebook ↗</a>
+      {% endif %}
+    </div>
+    {% if v.status == 'scheduled' and not tt %}
+      <p class="hint" style="margin-top:8px">Bài hẹn giờ <b>chưa hiện trên trang Page</b> cho tới đúng giờ đăng — nó nằm trong
+        Meta Business Suite › Nội dung › <b>Đã lên lịch</b>. Muốn đổi giờ hoặc huỷ thì làm ở đó.</p>
+    {% endif %}
+  </div>
+</div>

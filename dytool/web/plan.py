@@ -43,7 +43,7 @@ def today_items(store) -> list[dict]:
         state, cls = {"uploaded": ("Đã đăng", "ok"), "scheduled": ("Đã hẹn giờ", "info"),
                       "schedule_pending": ("Chờ gửi lịch", "warn"), "uploading": ("Đang đăng", "info")}.get(
             r["status"], (r["status"], ""))
-        out.append({"ts": ts, "time": vn_fmt(ts, "%H:%M"), "page_id": r["page_id"], "page": r["page_name"],
+        out.append({"ts": ts, "time": vn_fmt(ts, "%H:%M"), "id": r["id"], "page_id": r["page_id"], "page": r["page_name"],
                     "tt": r["platform"] == "tiktok", "title": (r["caption"] or r["desc"] or r["id"])[:90],
                     "state": state, "cls": cls, "color": cols.get(r["page_id"], PALETTE[0])})
     return sorted(out, key=lambda x: x["ts"] or 0)

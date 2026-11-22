@@ -150,6 +150,9 @@ class Worker:
             from . import progress
             try:
                 did = self._step()
+            except progress.Cancelled:              # Dừng lúc đang quét nguồn
+                self.store.log("Đã dừng việc đang chạy (quét nguồn)")
+                did = False
             except Exception as e:
                 self.store.log(f"Lỗi vòng lặp: {e}", "error")
                 traceback.print_exc()
@@ -442,6 +445,9 @@ class Worker:
                 raise RuntimeError("file tải về không hợp lệ")
             self.store.set_video(row["id"], page["id"], status="downloaded")
         except Exception as e:
+            if self._stopped(e, page, row, "tải"):
+                dest.with_suffix(".part").unlink(missing_ok=True)   # vẫn "Tìm thấy": bật lại thì tải lại từ đầu
+                return
             self.store.set_video(row["id"], page["id"], status="failed", error=f"tải: {e}")
             self.store.log(f"[{page['name']}] Lỗi tải {row['id']}: {e}", "error", page["id"])
 
@@ -473,6 +479,7 @@ class Worker:
             edit(src, dst, self.data / "work", ecfg)
             progress.step("Dịch caption")
             desc_vi = subtitles.translate_desc(row["desc"] or "", ecfg.get("subtitles", {}))
+            progress.check()        # bấm Dừng lúc đang dịch (lỗi dịch có thể bị nuốt) -> không đẩy sang chờ đăng
             # chỉ thay đúng {desc_vi} / {desc}: dấu {} khác trong mẫu (hashtag, emoji…) không được làm lỗi .format()
             # — lỗi lúc này là sau khi đã tốn công lồng tiếng xong
             caption = (s["caption_template"].replace("{desc_vi}", desc_vi)
@@ -487,6 +494,9 @@ class Worker:
                 self.store.log(f"[{page['name']}] {row['id']} đã bị đổi trạng thái trong lúc edit -> bỏ kết quả edit",
                                page_id=page["id"])
         except Exception as e:
+            if self._stopped(e, page, row, "edit"):
+                dst.unlink(missing_ok=True)          # file xuất dở; video vẫn "Đã tải" -> bật lại thì edit lại
+                return
             if "SIGTERM" in str(e) or "SIGKILL" in str(e):
                 # bị ngắt do tắt/khởi động lại tool -> làm lại sau, không tính là lỗi
                 return                                  # vẫn đang "Đã tải"
@@ -605,6 +615,9 @@ class Worker:
             self.store.log(f"[{dst['name']}] Đăng kèm từ {src['name']}: {cp['video_id']} "
                            + (f"hẹn giờ {when:%H:%M %d/%m}" if when else "đã đăng"), page_id=dst["id"])
         except Exception as e:
+            if self._stopped(e, dst, {"id": cp["video_id"]}, "đăng kèm TikTok"):
+                self.store.set_crosspost(*key, status="pending", error=None)   # chưa bấm Post: chưa đăng gì
+                return
             self.store.set_crosspost(*key, status="failed", error=str(e)[:500])
             self.store.log(f"[{dst['name']}] Lỗi đăng kèm {cp['video_id']} từ {src['name']}: {e}", "error", dst["id"])
 
@@ -650,9 +663,25 @@ class Worker:
             self.store.log(f"[{page['name']}] Không xếp được lượt đăng kèm TikTok cho {row['id']}: {e}",
                            "error", page["id"])
 
+    def _stopped(self, e: Exception, page, row, what: str) -> bool:
+        """Bấm Dừng (progress.Cancelled, hoặc chương trình con bị nút Dừng tắt nên báo lỗi khác) -> ghi nhật ký, True."""
+        from . import progress
+        if not (isinstance(e, progress.Cancelled) or progress.cancelled()):
+            return False
+        self.store.log(f"[{page['name']}] Đã dừng {what} {row['id']}", page_id=page["id"])
+        return True
+
     def _upload_failed(self, page, row, e: Exception, where: str) -> None:
         """Đăng lỗi: có thể lỗi xảy ra SAU khi đã bấm Chia sẻ / Post (mạng chậm, không thấy xác nhận) -> không
         đánh "Lỗi" để bấm Thử lại (edit lại + đăng lại = trùng) mà trả về Chờ duyệt kèm lời nhắc kiểm tra."""
+        from . import progress
+        if isinstance(e, progress.Cancelled):
+            # dừng TRƯỚC khi bấm nút đăng / lên lịch (sau đó progress không cho dừng) -> chắc chắn chưa đăng gì
+            self.store.set_video(row["id"], page["id"], status="review", scheduled_at=None,
+                                 error=f"Bạn đã bấm Dừng trước khi đăng — chưa có gì lên {where}. Duyệt lại khi muốn đăng")
+            self.store.log(f"[{page['name']}] Đã dừng đăng {row['id']} (chưa đăng gì) -> trả về chờ duyệt",
+                           page_id=page["id"])
+            return
         self.store.set_video(row["id"], page["id"], status="review", scheduled_at=None,
                              error=f"Đăng {where} chưa xong: {str(e)[:300]} — kiểm tra trên {where} xem bài đã lên "
                                    f"chưa; chưa có thì sửa lỗi rồi duyệt lại")

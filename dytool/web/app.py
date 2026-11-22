@@ -249,6 +249,24 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         from .. import progress
         return render(request, "_runcard.html", task=progress.snapshot())
 
+    @app.post("/worker/cancel", response_class=HTMLResponse)
+    def worker_cancel(request: Request, where: str = ""):
+        """Nút Dừng: dừng việc đang làm + tạm dừng chạy tự động (không thì vòng sau nhặt lại đúng video đó)."""
+        from .. import progress
+        t = progress.snapshot()
+        res = progress.cancel()
+        if res == "late":
+            return PlainTextResponse("Đang bấm đăng / lên lịch trên nền tảng — không dừng giữa chừng được (dừng thì "
+                                     "không biết bài đã lên chưa). Chờ vài giây cho xong rồi tạm dừng chạy tự động.", 400)
+        if res == "ok":
+            if worker.running:
+                worker.stop()
+            store.log(f"Bấm Dừng: {t['title']}{' · ' + t['page'] if t.get('page') else ''} — chạy tự động đã tạm dừng, "
+                      "bật lại thì việc này làm lại từ đầu")
+        if where == "progress":
+            return progress_partial(request)
+        return runcard(request)
+
     @app.post("/worker/toggle", response_class=HTMLResponse)
     def worker_toggle(request: Request):
         worker.stop() if worker.running else worker.start()
@@ -1223,6 +1241,21 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         if not re.fullmatch(r"\d{6,30}", vid) or not (data / "raw" / f"{vid}.mp4").is_file():
             return PlainTextResponse("Không có video gốc", 404)
         return FileResponse(data / "raw" / f"{vid}.mp4", media_type="video/mp4")
+
+    @app.get("/videos/{pid}/{vid}/view", response_class=HTMLResponse)
+    def video_view(request: Request, pid: int, vid: str):
+        """Hộp xem lại 1 video ở mọi trạng thái (trước chỉ Hộp duyệt mới xem được — video tự lên lịch thì không thấy
+        đâu): video đã edit / gốc, caption, giờ hẹn, chỗ xem bài trên Facebook / TikTok."""
+        import re
+        if not re.fullmatch(r"\d{6,30}", vid):
+            return PlainTextResponse("Mã video không hợp lệ", 400)
+        v = store.one("SELECT v.*, p.name page_name, p.asset_id, p.platform, p.profile_id FROM videos v "
+                      "JOIN pages p ON p.id=v.page_id WHERE v.page_id=? AND v.id=?", (pid, vid))
+        if not v:
+            return PlainTextResponse("Không tìm thấy video", 404)
+        edited = (data / "edited" / f"p{pid}_{vid}.mp4").is_file()
+        raw = (data / "raw" / f"{vid}.mp4").is_file()
+        return render(request, "_video_view.html", v=v, edited=edited, raw=raw)
 
     # ---------------- Lịch đăng ----------------
     @app.get("/calendar", response_class=HTMLResponse)

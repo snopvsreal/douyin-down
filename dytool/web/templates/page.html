@@ -51,15 +51,18 @@
       <div class="row" style="flex-wrap:nowrap; margin-top:8px">
         <select name="kind" style="max-width:120px" aria-label="Loại nguồn"
                 hx-get="/partials/kw-translate" hx-trigger="change" hx-include="closest form" hx-vals='{"uid": "{{ uid }}"}'
-                hx-target="#kwp-{{ uid }}" hx-swap="innerHTML">
+                hx-target="#kwp-{{ uid }}" hx-swap="innerHTML" hx-indicator="#kwi-{{ uid }}">
           <option value="keyword" {{ 'selected' if kind == 'keyword' }}>Từ khoá</option>
           <option value="channel" {{ 'selected' if kind == 'channel' }}>Kênh</option></select>
         {# gõ tiếng Việt -> xem trước cụm tiếng Trung sẽ dùng để tìm (keywords.translate); lưu thì lưu cụm tiếng Trung #}
         <input type="text" autocomplete="off" name="value" required value="{{ value }}" aria-label="Từ khoá hoặc link kênh"
                placeholder="Từ khoá tiếng Việt hoặc tiếng Trung (vd: mèo hài hước), hoặc link douyin.com/user/…"
                hx-get="/partials/kw-translate" hx-trigger="input changed delay:800ms" hx-include="closest form"
-               hx-vals='{"uid": "{{ uid }}"}' hx-target="#kwp-{{ uid }}" hx-swap="innerHTML" hx-sync="this:replace">
+               hx-vals='{"uid": "{{ uid }}"}' hx-target="#kwp-{{ uid }}" hx-swap="innerHTML" hx-sync="this:replace"
+               hx-indicator="#kwi-{{ uid }}">
       </div>
+      {# trong lúc chờ AI / dịch máy (vài giây): báo đang dịch, ẩn bản xem trước cũ #}
+      <div id="kwi-{{ uid }}" class="kw-busy busy-ind" role="status"><span class="spin" aria-hidden="true"></span>Đang dịch sang tiếng Trung…</div>
       <div id="kwp-{{ uid }}" class="kw-slot" aria-live="polite"></div>
       {% set mr = prm.get('max_results', 20) %}{% set pt = prm.get('publish_time', 1) %}
       {% set so = prm.get('sort_type', 1) %}{% set ad = prm.get('max_age_days', 3) %}
@@ -83,10 +86,10 @@
         <div class="small muted">{% if src.kind == 'keyword' %}{{ prm.max_results }} video mỗi lần, đăng trong {{ {0:'mọi lúc',1:'1 ngày',7:'1 tuần',180:'6 tháng'}[prm.publish_time] }}, xếp theo {{ {0:'tổng hợp',1:'nhiều like',2:'mới nhất'}[prm.sort_type] }}{% else %}video trong {{ prm.max_age_days }} ngày{% endif %}{% if not src.enabled %} · đang tắt{% endif %}</div>
         <details class="fold" style="margin-top:6px">
           <summary class="small" style="font-weight:500">Sửa</summary>
-          <form method="post" action="/sources/{{ src.id }}/update">
+          <form method="post" action="/sources/{{ src.id }}/update" hx-disabled-elt="find button.busy-btn">
             {{ source_fields(src.kind, src.value, prm, src.id) }}
             <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if src.enabled }}> Đang dùng nguồn này</label>
-            <button class="btn primary sm">Lưu nguồn</button>
+            <button class="btn primary sm busy-btn"><span class="lbl">Lưu nguồn</span><span class="busy"><span class="spin" aria-hidden="true"></span>Đang dịch &amp; lưu…</span></button>
           </form>
         </details>
       </div>
@@ -100,9 +103,9 @@
 
     <details class="fold add-src" {{ 'open' if not sources }}>
       <summary>Thêm nguồn</summary>
-      <form method="post" action="/pages/{{ page.id }}/sources">
+      <form method="post" action="/pages/{{ page.id }}/sources" hx-disabled-elt="find button.busy-btn">
         {{ source_fields() }}
-        <button class="btn primary" style="margin-top:12px">Thêm nguồn</button>
+        <button class="btn primary busy-btn" style="margin-top:12px"><span class="lbl">Thêm nguồn</span><span class="busy"><span class="spin" aria-hidden="true"></span>Đang dịch &amp; thêm nguồn…</span></button>
       </form>
     </details>
   </section>

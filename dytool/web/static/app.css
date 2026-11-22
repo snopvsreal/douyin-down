@@ -708,3 +708,17 @@ a.chip:hover { background: var(--active); text-decoration: none; }
 .ai-card b { font-weight: 600; }
 .ai-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 #ai-box .notice { margin-bottom: 10px; }
+
+/* đang xử lý: vòng xoay + chữ (dịch từ khoá có thể mất vài giây) */
+.spin { width: 13px; height: 13px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent;
+  display: inline-block; flex: none; animation: spin .7s linear infinite; vertical-align: -2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.busy-ind { display: none; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 12px; border-radius: var(--r-ctl);
+  background: var(--weak); color: var(--t2); font-size: 13px; }
+.busy-ind.htmx-request { display: flex; }
+.busy-ind.htmx-request + .kw-slot { display: none; }
+.busy-btn .busy { display: none; align-items: center; gap: 8px; }
+form.htmx-request .busy-btn .lbl { display: none; }
+form.htmx-request .busy-btn .busy { display: inline-flex; }
+form.htmx-request .busy-btn { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2s; } }

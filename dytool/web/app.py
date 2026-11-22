@@ -26,6 +26,10 @@ STATUS_VI = {
 }
 
 
+# hiện ở Hộp duyệt: chờ duyệt + đã duyệt nhưng CHƯA gửi lên nền tảng (đổi giờ / giữ lại / bỏ được)
+REVIEWABLE = "('review', 'approved', 'publish_now', 'schedule_pending')"
+QUEUED = ("approved", "publish_now", "schedule_pending")
+
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
@@ -293,7 +297,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             for v in store.q("SELECT v.id, v.page_id, v.desc, v.caption, v.status, p.name page_name FROM videos v "
                              "JOIN pages p ON p.id=v.page_id WHERE v.id LIKE ? OR v.desc LIKE ? OR v.caption LIKE ? "
                              "ORDER BY v.updated_at DESC LIMIT 8", (like, like, like)):
-                href = f"/review?v={v['page_id']}:{v['id']}" if v["status"] == "review" else f"/queue?q={v['id']}"
+                href = (f"/review?v={v['page_id']}:{v['id']}" if v["status"] in ("review",) + QUEUED
+                        else f"/queue?q={v['id']}")
                 items.append({"label": (v["caption"] or v["desc"] or v["id"])[:80], "href": href,
                               "kind": STATUS_VI.get(v["status"], v["status"]), "sub": v["page_name"]})
         return render(request, "_palette.html", items=items[:20], q=q)
@@ -1164,8 +1169,11 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     @app.get("/review", response_class=HTMLResponse)
     def review(request: Request, page: int | None = None, v: str = "", msg: str = ""):
         from . import plan
-        sql = ("SELECT v.*, p.name page_name, p.platform FROM videos v JOIN pages p ON p.id=v.page_id "
-               "WHERE v.status='review'" + (" AND v.page_id=?" if page else "") + " ORDER BY v.likes DESC, v.updated_at DESC")
+        # chờ duyệt + video ĐÃ DUYỆT (kênh bật "Tự đăng" duyệt luôn) nhưng chưa gửi lên nền tảng: vẫn xem / đổi giờ /
+        # giữ lại / bỏ được (trước không hiện ở đâu -> "chờ đăng mà Hộp duyệt không thấy")
+        sql = ("SELECT v.*, p.name page_name, p.platform, p.enabled page_enabled FROM videos v JOIN pages p ON p.id=v.page_id "
+               f"WHERE v.status IN {REVIEWABLE}" + (" AND v.page_id=?" if page else "") +
+               " ORDER BY v.status!='review', v.likes DESC, v.updated_at DESC")
         vids = store.q(sql, (page,) if page else ())
         keys = [f"{x['page_id']}:{x['id']}" for x in vids]
         i = keys.index(v) if v in keys else 0
@@ -1180,7 +1188,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             if int(s.get("tiktok_mirror") or 0):
                 mirror = store.one("SELECT name FROM pages WHERE id=?", (int(s["tiktok_mirror"]),))
         by_page = store.q("SELECT p.id, p.name, COUNT(*) n FROM videos v JOIN pages p ON p.id=v.page_id "
-                          "WHERE v.status='review' GROUP BY p.id ORDER BY n DESC")
+                          f"WHERE v.status IN {REVIEWABLE} GROUP BY p.id ORDER BY n DESC")
         nxt = keys[i + 1] if cur and i + 1 < len(keys) else (keys[i - 1] if cur and i > 0 else "")
         return render(request, "review.html", videos=vids, cur=cur, idx=i, keys=keys, cur_page=page, by_page=by_page,
                       slot=slot, slot_label=slot_label, suggest=suggest_slot(cur["page_id"]) if cur else "",
@@ -1195,10 +1203,12 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         import datetime as dt
         from urllib.parse import urlencode
         from ..store import vn_ts
-        if act == "reject":
-            mode = "reject"
+        if act in ("reject", "hold"):
+            mode = act
         fields = {"caption": caption} if caption is not None else {}
         msg = ""
+        # video đã tự duyệt nhưng chưa gửi lên nền tảng cũng đổi được; worker đang đăng ('uploading') thì không
+        allowed = ("review",) + QUEUED
         if mode in ("slot", "at"):
             if mode == "slot":
                 pg = store.one("SELECT * FROM pages WHERE id=?", (pid,))
@@ -1214,22 +1224,24 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                     return PlainTextResponse("Chưa chọn đủ ngày và giờ đăng", 400)
                 if ts < time.time() + 20 * 60:
                     return PlainTextResponse("Giờ đăng phải sau ít nhất 20 phút nữa", 400)
-            ok = store.set_video_if(vid, pid, ("review",), status="schedule_pending", scheduled_at=ts, error=None, **fields)
+            ok = store.set_video_if(vid, pid, allowed, status="schedule_pending", scheduled_at=ts, error=None, **fields)
             msg = f"Đã lên lịch {vn_fmt(ts)}"
             if ok:
                 store.x("DELETE FROM crossposts WHERE video_id=? AND src_page_id=? AND status='pending'", (vid, pid))
                 store.log(f"Duyệt + lên lịch {vid} lúc {vn_fmt(ts)}", page_id=pid)
         else:
-            new = {"approve": "approved", "now": "publish_now", "reject": "rejected"}.get(mode)
+            new = {"approve": "approved", "now": "publish_now", "reject": "rejected", "hold": "review"}.get(mode)
             if not new:
                 return PlainTextResponse("Thao tác không hợp lệ", 400)
-            ok = store.set_video_if(vid, pid, ("review",), status=new, error=None, **fields)
+            ok = store.set_video_if(vid, pid, allowed, status=new, scheduled_at=None, error=None, **fields)
             msg = {"approved": "Đã duyệt — đăng theo cài đặt kênh", "publish_now": "Đã duyệt — đăng ngay",
-                   "rejected": "Đã bỏ video"}[new]
-            if ok and new == "rejected":
+                   "rejected": "Đã bỏ video", "review": "Đã giữ lại — video chờ bạn duyệt, chưa đăng"}[new]
+            if ok and new == "review":
+                nxt = f"{pid}:{vid}"         # ở lại video này để duyệt
+            if ok and new in ("rejected", "review"):
                 store.x("DELETE FROM crossposts WHERE video_id=? AND src_page_id=? AND status='pending'", (vid, pid))
         if not ok:
-            msg = "Video không còn ở mục chờ duyệt (đã được xử lý)"
+            msg = "Video không còn ở Hộp duyệt (tool đang / đã đăng, hoặc đã được xử lý)"
         q = {k: v for k, v in (("page", page), ("v", nxt), ("msg", msg)) if v}
         return RedirectResponse("/review?" + urlencode(q), 303)
 

@@ -39,6 +39,8 @@
     <div class="row" style="gap:6px; margin-top:14px; flex-wrap:wrap">
       {% if v.status == 'review' %}
         <a class="btn sm primary" href="/review?v={{ v.page_id }}:{{ v.id }}">Mở ở Hộp duyệt</a>
+      {% elif v.status in ('approved', 'publish_now', 'schedule_pending') %}
+        <a class="btn sm primary" href="/review?v={{ v.page_id }}:{{ v.id }}">Đổi giờ / giữ lại ở Hộp duyệt</a>
       {% endif %}
       {% if v.status == 'scheduled' %}
         {% if tt %}

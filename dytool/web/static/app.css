@@ -559,6 +559,10 @@ a.chip:hover { background: var(--active); text-decoration: none; }
   box-shadow: var(--shadow-float); margin-top: 12vh; }
 .palette::backdrop { background: #0000004d; }
 /* hộp xem lại 1 video (mọi trạng thái) */
+/* Hộp duyệt: video đã tự duyệt nhưng chưa gửi lên nền tảng */
+.rv-plan { padding: 10px 12px; border-radius: var(--r-tile); background: var(--primary-tint); color: var(--t1);
+  font-size: 13px; line-height: 19px; }
+.rv-auto { align-self: flex-start; margin-top: 4px; font-size: 11px; }
 .vview { width: min(860px, 94vw); max-height: 90vh; padding: 0; border: 0; border-radius: var(--r-panel); background: var(--raised);
   color: var(--t1); box-shadow: var(--shadow-float); overflow: auto; }
 .vview::backdrop { background: #00000066; }

@@ -26,7 +26,8 @@
     <a class="rv-item {{ 'on' if k == key }}" href="/review?v={{ k }}{{ qs }}" {{ 'aria-current=true' if k == key }}>
       <span class="rv-thumb" style="box-shadow: inset 3px 0 0 {{ colors.get(v.page_id, '#535efd') }}"><video src="/media/edited/p{{ v.page_id }}_{{ v.id }}.mp4#t=1" preload="none" muted></video></span>
       <span class="rv-meta"><b class="trunc">{{ v.caption or v.desc or v.id }}</b>
-        <span class="small muted">{{ v.page_name }} · {{ (v.duration or 0)|round|int }}s · ♥ {{ '{:,}'.format(v.likes or 0) }}</span></span>
+        <span class="small muted">{{ v.page_name }} · {{ (v.duration or 0)|round|int }}s · ♥ {{ '{:,}'.format(v.likes or 0) }}</span>
+        {% if v.status != 'review' %}<span class="pill info rv-auto">Tự duyệt · {% if v.status == 'schedule_pending' and v.scheduled_at %}đăng {{ vnt(v.scheduled_at, '%H:%M %d/%m') }}{% elif v.status == 'publish_now' %}đăng ngay{% else %}chờ đăng{% endif %}</span>{% endif %}</span>
     </a>
     {% endfor %}
   </nav>
@@ -59,6 +60,16 @@
         <a href="/pages/{{ cur.page_id }}"><b>{{ cur.page_name }}</b></a>
         <span class="small muted">{{ 'TikTok' if cur.platform == 'tiktok' else 'Facebook' }}{% if mirror %} · đăng kèm {{ mirror.name }}{% endif %}</span></div>
     </div>
+    {% if cur.status != 'review' %}
+    <div class="rv-plan" role="status">
+      <b>Đã tự duyệt — chưa gửi lên {{ 'TikTok' if cur.platform == 'tiktok' else 'Facebook' }}.</b>
+      {% if cur.status == 'schedule_pending' and cur.scheduled_at %}Sẽ gửi lịch đăng <b class="num">{{ vnt(cur.scheduled_at, '%H:%M %d/%m') }}</b>.
+      {% elif cur.status == 'publish_now' %}Sẽ đăng ngay khi tool rảnh.
+      {% else %}Sẽ đăng khi kênh còn lượt trong ngày{{ ' (kênh đang tắt nên chưa đăng)' if not cur.page_enabled }}.{% endif %}
+      Kênh này bật <a href="/pages/{{ cur.page_id }}#lich">Tự đăng, không duyệt</a> nên video edit xong được duyệt luôn.
+      Đổi giờ bên dưới, <b>Giữ lại</b> để tự duyệt sau, hoặc <b>Bỏ</b>.
+    </div>
+    {% endif %}
     <div>
       <label for="rv-cap" style="margin-top:0">Caption</label>
       <textarea id="rv-cap" name="caption" rows="5" autocomplete="off">{{ cur.caption or '' }}</textarea>
@@ -78,9 +89,12 @@
         <span><b>Chọn giờ…</b><input type="datetime-local" name="when" value="{{ suggest }}" aria-label="Giờ đăng" style="margin-top:6px"></span></label>
     </fieldset>
     <div class="rv-actions">
-      <button class="btn primary lg" type="submit" name="go" value="1">Duyệt <kbd>A</kbd></button>
+      <button class="btn primary lg" type="submit" name="go" value="1">{{ 'Đổi giờ đăng' if cur.status != 'review' else 'Duyệt' }} <kbd>A</kbd></button>
       <div class="row" style="flex-wrap:nowrap">
-        {% if nxt %}<a class="btn" style="flex:1" href="/review?v={{ nxt }}{{ qs }}" id="rv-skip">Để sau <kbd>S</kbd></a>{% endif %}
+        {% if cur.status != 'review' %}
+          <button class="btn" style="flex:1" type="button" hx-post="/review/act" hx-vals='{"act": "hold"}' hx-target="body" hx-swap="innerHTML"
+                  title="Đưa về Chờ duyệt: tool không đăng cho tới khi bạn bấm Duyệt">Giữ lại</button>
+        {% elif nxt %}<a class="btn" style="flex:1" href="/review?v={{ nxt }}{{ qs }}" id="rv-skip">Để sau <kbd>S</kbd></a>{% endif %}
         {# yêu cầu riêng (không phải submit của form): hx-confirm chỉ chạy trên phần tử tự gửi yêu cầu #}
         <button class="btn danger" style="flex:1" type="button" id="rv-reject" hx-post="/review/act" hx-vals='{"act": "reject"}'
                 hx-target="body" hx-swap="innerHTML"

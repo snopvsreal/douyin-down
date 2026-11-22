@@ -35,11 +35,13 @@
     {% endcall %}
     {{ nav('/accounts', 'Tài khoản & kênh', p.startswith('/accounts') or p.startswith('/pages'), 4,
            '<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5c.8-3.1 3-4.8 5.5-4.8s4.7 1.7 5.5 4.8"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15.9 14.8c2 .3 3.5 1.7 4.1 4"/>') }}
+    {{ nav('/browsers', 'Hồ sơ trình duyệt', p.startswith('/browsers'), 5,
+           '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M3 9h18"/><circle cx="6.2" cy="6.8" r=".6"/><circle cx="8.4" cy="6.8" r=".6"/><circle cx="12" cy="14.3" r="2.6"/>') }}
     {# Cài đặt nằm cuối menu như app Windows #}
-    {{ nav('/settings', 'Cài đặt', p.startswith('/settings'), 5,
+    {{ nav('/settings', 'Cài đặt', p.startswith('/settings'), 6,
            '<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/>',
            'nav-bottom') }}
-    <p class="nav-hint">Chuyển trang nhanh: <kbd>Ctrl</kbd> + <kbd>1</kbd>–<kbd>5</kbd></p>
+    <p class="nav-hint">Chuyển trang nhanh: <kbd>Ctrl</kbd> + <kbd>1</kbd>–<kbd>6</kbd></p>
   </nav>
 
   <div class="content" id="main" tabindex="-1"><main>
@@ -60,7 +62,7 @@
 {# Vùng đọc to cho trình đọc màn hình: chỉ được cập nhật (hx-swap-oob) khi bước đăng nhập đổi, không theo từng giây #}
 <div id="sr-live" class="sr-only" aria-live="polite"></div>
 <script>
-  // Phím tắt như app: Ctrl+1..4 chuyển trang; sau mỗi lần chuyển trang (boost) cuộn nội dung về đầu.
+  // Phím tắt như app: Ctrl+1..6 chuyển trang; sau mỗi lần chuyển trang (boost) cuộn nội dung về đầu.
   // Chỉ gắn 1 lần: khi chuyển trang kiểu boost, htmx chạy lại script này.
   if (!window.__dyShell) {
     window.__dyShell = true;

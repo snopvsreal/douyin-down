@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -397,6 +397,93 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     _th.Thread(target=_read_accel, daemon=True).start()
 
     # ---------------- Trình duyệt nhúng (SDK ShardX) ----------------
+    # ---------------- Hồ sơ trình duyệt (trang quản lý) ----------------
+    def _profile_usage() -> dict[str, list[str]]:
+        """id hồ sơ -> tài khoản / Douyin đang dùng nó."""
+        from .. import browsers
+        use: dict[str, list[str]] = {}
+        for a in store.q("SELECT * FROM accounts ORDER BY id"):
+            c = browsers.get_choice(store.account_dir(data, a["id"]))
+            if c:
+                use.setdefault(c["profile_id"], []).append(
+                    f"{'TikTok' if a['platform'] == 'tiktok' else 'Facebook'} · {a['name']}")
+        c = browsers.get_choice(data)
+        if c:
+            use.setdefault(c["profile_id"], []).append("Đăng nhập Douyin")
+        return use
+
+    @app.get("/browsers", response_class=HTMLResponse)
+    def browsers_page(request: Request):
+        from .. import browsers
+        profiles = browsers.profile_details()
+        try:
+            engine = json.loads((browsers.SDK_DIR / "manifest.json").read_text("utf-8")).get("installed_chromium_version")
+        except (OSError, ValueError):
+            engine = None
+        return render(request, "browsers.html", profiles=profiles, usage=_profile_usage(), engine=engine,
+                      engine_ready=browsers.engine_installed(), total_mb=round(sum(p["size_mb"] for p in profiles), 1),
+                      sdk_dir=str(browsers.SDK_DIR))
+
+    def _browser_op(fn, ok_msg: str = ""):
+        from .. import browsers
+        try:
+            fn()
+        except browsers.BrowserError as e:
+            return PlainTextResponse(str(e), 400)
+        if ok_msg:
+            store.log(ok_msg)
+        return RedirectResponse("/browsers", 303)
+
+    def _profile_name(pid: str) -> str:
+        from .. import browsers
+        return next((p["name"] for p in browsers.list_profiles() if p["id"] == pid), pid)
+
+    @app.post("/browsers/new")
+    def browsers_new(name: str = Form(""), lang: str = Form("auto")):
+        from .. import browsers
+        name = " ".join(name.split())[:80] or "Hồ sơ mới"
+        return _browser_op(lambda: browsers.create_profile(name, english=lang == "en"),
+                           f"Đã tạo hồ sơ trình duyệt '{name}'")
+
+    @app.post("/browsers/{pid}/open")
+    def browsers_open(pid: str):
+        from .. import browsers
+        return _browser_op(lambda: browsers.open_window(pid))
+
+    @app.post("/browsers/{pid}/close")
+    def browsers_close(pid: str):
+        from .. import browsers
+        return _browser_op(lambda: browsers.close_window(pid))
+
+    @app.post("/browsers/{pid}/rename")
+    def browsers_rename(pid: str, name: str = Form("")):
+        from .. import browsers
+
+        def run():
+            browsers.rename_profile(pid, name)
+            new = " ".join(name.split())[:80]
+            # tên hiện ở trang Tài khoản / Cài đặt đọc từ browser.json -> cập nhật theo
+            for target in [store.account_dir(data, a["id"]) for a in store.q("SELECT id FROM accounts")] + [data]:
+                c = browsers.get_choice(target)
+                if c and c["profile_id"] == pid:
+                    browsers.set_choice(target, pid, new)
+        return _browser_op(run)
+
+    @app.post("/browsers/{pid}/language")
+    def browsers_language(pid: str, lang: str = Form("auto")):
+        from .. import browsers
+        return _browser_op(lambda: browsers.set_language(pid, lang == "en"),
+                           f"Hồ sơ '{_profile_name(pid)}': ngôn ngữ {'tiếng Anh' if lang == 'en' else 'theo IP'} (áp dụng lần mở sau)")
+
+    @app.post("/browsers/{pid}/delete")
+    def browsers_delete(pid: str):
+        from .. import browsers
+        used = _profile_usage().get(pid)
+        if used:
+            return PlainTextResponse(f"Hồ sơ đang dùng cho {', '.join(used)} — đổi sang hồ sơ khác trước rồi xoá", 400)
+        name = _profile_name(pid)
+        return _browser_op(lambda: browsers.delete_profile(pid), f"Đã xoá hồ sơ trình duyệt '{name}'")
+
     def _auto_profile(target: Path, name: str, who: str, quiet: bool = False, english: bool = False) -> bool:
         """Chưa gắn hồ sơ -> tự tạo hồ sơ trình duyệt mới và gắn luôn (người dùng không phải liên kết tay)."""
         from .. import browsers

@@ -14,7 +14,6 @@ Hồ sơ cho đăng nhập Douyin: data/browser.json
 """
 
 import contextlib
-import io
 import json
 import threading
 from pathlib import Path
@@ -35,12 +34,25 @@ _sdk = None
 _sdk_lock = threading.Lock()
 
 
+_stdout_fixed = False
+
+
 @contextlib.contextmanager
 def _quiet():
-    """SDK in tiến trình ra stdout (có ký tự '→'): log ghi theo bảng mã cp1252 / pythonw không có stdout -> lỗi.
-    Gom vào bộ nhớ, bỏ đi."""
-    with contextlib.redirect_stdout(io.StringIO()):
-        yield
+    """SDK in tiến trình ra stdout (có ký tự '→'): stdout ghi file log theo bảng mã cp1252 -> UnicodeEncodeError.
+    Chuyển stdout / stderr sang UTF-8 (ký tự lạ thì thay thế) 1 lần. KHÔNG dùng contextlib.redirect_stdout: nó đổi
+    sys.stdout của CẢ tiến trình (không theo luồng) -> luồng tải nhân chạy nền nuốt mất log của luồng khác, 2 lần gọi
+    chồng nhau có thể để stdout kẹt ở bộ nhớ. pythonw: stdout = None -> print không làm gì, không lỗi."""
+    global _stdout_fixed
+    if not _stdout_fixed:
+        import sys
+        for s in (sys.stdout, sys.stderr):
+            try:
+                s.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+        _stdout_fixed = True
+    yield
 
 
 def sdk():
@@ -276,6 +288,116 @@ def ensure_profile(acc_dir: Path, name: str, english: bool = False) -> tuple[dic
     c = create_profile(name, english=english)
     set_choice(acc_dir, c["profile_id"], c["profile_name"])
     return c, True
+
+
+# ---------------- quản lý hồ sơ (trang Hồ sơ trình duyệt) ----------------
+
+_opened: dict = {}            # hồ sơ mở bằng nút "Mở" trên trang quản lý: id -> BrowserSession (để nút Đóng tắt được)
+
+
+def _profile_dir(pid: str) -> Path:
+    if not _valid_id(pid) or not (PROFILES_DIR / pid / "profile.json").exists():
+        raise BrowserError("Không có hồ sơ này")
+    return PROFILES_DIR / pid
+
+
+def _dir_size(d: Path) -> int:
+    import os
+    total = 0
+    for root, _dirs, files in os.walk(d):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
+
+
+def profile_details() -> list[dict]:
+    """Mọi hồ sơ kèm thông tin để hiện trên trang quản lý (chỉ đọc file)."""
+    import re
+    out = []
+    for p in list_profiles():
+        d = PROFILES_DIR / p["id"]
+        try:
+            cfg = json.loads((d / "profile.json").read_text("utf-8"))
+        except (OSError, ValueError):
+            cfg = {}
+        nav, scr, gl = cfg.get("navigator") or {}, cfg.get("screen") or {}, cfg.get("webgl") or {}
+        # "ANGLE (NVIDIA, NVIDIA Quadro P2000 (0x00001C30) Direct3D11 …)" -> "NVIDIA Quadro P2000"
+        m = re.match(r"ANGLE \([^,]*, ([^,(]+)", str(gl.get("renderer") or ""))
+        gpu = (m.group(1) if m else str(gl.get("renderer") or "")).strip()
+        lang = nav.get("language") or ""
+        s = _opened.get(p["id"])
+        if s is not None and s.process.poll() is not None:     # người dùng tự đóng cửa sổ
+            _opened.pop(p["id"], None)
+            s = None
+        out.append({**p, "gpu": gpu, "screen": f"{scr.get('width', '?')}×{scr.get('height', '?')}",
+                    "cores": nav.get("hardware_concurrency"), "ram": nav.get("device_memory"),
+                    "os": nav.get("platform") or "", "lang": lang, "english": lang.startswith("en"),
+                    "template": cfg.get("name") or "", "created": int((d / "profile.json").stat().st_mtime)
+                    if (d / "profile.json").exists() else 0,
+                    "size_mb": round(_dir_size(d) / 1e6, 1), "opened_here": s is not None})
+    return out
+
+
+def open_window(pid: str) -> None:
+    """Mở cửa sổ hồ sơ để người dùng tự xem / đăng nhập / chỉnh trang (không gắn Playwright). Đang mở rồi -> thôi."""
+    d = _profile_dir(pid)
+    if _running_cdp(d):
+        return
+    if not engine_installed():
+        raise BrowserError("Nhân trình duyệt đang tải — đợi tải xong rồi mở")
+    s = sdk()
+    try:
+        with _quiet():
+            _opened[pid] = s.launch(s.open_profile(pid), cdp=True, headless=False)
+    except Exception as e:
+        raise BrowserError(f"Không mở được hồ sơ: {e}") from e
+
+
+def close_window(pid: str) -> None:
+    """Đóng hồ sơ như ShardBrowser đóng (CDP Browser.close -> lưu cookie rồi thoát)."""
+    d = _profile_dir(pid)
+    s = _opened.pop(pid, None)
+    if s is not None:
+        s.stop()
+        return
+    ws = _running_cdp(d)
+    if ws:
+        from shardx.browser import _close_over_cdp
+        _close_over_cdp(ws)
+
+
+def rename_profile(pid: str, name: str) -> None:
+    name = " ".join(name.split())[:80]
+    if not name:
+        raise BrowserError("Tên hồ sơ trống")
+    (_profile_dir(pid) / META).write_text(json.dumps({"name": name}, ensure_ascii=False), "utf-8")
+
+
+def set_language(pid: str, english: bool) -> None:
+    """Ngôn ngữ giao diện: theo IP (như tạo mới) hoặc tiếng Anh (hồ sơ TikTok). Áp dụng từ lần mở sau."""
+    _profile_dir(pid)
+    s = sdk()
+    p = s.open_profile(pid)
+    nav = p.config.setdefault("navigator", {})
+    if english:
+        nav.update(language="en-US", accept_language="en-US,en;q=0.9", languages=["en-US", "en"])
+        p.config["icu_locale"] = "en-US"
+    else:
+        nav["language"] = "auto"
+    with _quiet():
+        s.save_profile(p)
+
+
+def delete_profile(pid: str) -> None:
+    """Xoá hẳn hồ sơ (dấu vân tay + cookie đăng nhập). Nơi gọi phải chặn hồ sơ đang gắn với tài khoản."""
+    import shutil
+    d = _profile_dir(pid)
+    if _running_cdp(d):
+        raise BrowserError("Hồ sơ đang mở — đóng trước rồi xoá")
+    shutil.rmtree(d)
 
 
 # ---------------- mở hồ sơ ----------------

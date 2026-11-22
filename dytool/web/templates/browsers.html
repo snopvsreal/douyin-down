@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Hồ sơ trình duyệt{% endblock %}
+{% block body %}
+<div class="head">
+  <div><h1>Hồ sơ trình duyệt</h1>
+    <p class="sub">Mỗi hồ sơ là 1 trình duyệt riêng: dấu vân tay riêng (máy, card đồ hoạ, màn hình…) và cookie đăng nhập
+      riêng. dytool tự tạo hồ sơ khi bấm Đăng nhập ở tài khoản; ở đây để xem, mở tay, đổi tên, đổi ngôn ngữ hoặc xoá.</p></div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <div class="row" style="gap:16px; flex-wrap:wrap">
+    <div>
+      {% if engine_ready %}<span class="pill ok">Nhân sẵn sàng</span>{% else %}<span class="pill warn">Đang tải nhân trình duyệt…</span>{% endif %}
+      <span class="small muted">{% if engine %}ShardX {{ engine }} · {% endif %}{{ profiles|length }} hồ sơ · {{ total_mb }} MB</span>
+    </div>
+    <div class="spacer"></div>
+    <form method="post" action="/browsers/new" class="row" style="gap:8px; flex-wrap:wrap" hx-disabled-elt="find button">
+      <label for="np-name" class="sr-only">Tên hồ sơ mới</label>
+      <input type="text" id="np-name" name="name" placeholder="Tên hồ sơ mới" autocomplete="off" maxlength="80" style="width:200px; max-width:100%">
+      <label for="np-lang" class="sr-only">Ngôn ngữ giao diện</label>
+      <select id="np-lang" name="lang" style="width:auto">
+        <option value="auto">Ngôn ngữ theo IP</option>
+        <option value="en">Tiếng Anh (TikTok)</option>
+      </select>
+      <button class="btn primary">Tạo hồ sơ</button>
+    </form>
+  </div>
+  <p class="hint" style="margin:8px 0 0">Lưu ở <code>{{ sdk_dir }}</code>. Hồ sơ mới chưa đăng nhập gì — gắn vào tài khoản ở
+    <a href="/accounts">Tài khoản & kênh</a> (Hồ sơ trình duyệt › Đổi) rồi bấm Đăng nhập.</p>
+</div>
+
+{% if not profiles %}
+  <p class="empty">Chưa có hồ sơ nào. Bấm <b>Đăng nhập</b> ở <a href="/accounts">Tài khoản & kênh</a> — dytool tự tạo hồ sơ cho tài khoản đó.</p>
+{% endif %}
+
+<div class="grid g2">
+{% for p in profiles %}
+  {% set used = usage.get(p.id, []) %}
+  <div class="card acc">
+    <div class="row">
+      <h3 class="trunc" title="{{ p.name }}">{{ p.name }}</h3>
+      {% if p.running %}<span class="pill ok">Đang mở</span>{% endif %}
+      <div class="spacer"></div>
+      <div class="actions">
+        {% if p.running %}
+          <form method="post" action="/browsers/{{ p.id }}/close" hx-disabled-elt="find button"
+                {% if not p.opened_here %}hx-confirm="Hồ sơ này đang được dytool dùng (đăng nhập hoặc đăng bài). Đóng lúc này có thể làm việc đó dừng giữa chừng. Vẫn đóng?"{% endif %}>
+            <button class="btn sm">Đóng</button></form>
+        {% else %}
+          <form method="post" action="/browsers/{{ p.id }}/open" hx-disabled-elt="find button">
+            <button class="btn sm" {{ 'disabled' if not engine_ready }} aria-label="Mở cửa sổ hồ sơ {{ p.name }}">Mở</button></form>
+        {% endif %}
+        <form method="post" action="/browsers/{{ p.id }}/delete"
+              hx-confirm="Xoá hẳn hồ sơ {{ p.name }}? Mất dấu vân tay và mọi cookie đăng nhập trong hồ sơ ({{ p.size_mb }} MB), không lấy lại được.">
+          <button class="btn sm ghost danger" {{ 'disabled' if used or p.running }}
+                  title="{{ 'Đang dùng cho tài khoản — đổi sang hồ sơ khác trước' if used else ('Đóng hồ sơ trước' if p.running else 'Xoá hồ sơ') }}"
+                  aria-label="Xoá hồ sơ {{ p.name }}">Xoá</button></form>
+      </div>
+    </div>
+
+    <p class="small" style="margin:6px 0 0">
+      {% if used %}Dùng cho: {% for u in used %}<span class="tag{{ ' tt' if u.startswith('TikTok') }}">{{ u }}</span> {% endfor %}
+      {% else %}<span class="muted">Chưa gắn với tài khoản nào</span>{% endif %}</p>
+
+    <table class="small" style="margin-top:8px">
+      <tr><td class="muted">Máy giả lập</td><td>{{ p.os }} · {{ p.cores }} nhân · {{ p.ram }} GB RAM</td></tr>
+      <tr><td class="muted">Card đồ hoạ</td><td class="trunc" title="{{ p.gpu }}">{{ p.gpu or '—' }}</td></tr>
+      <tr><td class="muted">Màn hình mẫu</td><td>{{ p.screen }} <span class="muted">(khi mở dùng màn hình thật)</span></td></tr>
+      <tr><td class="muted">Ngôn ngữ · giờ</td><td>{{ 'Tiếng Anh' if p.english else ('Theo IP' if p.lang == 'auto' else p.lang) }} · múi giờ theo IP</td></tr>
+      <tr><td class="muted">Dung lượng</td><td>{{ p.size_mb }} MB · tạo {{ vnt(p.created, '%d/%m/%Y') }}</td></tr>
+    </table>
+
+    <details class="small" style="margin-top:10px">
+      <summary class="muted" style="cursor:pointer">Đổi tên · ngôn ngữ</summary>
+      <div class="row" style="margin-top:8px; gap:8px; flex-wrap:wrap">
+        <form method="post" action="/browsers/{{ p.id }}/rename" class="row" style="gap:6px; flex-wrap:nowrap">
+          <label for="rn-{{ p.id }}" class="sr-only">Tên mới</label>
+          <input type="text" id="rn-{{ p.id }}" name="name" value="{{ p.name }}" maxlength="80" required style="width:200px; max-width:100%">
+          <button class="btn sm">Đổi tên</button></form>
+        <form method="post" action="/browsers/{{ p.id }}/language" class="row" style="gap:6px; flex-wrap:nowrap">
+          <label for="lg-{{ p.id }}" class="sr-only">Ngôn ngữ giao diện</label>
+          <select id="lg-{{ p.id }}" name="lang" style="width:auto; min-height:28px; padding:2px 8px; font-size:13px">
+            <option value="auto" {{ 'selected' if not p.english }}>Theo IP</option>
+            <option value="en" {{ 'selected' if p.english }}>Tiếng Anh (TikTok)</option>
+          </select>
+          <button class="btn sm">Lưu</button></form>
+      </div>
+      <p class="hint">Hồ sơ TikTok nên để tiếng Anh: dytool bấm nút trên TikTok theo chữ tiếng Anh. Đổi ngôn ngữ áp dụng từ lần mở sau.</p>
+    </details>
+  </div>
+{% endfor %}
+</div>
+{% endblock %}

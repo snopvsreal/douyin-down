@@ -195,6 +195,12 @@ def install_engine_background() -> None:
             install_engine()
         except BrowserError as e:
             print(e, flush=True)
+            return
+        try:                          # đọc sẵn 220 mẫu dấu vân tay -> lần đầu mở trang chi tiết hồ sơ không chờ ~0.5 s
+            from . import browser_mgr
+            browser_mgr.templates()
+        except Exception:
+            pass
     threading.Thread(target=run, daemon=True, name="shardx-install").start()
 
 
@@ -463,11 +469,36 @@ def _dir_size(d: Path) -> int:
     return total
 
 
-def profile_details() -> list[dict]:
-    """Mọi hồ sơ kèm thông tin để hiện trên trang quản lý (chỉ đọc file)."""
+_sizes: dict = {}             # id -> (lúc tính, MB); tính ở luồng nền
+_sizing: set = set()
+SIZE_TTL = 300
+
+
+def profile_size_mb(pid: str) -> float | None:
+    """Dung lượng hồ sơ (MB), nhớ 5 phút. Chưa có -> None và tính ở luồng nền: hồ sơ dùng lâu có hàng nghìn file
+    cache, duyệt hết mỗi lần mở trang làm trang chậm cả giây."""
+    hit = _sizes.get(pid)
+    if hit and time.time() - hit[0] < SIZE_TTL:
+        return hit[1]
+    if pid not in _sizing:
+        _sizing.add(pid)
+
+        def run():
+            try:
+                _sizes[pid] = (time.time(), round(_dir_size(PROFILES_DIR / pid) / 1e6, 1))
+            finally:
+                _sizing.discard(pid)
+        threading.Thread(target=run, daemon=True, name="profile-size").start()
+    return hit[1] if hit else None
+
+
+def profile_details(only: str | None = None) -> list[dict]:
+    """Hồ sơ kèm thông tin để hiện trên trang quản lý (chỉ đọc file). only = chỉ 1 hồ sơ (trang chi tiết)."""
     import re
     out = []
     for p in list_profiles():
+        if only and p["id"] != only:
+            continue
         d = PROFILES_DIR / p["id"]
         try:
             cfg = json.loads((d / "profile.json").read_text("utf-8"))
@@ -492,7 +523,7 @@ def profile_details() -> list[dict]:
                     "proxy_id": meta.get("proxy_id") or "", "webrtc": meta.get("webrtc") or "auto",
                     "extensions": meta.get("extensions") or [], "bookmarks": meta.get("bookmarks") or [],
                     "extra_args": meta.get("extra_args") or "",
-                    "size_mb": round(_dir_size(d) / 1e6, 1), "opened_here": s is not None})
+                    "size_mb": profile_size_mb(p["id"]), "opened_here": s is not None})
     return out
 
 

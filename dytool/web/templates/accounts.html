@@ -6,7 +6,7 @@
     <p class="sub">Bấm <b>Đăng nhập</b> ở tài khoản: lần đầu dytool tự tạo 1 hồ sơ trình duyệt riêng cho tài khoản đó rồi mở ra
       để bạn đăng nhập. Không cần tạo hay liên kết hồ sơ bằng tay.</p></div>
 </div>
-{% if logging_in %}<div hx-get="/partials/accounts" hx-trigger="every 3s" hx-swap="none"></div>{% endif %}
+{% if logging_in %}<div hx-get="/partials/accounts" hx-trigger="every 3s [!document.hidden]" hx-swap="none"></div>{% endif %}
 
 {% from "_macros.html" import profile_line with context %}
 
@@ -20,8 +20,8 @@
 {% macro account_card(a, platform) %}
 {% set tt = platform == 'tiktok' %}
 <div class="card acc">
-  <div class="row">
-    <h3>{{ a.name }}</h3>
+  <div class="row acc-head">
+    <h3 title="{{ a.name }}">{{ a.name }}</h3>
     {% if a.id in logging_in %}
       <span class="pill warn">Đang chờ đăng nhập</span>
     {% elif a.id in relogin %}
@@ -49,7 +49,7 @@
         <button class="btn sm ghost danger" aria-label="Xoá tài khoản {{ a.name }}" title="Xoá khỏi tool">Xoá</button></form>
     </div>
   </div>
-  <div hx-get="/partials/login/fb/{{ a.id }}" hx-trigger="load, every 1s" hx-swap="innerHTML"
+  <div hx-get="/partials/login/fb/{{ a.id }}" hx-trigger="load, every 1s [!document.hidden]" hx-swap="innerHTML"
        class="lp-slot" style="margin-top:12px"></div>
   {{ profile_line('/accounts/' ~ a.id ~ '/browser', '/accounts/' ~ a.id ~ '/browser/new', choices.get(a.id, {}),
                   'br-' ~ a.id, 'tự tạo khi bấm Đăng nhập') }}

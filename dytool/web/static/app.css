@@ -367,6 +367,12 @@ input.switch:checked::after { transform: translateX(16px); }
 .acc table { margin-top: 8px; }
 .acc td { padding-left: 0; padding-top: 8px; padding-bottom: 8px; }
 .acc .actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+/* hàng tiêu đề thẻ tài khoản: không xuống dòng — tên dài thì cắt "…", nút giữ 1 hàng */
+.acc-head { flex-wrap: nowrap; }
+.acc-head h3 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acc-head .pill, .acc-head .actions { flex: none; }
+.acc-head .actions { flex-wrap: nowrap; }
+.acc-head .spacer { min-width: 4px; }
 
 /* ---------- nhật ký / tiến trình ---------- */
 .log { font: 12px/1.7 var(--mono); max-height: 320px; overflow: auto; }

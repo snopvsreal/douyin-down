@@ -67,7 +67,7 @@
         {% else %}<span class="muted">Không (mạng của máy này)</span>{% endif %}</td></tr>
       <tr><td class="muted">Máy giả lập</td><td class="trunc" title="{{ p.gpu }}">{{ p.os }} · {{ p.cores }} nhân · {{ p.ram }} GB · {{ p.gpu or '—' }}</td></tr>
       <tr><td class="muted">Ngôn ngữ</td><td>{{ 'Tiếng Anh' if p.english else ('Theo IP' if p.lang == 'auto' else p.lang) }} · múi giờ theo IP</td></tr>
-      <tr><td class="muted">Dung lượng</td><td>{{ p.size_mb }} MB · tạo {{ vnt(p.created, '%d/%m/%Y') }}</td></tr>
+      <tr><td class="muted">Dung lượng</td><td>{{ p.size_mb if p.size_mb is not none else '…' }} MB · tạo {{ vnt(p.created, '%d/%m/%Y') }}</td></tr>
     </table>
     {% if p.notes %}<p class="small muted trunc" style="margin:6px 0 0" title="{{ p.notes }}">{{ p.notes }}</p>{% endif %}
   </div>

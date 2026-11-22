@@ -449,7 +449,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         tags = sorted({t for p in profiles for t in p["tags"]}, key=str.lower)
         shown = [p for p in profiles if not tag or tag in p["tags"]]
         return render(request, "browsers.html", profiles=shown, all_count=len(profiles), tags=tags, tag=tag,
-                      usage=_profile_usage(), total_mb=round(sum(p["size_mb"] for p in profiles), 1), **_bctx())
+                      usage=_profile_usage(), total_mb=round(sum(p["size_mb"] or 0 for p in profiles), 1), **_bctx())
 
     @app.post("/browsers/new")
     def browsers_new(name: str = Form(""), lang: str = Form("auto")):
@@ -565,7 +565,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             browsers.profile_dir(pid)
         except browsers.BrowserError:
             return RedirectResponse("/browsers", 303)
-        p = next(x for x in browsers.profile_details() if x["id"] == pid)
+        p = browsers.profile_details(only=pid)[0]
         try:
             tpls = browser_mgr.templates()
         except Exception:

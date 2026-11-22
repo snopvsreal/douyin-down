@@ -9,6 +9,9 @@
   <script>try { const t = localStorage.getItem('dy-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <title>{% block title %}dytool{% endblock %} · dytool</title>
   <link rel="icon" type="image/png" href="/static/favicon.png">
+  {# tải trước font (chữ Latin + tiếng Việt) -> chữ hiện đúng font ngay, không nháy từ font hệ thống sang Inter #}
+  <link rel="preload" href="/static/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/inter-vietnamese.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/app.css?v={{ css_v() }}">
   <script src="/static/htmx.min.js"></script>
 </head>
@@ -66,7 +69,7 @@
     {% block body %}{% endblock %}</main></div>
 
   {# thanh trạng thái: chạy tự động / việc đang làm / Douyin / tải Douyin / VoiceStudio (làm mới 5s) #}
-  <footer class="statusbar" hx-get="/partials/services" hx-trigger="load, every 5s" hx-swap="innerHTML">
+  <footer class="statusbar" hx-get="/partials/services" hx-trigger="load, every 5s [!document.hidden], visibilitychange[!document.hidden] from:document" hx-swap="innerHTML">
     <div class="sb-group"><span class="sb-item"><span class="dot"></span>Đang kiểm tra…</span></div>
   </footer>
 </div>

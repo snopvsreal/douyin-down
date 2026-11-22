@@ -18,7 +18,7 @@
 {% endif %}
 
 {# thanh tiến trình đăng nhập Douyin; câu đọc to cho trình đọc màn hình đi qua #sr-live (base.html) #}
-<div hx-get="/partials/login/douyin" hx-trigger="load, every 1s" hx-swap="innerHTML" class="lp-slot"
+<div hx-get="/partials/login/douyin" hx-trigger="load, every 1s [!document.hidden]" hx-swap="innerHTML" class="lp-slot"
      style="margin-bottom:16px"></div>
 
 {# Dây chuyền: đúng thứ tự 1 video đi qua; bấm vào để xem danh sách ở Tiến trình #}
@@ -39,7 +39,7 @@
 {% endif %}
 
 <div class="split section">
-  <div class="card" hx-get="/partials/progress" hx-trigger="load, every 2s" hx-swap="innerHTML">
+  <div class="card" hx-get="/partials/progress" hx-trigger="load, every 2s [!document.hidden]" hx-swap="innerHTML">
     <p class="muted">Đang tải…</p>
   </div>
   <div class="card">
@@ -69,6 +69,6 @@
   <summary>Nhật ký <span class="small muted" style="font-weight:400">— mọi việc tool đã làm, mới nhất ở trên</span></summary>
   {# chỉ tải khi mở mục Nhật ký, và chỉ làm mới mỗi 5s khi đang mở #}
   <div class="log" hx-get="/partials/log" hx-swap="innerHTML"
-       hx-trigger="toggle from:closest details, every 5s [this.closest('details').open]"></div>
+       hx-trigger="toggle from:closest details, every 5s [(this.closest('details').open) && !document.hidden]"></div>
 </details>
 {% endblock %}

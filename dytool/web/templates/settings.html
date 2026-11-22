@@ -75,7 +75,7 @@
 <section class="section" id="douyin" aria-labelledby="h-dy">
   <h2 id="h-dy">Douyin</h2>
   <div class="card">
-    <div class="lp-slot" hx-get="/partials/login/douyin" hx-trigger="load, every 1s" hx-swap="innerHTML"
+    <div class="lp-slot" hx-get="/partials/login/douyin" hx-trigger="load, every 1s [!document.hidden]" hx-swap="innerHTML"
          style="margin-bottom:8px"></div>
     <div class="set-row">
       <div class="set-label"><b>Đăng nhập Douyin</b>

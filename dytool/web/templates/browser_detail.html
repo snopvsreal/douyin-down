@@ -182,7 +182,7 @@
     <p class="hint">Thêm vào mỗi lần mở hồ sơ. Không được đặt tham số dytool tự lo (hồ sơ, proxy, tiện ích, cổng điều khiển).</p>
     <div class="row" style="margin-top:12px"><button class="btn primary">Lưu</button></div>
   </form>
-  <p class="hint">Mã hồ sơ: <code>{{ prof.id }}</code> · {{ prof.size_mb }} MB · tạo {{ vnt(prof.created, '%d/%m/%Y %H:%M') }}</p>
+  <p class="hint">Mã hồ sơ: <code>{{ prof.id }}</code> · {{ prof.size_mb if prof.size_mb is not none else '…' }} MB · tạo {{ vnt(prof.created, '%d/%m/%Y %H:%M') }}</p>
 </section>
 
 </div>

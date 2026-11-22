@@ -1,6 +1,6 @@
 {# Khung "Cập nhật" ở Tổng quan: tự làm mới 2s khi đang tải / cài, 60s lúc bình thường #}
 <section class="card updates" id="cap-nhat" aria-labelledby="h-upd"
-         hx-get="/partials/updates" hx-trigger="every {{ '2s' if busy else '60s' }}" hx-swap="outerHTML">
+         hx-get="/partials/updates" hx-trigger="every {{ '2s' if busy else '60s' }} [!document.hidden]" hx-swap="outerHTML">
   <div class="row">
     <h2 id="h-upd" style="margin:0">Cập nhật</h2>
     <div class="spacer"></div>

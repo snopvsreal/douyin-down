@@ -2,7 +2,7 @@
 {% block title %}Proxy · Hồ sơ trình duyệt{% endblock %}
 {% block body %}
 {% set active = 'proxies' %}{% include "_btabs.html" %}
-{% if checking.on %}<div hx-get="/browsers/proxies" hx-trigger="every 3s" hx-select=".content > *" hx-target=".content" hx-swap="innerHTML"></div>{% endif %}
+{% if checking.on %}<div hx-get="/browsers/proxies" hx-trigger="every 3s [!document.hidden]" hx-select=".content > *" hx-target=".content" hx-swap="innerHTML"></div>{% endif %}
 
 <form method="post" action="/browsers/proxies/add" class="card" style="margin-bottom:16px" hx-disabled-elt="find button">
   <label for="px-text"><b>Thêm proxy</b> — dán nhiều dòng, mỗi dòng 1 proxy</label>

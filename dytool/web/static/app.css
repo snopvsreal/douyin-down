@@ -525,9 +525,11 @@ html.in-app .topbar a, html.in-app .topbar button, html.in-app .topbar input, ht
 html.in-app .winctl { app-region: no-drag; }
 /* 3 nút luôn ở góc phải trên (chip dịch vụ có xuống dòng khi cửa sổ hẹp cũng không kéo theo) */
 html.in-app .topbar { padding-right: 144px; }
-html.in-app .winctl { display: flex; gap: 2px; position: absolute; top: 10px; right: 8px; }
-.winctl button { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 32px; padding: 0;
-  border: 0; border-radius: var(--r-ctl); background: transparent; color: var(--t2); cursor: default;
+/* sát góc trên phải cửa sổ như nút của Windows (trước nằm trong thanh, cách mép trên ~20px trông thừa) */
+html.in-app .winctl { display: flex; position: fixed; top: 0; right: 0; z-index: 30; }
+html.in-app .content::-webkit-scrollbar-track { margin-top: 52px; }   /* thanh cuộn bắt đầu dưới thanh trên, không lẫn với nút ✕ */
+.winctl button { display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 32px; padding: 0;
+  border: 0; border-radius: 0; background: transparent; color: var(--t2); cursor: default;
   transition: background .1s, color .1s; }
 .winctl button:hover { background: var(--hover); color: var(--t1); }
 .winctl button:active { background: var(--active); }

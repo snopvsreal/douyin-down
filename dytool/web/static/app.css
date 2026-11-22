@@ -525,8 +525,10 @@ html.in-app .topbar a, html.in-app .topbar button, html.in-app .topbar input, ht
 html.in-app .winctl { app-region: no-drag; }
 /* 3 nút luôn ở góc phải trên (chip dịch vụ có xuống dòng khi cửa sổ hẹp cũng không kéo theo) */
 html.in-app .topbar { padding-right: 144px; }
-/* sát góc trên phải cửa sổ như nút của Windows (trước nằm trong thanh, cách mép trên ~20px trông thừa) */
-html.in-app .winctl { display: flex; position: fixed; top: 0; right: 0; z-index: 30; }
+/* sát góc trên phải của tấm trang (cách mép cửa sổ đúng khe nền 8px như mọi chỗ khác); nút ✕ bo theo góc tấm để
+   nền đỏ khi rê chuột không lẹm ra ngoài đường cong. Trước: dính mép cửa sổ -> đè lên góc bo của tấm (rõ ở nền sáng) */
+html.in-app .winctl { display: flex; position: fixed; top: 8px; right: 8px; z-index: 30; }
+.winctl button.close { border-top-right-radius: var(--r-panel); }
 html.in-app .content::-webkit-scrollbar-track { margin-top: 52px; }   /* thanh cuộn bắt đầu dưới thanh trên, không lẫn với nút ✕ */
 .winctl button { display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 32px; padding: 0;
   border: 0; border-radius: 0; background: transparent; color: var(--t2); cursor: default;

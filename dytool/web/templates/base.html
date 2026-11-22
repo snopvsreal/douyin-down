@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f3f3f3" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#202020" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f5f5f5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
+  {# sáng / tối chọn ở cuối menu (localStorage); đặt trước khi vẽ để không nháy màu #}
+  <script>try { const t = localStorage.getItem('dy-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <title>{% block title %}dytool{% endblock %} · dytool</title>
   <link rel="icon" type="image/png" href="/static/favicon.png">
   <link rel="stylesheet" href="/static/app.css?v={{ css_v() }}">
@@ -23,6 +25,7 @@
         <svg viewBox="0 0 24 24" aria-hidden="true">{{ icon|safe }}</svg>
         <span class="label">{{ label }}</span>{{ caller() if caller }}</a>
     {% endmacro %}
+    <p class="nav-sec">Làm việc</p>
     {{ nav('/', 'Tổng quan', p == '/', 1,
            '<path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/>') }}
     {% call nav('/review', 'Duyệt video', p.startswith('/review'), 2,
@@ -33,15 +36,23 @@
                 '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2"/><circle cx="4.5" cy="12" r="1.2"/><circle cx="4.5" cy="18" r="1.2"/>') %}
       {% if navc.get('failed') %}<span class="badge err">{{ navc.failed }}<span class="sr-only"> video lỗi</span></span>{% endif %}
     {% endcall %}
+    <p class="nav-sec">Kênh</p>
     {{ nav('/accounts', 'Tài khoản & kênh', p.startswith('/accounts') or p.startswith('/pages'), 4,
            '<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5c.8-3.1 3-4.8 5.5-4.8s4.7 1.7 5.5 4.8"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15.9 14.8c2 .3 3.5 1.7 4.1 4"/>') }}
     {{ nav('/browsers', 'Hồ sơ trình duyệt', p.startswith('/browsers'), 5,
            '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M3 9h18"/><circle cx="6.2" cy="6.8" r=".6"/><circle cx="8.4" cy="6.8" r=".6"/><circle cx="12" cy="14.3" r="2.6"/>') }}
-    {# Cài đặt nằm cuối menu như app Windows #}
+    {# cuối menu: Cài đặt, chọn sáng / tối, phiên bản (như ShardBrowser) #}
+    <div class="nav-bottom-wrap">
     {{ nav('/settings', 'Cài đặt', p.startswith('/settings'), 6,
            '<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/>',
            'nav-bottom') }}
-    <p class="nav-hint">Chuyển trang nhanh: <kbd>Ctrl</kbd> + <kbd>1</kbd>–<kbd>6</kbd></p>
+    <div class="theme-seg" role="group" aria-label="Giao diện">
+      <button type="button" data-theme-set="light" title="Sáng"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/></svg><span>Sáng</span></button>
+      <button type="button" data-theme-set="dark" title="Tối"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.6 5.6 0 0 1 6.4 2.5a5.6 5.6 0 1 0 7.1 7.1z"/></svg><span>Tối</span></button>
+      <button type="button" data-theme-set="auto" title="Theo máy (Windows)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="8.5" rx="1.5"/><path d="M6 14h4"/></svg><span>Tự động</span></button>
+    </div>
+    <div class="app-ver"><img src="/static/icon.png" alt=""><div><b>dytool {{ app_ver() or '' }}</b><span>Ctrl + 1–6 chuyển trang</span></div></div>
+    </div>
   </nav>
 
   <div class="content" id="main" tabindex="-1"><main>
@@ -62,6 +73,23 @@
 {# Vùng đọc to cho trình đọc màn hình: chỉ được cập nhật (hx-swap-oob) khi bước đăng nhập đổi, không theo từng giây #}
 <div id="sr-live" class="sr-only" aria-live="polite"></div>
 <script>
+  // Sáng / tối / theo máy (cuối menu). Lưu localStorage; "theo máy" = bỏ data-theme -> theo Windows.
+  if (!window.__dyTheme) {
+    window.__dyTheme = true;
+    const mark = () => {
+      const cur = document.documentElement.dataset.theme || 'auto';
+      document.querySelectorAll('[data-theme-set]').forEach(b => b.setAttribute('aria-pressed', b.dataset.themeSet === cur));
+    };
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-theme-set]'); if (!b) return;
+      const v = b.dataset.themeSet;
+      if (v === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = v;
+      try { v === 'auto' ? localStorage.removeItem('dy-theme') : localStorage.setItem('dy-theme', v); } catch (err) {}
+      mark();
+    });
+    document.addEventListener('htmx:afterSettle', mark);
+    mark();
+  }
   // Phím tắt như app: Ctrl+1..6 chuyển trang; sau mỗi lần chuyển trang (boost) cuộn nội dung về đầu.
   // Chỉ gắn 1 lần: khi chuyển trang kiểu boost, htmx chạy lại script này.
   if (!window.__dyShell) {

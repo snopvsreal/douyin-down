@@ -81,8 +81,10 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     tpl = Jinja2Templates(directory=str(HERE / "templates"))
     # css_v(): đổi theo lần sửa app.css (đọc lại mỗi trang) để trình duyệt không dùng bản CSS cũ trong cache
     from ..store import vn_fmt
+    from .. import updates as _updates
     tpl.env.globals.update(STATUS_VI=STATUS_VI, time=time, vnt=vn_fmt,     # vnt(ts, fmt): hiện giờ theo giờ VN
-                           css_v=lambda: int((HERE / "static" / "app.css").stat().st_mtime))
+                           css_v=lambda: int((HERE / "static" / "app.css").stat().st_mtime),
+                           app_ver=lambda: _updates.installed("dytool"))   # cuối menu; đọc có nhớ 60 s
     tpl.env.filters["ago"] = lambda ts: _ago(ts)
 
     def _setup_failed() -> str | None:

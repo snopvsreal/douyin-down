@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Hồ sơ trình duyệt{% endblock %}
+{% block crumb %}Hệ thống › <b>Trình duyệt</b>{% endblock %}
 {% block body %}
 {% set active = 'profiles' %}{% include "_btabs.html" %}
 
@@ -24,13 +25,13 @@
       <button class="btn primary">Tạo hồ sơ</button>
     </form>
   </div>
-  <p class="hint" style="margin:8px 0 0">Hồ sơ mới chưa đăng nhập gì — gắn vào tài khoản ở <a href="/accounts">Tài khoản & kênh</a>
+  <p class="hint" style="margin:8px 0 0">Hồ sơ mới chưa đăng nhập gì — gắn vào tài khoản ở <a href="/accounts">Tài khoản</a>
     (Hồ sơ trình duyệt › Đổi) rồi bấm Đăng nhập. Lưu ở <code>{{ sdk_dir }}</code>.</p>
 </div>
 
 {% if not profiles %}
   <p class="empty">{% if tag %}Không có hồ sơ nào mang nhãn “{{ tag }}”.{% else %}Chưa có hồ sơ nào. Bấm <b>Đăng nhập</b> ở
-    <a href="/accounts">Tài khoản & kênh</a> — dytool tự tạo hồ sơ cho tài khoản đó.{% endif %}</p>
+    <a href="/accounts">Tài khoản</a> — dytool tự tạo hồ sơ cho tài khoản đó.{% endif %}</p>
 {% endif %}
 
 <div class="grid g2">

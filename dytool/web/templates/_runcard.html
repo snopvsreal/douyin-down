@@ -1,0 +1,18 @@
+{# Thẻ "Chạy tự động" cuối menu (poll 3s): công tắc bật / tạm dừng worker + việc đang làm #}
+<div class="run-head">
+  <b>Chạy tự động</b>
+  <button type="button" class="tgl {{ 'on' if worker.running }}" role="switch" aria-checked="{{ 'true' if worker.running else 'false' }}"
+          aria-label="{{ 'Tạm dừng chạy tự động' if worker.running else 'Bật chạy tự động' }}"
+          hx-post="/worker/toggle" hx-target="#runcard" hx-swap="innerHTML" hx-disabled-elt="this"
+          {% if worker.running %}hx-confirm="Tạm dừng chạy tự động? Tool ngừng quét, edit và đăng (việc đang làm dở sẽ làm lại sau)."{% endif %}><span></span></button>
+</div>
+{% if task %}
+  {% set cur = task.steps|selectattr('running')|list %}
+  <div class="run-task" title="{{ task.title }}{% if task.page %} — {{ task.page }}{% endif %}">{{ task.title }}{% if task.page %} · {{ task.page }}{% endif %}</div>
+  <div class="run-bar"><div></div></div>
+  <div class="run-sub">{% if cur %}{{ cur[0].name }} · {% endif %}{{ (task.elapsed // 60)|int }} phút {{ (task.elapsed % 60)|int }}s</div>
+{% elif worker.running %}
+  <div class="run-sub">Đang chờ việc mới</div>
+{% else %}
+  <div class="run-sub">Đang tạm dừng — không quét, edit hay đăng</div>
+{% endif %}

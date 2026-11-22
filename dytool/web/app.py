@@ -99,6 +99,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         from . import plan
         return tpl.TemplateResponse(request, name, {"worker": worker, "navc": store.counts(),
                                                     "nav_pages": plan.nav_pages(store),
+                                                    "data_rev": f"{store.rev()}-{int(worker.running)}",
                                                     "setup_failed": _setup_failed(), **ctx})
 
     @app.post("/settings/reinstall-libs")
@@ -237,6 +238,11 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         return render(request, "home.html", totals=totals, todo=todo, today=plan.today_items(store),
                       chans=plan.channel_today(store, store.page_settings), logs=logs,
                       today_label=vn_fmt(time.time(), "%d/%m"))
+
+    @app.get("/partials/rev")
+    def data_rev():
+        """Phiên bản dữ liệu cho cập nhật trực tiếp (base.html hỏi 3 s / lần; đổi thì vẽ lại trang đang mở)."""
+        return PlainTextResponse(f"{store.rev()}-{int(worker.running)}", headers={"Cache-Control": "no-store"})
 
     @app.get("/partials/runcard", response_class=HTMLResponse)
     def runcard(request: Request):
@@ -1020,7 +1026,12 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         if auto:
             if (form.get("enabled") == "on") != bool(was):
                 store.log(f"{'Bật' if form.get('enabled') == 'on' else 'Tắt'} kênh {page['name']}", page_id=pid)
-            return HTMLResponse(f'<span class="saved">Đã tự lưu lúc {vn_fmt(time.time(), "%H:%M:%S")}</span>')
+            # kèm phần trang đổi theo cài đặt (hx-swap-oob): nhãn Đang chạy / tắt, ô tóm tắt, chấm kênh ở menu
+            from . import plan
+            fresh = store.one("SELECT * FROM pages WHERE id=?", (pid,))
+            return render(request, "_ch_saved.html", page=fresh, s=store.page_settings(fresh),
+                          ch=next((c for c in plan.nav_pages(store) if c["id"] == pid), None),
+                          saved_at=vn_fmt(time.time(), "%H:%M:%S"))
         store.log(f"Đã lưu cài đặt Page #{pid}", page_id=pid)
         return RedirectResponse(f"/pages/{pid}?saved=1", 303)
 

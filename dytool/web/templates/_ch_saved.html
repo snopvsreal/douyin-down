@@ -1,0 +1,6 @@
+{# Phản hồi tự lưu cài đặt kênh: dòng "Đã tự lưu" + đổi ngay nhãn trạng thái, ô tóm tắt, chấm kênh ở menu #}
+{% from "_ch_live.html" import pill, summary, nav_chan %}
+<span class="saved">Đã tự lưu lúc {{ saved_at }}</span>
+{{ pill(page, oob=true) }}
+{{ summary(s, oob=true) }}
+{% if ch %}{{ nav_chan(ch, on=true, oob=true) }}{% endif %}

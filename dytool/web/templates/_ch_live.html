@@ -1,0 +1,27 @@
+{# Phần trang kênh đổi theo cài đặt — dùng chung cho lúc vẽ trang và phản hồi tự lưu (hx-swap-oob: đổi ngay, không cần
+   tải lại trang, kể cả khi đang gõ) #}
+{% macro pill(page, oob=false) -%}
+<span id="ch-pill" class="pill {{ 'ok' if page.enabled }}" {{ 'hx-swap-oob=outerHTML' if oob }}>{{ 'Đang chạy' if page.enabled else 'Đang tắt' }}</span>
+{%- endmacro %}
+
+{% macro summary(s, oob=false) -%}
+{% set gender_vi = {'auto': 'tự nhận nam / nữ', 'male': 'luôn giọng nam', 'female': 'luôn giọng nữ'} %}
+<section class="card" id="ch-summary" aria-labelledby="h-sum" {{ 'hx-swap-oob=outerHTML' if oob }}>
+  <h2 id="h-sum">Kênh này chạy thế nào</h2>
+  <dl class="kv">
+    <dt>Đăng</dt><dd>tối đa {{ s.max_posts_per_day|int }} bài / ngày</dd>
+    <dt>Khung giờ</dt><dd>{{ s.schedule_slots or '—' }}</dd>
+    <dt>Duyệt</dt><dd>{{ 'tự đăng, không duyệt' if s.auto_publish else 'bạn duyệt từng video' }}{{ ' · tự xếp lịch' if s.auto_schedule }}</dd>
+    <dt>Edit</dt><dd>{{ ['lật ngang' if s.hflip, 'nghiêng ' ~ s.rotate_deg ~ '°' if s.rotate_deg, 'phủ màu' if s.tint_opacity, 'phụ đề' if s.subs_enabled]|select|join(' · ') or 'không' }}</dd>
+    <dt>Lồng tiếng</dt><dd>{{ gender_vi.get(s.gender, s.gender) if s.dub_enabled else 'tắt' }}</dd>
+    <dt>Lọc</dt><dd>{{ s.min_duration|int }}–{{ s.max_duration|int }} giây · ≥ {{ '{:,}'.format(s.min_likes|int) }} like</dd>
+  </dl>
+</section>
+{%- endmacro %}
+
+{% macro nav_chan(ch, on=false, oob=false) -%}
+<a href="/pages/{{ ch.id }}" id="nav-ch-{{ ch.id }}" class="nav-item nav-chan {{ 'on' if on }}" {{ 'aria-current=page' if on }}
+   title="{{ ch.name }} — {{ 'đang bật' if ch.enabled else 'đang tắt' }}" {{ 'hx-swap-oob=outerHTML' if oob }}>
+  <span class="chan-dot" style="background:{{ ch.color if ch.enabled else 'var(--t-dis)' }}" aria-hidden="true"></span>
+  <span class="label">{{ ch.name }}</span><span class="ptag">{{ 'TT' if ch.tt else 'FB' }}</span></a>
+{%- endmacro %}

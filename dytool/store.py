@@ -247,6 +247,12 @@ class Store:
             self.conn.commit()
             return cur.rowcount > 0
 
+    def rev(self) -> int:
+        """Phiên bản dữ liệu: tổng số dòng đã ghi (thêm / sửa / xoá) qua kết nối này — mọi lần ghi của app lẫn worker
+        đều qua 1 kết nối, nên số này đổi đúng khi có gì thay đổi. Giao diện hỏi số này để tự vẽ lại (cập nhật trực tiếp)."""
+        with self.lock:
+            return self.conn.total_changes
+
     def counts(self, page_id: int | None = None) -> dict:
         sql = "SELECT status, COUNT(*) n FROM videos" + (" WHERE page_id=?" if page_id else "") + " GROUP BY status"
         return {r["status"]: r["n"] for r in self.q(sql, (page_id,) if page_id else ())}

@@ -2,13 +2,14 @@
 {% block title %}{{ page.name }}{% endblock %}
 {% block crumb %}Kênh › <b>{{ page.name }}</b>{% endblock %}
 {% block body %}
+{% from "_ch_live.html" import pill, summary %}
 {% set tt = page.platform == 'tiktok' %}
 {% set gender_vi = {'auto': 'tự nhận nam / nữ', 'male': 'luôn giọng nam', 'female': 'luôn giọng nữ'} %}
 <div class="ch-head">
   <span class="ch-av lg" style="background:{{ color }}" aria-hidden="true">{{ page.name[:1]|upper }}</span>
   <div style="min-width:0">
     <div class="row" style="gap:10px"><h1 class="trunc" style="max-width:none">{{ page.name }}</h1>
-      {% if page.enabled %}<span class="pill ok">Đang chạy</span>{% else %}<span class="pill">Đang tắt</span>{% endif %}</div>
+      {{ pill(page) }}</div>
     <p class="sub">
       {% if tt %}Kênh TikTok · tài khoản {{ page.acc_name }}{% if page.profile_id %} · <a href="https://www.tiktok.com/@{{ page.profile_id }}" target="_blank" rel="noopener">mở kênh ↗</a>{% endif %}
       {% else %}Facebook Page · tài khoản {{ page.acc_name }} · <a href="https://www.facebook.com/profile.php?id={{ page.profile_id }}" target="_blank" rel="noopener">mở Page ↗</a>{% endif %}
@@ -224,17 +225,7 @@
 
 {# ---------- cột phải: tóm tắt + sao chép ---------- #}
 <aside class="ch-aside">
-  <section class="card" aria-labelledby="h-sum">
-    <h2 id="h-sum">Kênh này chạy thế nào</h2>
-    <dl class="kv">
-      <dt>Đăng</dt><dd>tối đa {{ s.max_posts_per_day|int }} bài / ngày</dd>
-      <dt>Khung giờ</dt><dd>{{ s.schedule_slots or '—' }}</dd>
-      <dt>Duyệt</dt><dd>{{ 'tự đăng, không duyệt' if s.auto_publish else 'bạn duyệt từng video' }}{{ ' · tự xếp lịch' if s.auto_schedule }}</dd>
-      <dt>Edit</dt><dd>{{ ['lật ngang' if s.hflip, 'nghiêng ' ~ s.rotate_deg ~ '°' if s.rotate_deg, 'phủ màu' if s.tint_opacity, 'phụ đề' if s.subs_enabled]|select|join(' · ') or 'không' }}</dd>
-      <dt>Lồng tiếng</dt><dd>{{ gender_vi.get(s.gender, s.gender) if s.dub_enabled else 'tắt' }}</dd>
-      <dt>Lọc</dt><dd>{{ s.min_duration|int }}–{{ s.max_duration|int }} giây · ≥ {{ '{:,}'.format(s.min_likes|int) }} like</dd>
-    </dl>
-  </section>
+  {{ summary(s) }}
   {% if others %}
   <section class="card" aria-labelledby="h-copy">
     <h2 id="h-copy">Sao chép cài đặt</h2>

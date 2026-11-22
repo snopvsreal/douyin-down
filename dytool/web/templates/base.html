@@ -18,7 +18,7 @@
 {# hx-boost: bấm menu / gửi form không tải lại cả trang (không nháy trắng) — giống app thật #}
 <body hx-boost="true">
 <a class="skip" href="#main">Bỏ qua menu, tới nội dung chính</a>
-<div class="app" data-css="{{ css_v() }}">
+<div class="app" data-css="{{ css_v() }}" data-rev="{{ data_rev }}">
   <nav class="side" aria-label="Menu chính">
     <div class="brand" translate="no"><img src="/static/icon.png" alt=""><span>dytool</span></div>
     <button type="button" class="search-btn" data-palette-open aria-label="Tìm hoặc ra lệnh (Ctrl+K)">
@@ -49,11 +49,9 @@
     <div class="nav-sec nav-sec-row"><span>Kênh</span>
       <a href="/accounts" class="nav-sec-add" title="Thêm kênh: đăng nhập tài khoản Facebook / TikTok, tool tự tìm Page"
          aria-label="Thêm kênh"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></a></div>
+    {% from "_ch_live.html" import nav_chan %}
     {% for ch in nav_pages %}
-      <a href="/pages/{{ ch.id }}" class="nav-item nav-chan {{ 'on' if p == '/pages/' ~ ch.id }}" {{ 'aria-current=page' if p == '/pages/' ~ ch.id }}
-         title="{{ ch.name }} — {{ 'đang bật' if ch.enabled else 'đang tắt' }}">
-        <span class="chan-dot" style="background:{{ ch.color if ch.enabled else 'var(--t-dis)' }}" aria-hidden="true"></span>
-        <span class="label">{{ ch.name }}</span><span class="ptag">{{ 'TT' if ch.tt else 'FB' }}</span></a>
+      {{ nav_chan(ch, on=(p == '/pages/' ~ ch.id)) }}
     {% else %}
       <p class="nav-empty">Chưa có kênh — đăng nhập tài khoản ở <a href="/accounts">Tài khoản</a>, tool tự tìm Page.</p>
     {% endfor %}
@@ -119,6 +117,55 @@
     const link = document.querySelector('link[rel=stylesheet][href*="/static/app.css"]');
     if (v && link && !link.getAttribute('href').endsWith('v=' + v)) link.setAttribute('href', '/static/app.css?v=' + v);
   })();
+  // CẬP NHẬT TRỰC TIẾP: hỏi /partials/rev 3 s / lần; dữ liệu đổi (bạn sửa, hoặc tool chạy nền tải / edit / đăng xong)
+  // -> lấy lại trang đang mở, thay <main> + menu trái (giữ mục <details> đang mở, vị trí cuộn, thẻ Chạy tự động).
+  // Hoãn lại khi đang gõ / chọn trong ô, có chỉnh sửa chưa lưu, đang xem video, đang kéo thả, hộp Ctrl+K mở.
+  if (!window.__dyLive) {
+    window.__dyLive = true;
+    let pending = false, dirty = false;     // mốc = data-rev lúc vẽ trang (.app), cập nhật sau mỗi lần vẽ lại
+    document.addEventListener('input', (e) => {          // sửa ở form KHÔNG tự lưu = chưa lưu -> đừng vẽ lại đè mất
+      if (!e.target.closest('form[hx-trigger="autosave"], #palette')) dirty = true;
+    }, true);
+    document.addEventListener('htmx:afterSettle', (e) => { if (e.detail.boosted) dirty = false; });
+    document.addEventListener('htmx:afterRequest', (e) => {   // gửi form xong (POST) = đã lưu; GET xem trước thì chưa
+      if (e.detail.elt?.closest?.('form') && (e.detail.requestConfig?.verb || 'get') !== 'get') dirty = false;
+    });
+    const typing = (a) => a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) &&
+      !['checkbox', 'radio', 'button', 'submit', 'range', 'color', 'file', 'hidden'].includes(a.type);
+    const busy = () => typing(document.activeElement) || dirty || document.getElementById('palette')?.open ||
+      [...document.querySelectorAll('main video')].some(v => !v.paused) ||
+      !!document.querySelector('.dragging, .drop-on, main .htmx-request, main form.htmx-request');
+    const refresh = async (v) => {
+      const url = location.pathname + location.search;
+      let html;
+      try { html = await (await fetch(url, { headers: { 'X-Live': '1' } })).text(); } catch (e) { return; }
+      if (busy() || location.pathname + location.search !== url) { pending = true; return; }
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const main = document.querySelector('main'), nmain = doc.querySelector('main');
+      if (!main || !nmain) return;
+      const open = [...main.querySelectorAll('details')].map(d => d.open);
+      const nav = document.querySelector('nav.side'), nnav = doc.querySelector('nav.side');
+      if (nav && nnav) {
+        const rc = nnav.querySelector('#runcard'), cur = nav.querySelector('#runcard');
+        if (rc && cur) rc.innerHTML = cur.innerHTML;     // thẻ Chạy tự động giữ nguyên, nó tự làm mới riêng
+        htmx.swap(nav, nnav.outerHTML, { swapStyle: 'outerHTML' });
+      }
+      const crumb = document.querySelector('.topbar .crumb'), ncrumb = doc.querySelector('.topbar .crumb');
+      if (crumb && ncrumb) crumb.innerHTML = ncrumb.innerHTML;
+      htmx.swap(main, nmain.outerHTML, { swapStyle: 'outerHTML' });
+      const ds = [...document.querySelectorAll('main details')];
+      if (ds.length === open.length) ds.forEach((d, i) => { d.open = open[i]; });
+      const app = document.querySelector('.app'); if (app) app.dataset.rev = doc.querySelector('.app')?.dataset.rev || v;
+    };
+    setInterval(async () => {
+      if (document.hidden) return;
+      try {
+        const v = await (await fetch('/partials/rev', { cache: 'no-store' })).text();
+        if (v !== document.querySelector('.app')?.dataset.rev) pending = v;
+      } catch (e) { return; }
+      if (pending && !busy()) { const v = pending; pending = false; refresh(v); }
+    }, 3000);
+  }
   // Sáng / tối / theo máy (cuối menu). Lưu localStorage; "theo máy" = bỏ data-theme -> theo Windows.
   if (!window.__dyTheme) {
     window.__dyTheme = true;

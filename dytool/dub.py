@@ -162,23 +162,50 @@ def make_line(vs: VoiceStudio, text: str, window: float, clip: Path, cfg: dict, 
     return text, d
 
 
-def align_subtitles(clip: Path, offset: float, text: str, max_words: int = 9) -> list[dict]:
-    """Phụ đề khớp đúng giọng đọc: Whisper nghe lại clip TTS lấy mốc thời gian từng từ,
-    chia dòng tại dấu câu hoặc khi quá max_words từ. Không nhận dạng được thì chia đều theo âm tiết."""
-    from . import phrasing
+def split_cues(words: list[str], max_chars: int = 34, comma_chars: int = 14) -> list[list[int]]:
+    """Chia câu thành các cụm phụ đề (mỗi cụm ≤ ~2 dòng): luôn tách ở cuối câu (. ! ? …), tách ở dấu phẩy
+    khi cụm đã đủ dài, cụm quá max_chars thì lùi về chỗ ngắt đẹp nhất (dấu phẩy > trước chữ nối > không
+    cắt đôi từ ghép). Không để cụm cuối chỉ 1-2 chữ."""
+    from .subtitles import _LEAD, splits_word
+    out, cur = [], []
+
+    def chars(idx):
+        return sum(len(words[k]) + 1 for k in idx) - 1
+
+    for i, w in enumerate(words):
+        cur.append(i)
+        left = len(words) - 1 - i
+        if left == 0:
+            break
+        if left <= 2:
+            continue
+        if (w[-1] in ".!?…" and len(cur) >= 2) or (w[-1] in ",;:" and chars(cur) >= comma_chars):
+            out.append(cur)
+            cur = []
+        elif chars(cur) > max_chars and len(cur) >= 4:
+            # quá dài: chọn chỗ ngắt tốt nhất trong nửa sau cụm
+            best, score = len(cur) - 1, -1
+            for p in range(len(cur) // 2, len(cur)):
+                j = cur[p]                          # ngắt TRƯỚC words[j]
+                s = 3 if words[j - 1][-1] in ",;:" else 2 if words[j].lower() in _LEAD else \
+                    0 if splits_word(words, j) else 1
+                if s >= score:
+                    best, score = p, s
+            out.append(cur[:best])
+            cur = cur[best:]
+    if cur:
+        out.append(cur)
+    return [x for x in out if x]
+
+
+def align_subtitles(clip: Path, offset: float, text: str) -> list[dict]:
+    """Phụ đề khớp đúng giọng đọc: Whisper nghe lại clip TTS lấy mốc thời gian từng từ, chia cụm bằng
+    split_cues. Ngắt dòng trong cụm do subtitles.write_ass làm theo độ rộng chữ. Không nhận dạng được
+    thì chia đều."""
     from .subtitles import word_timestamps
     words = text.split()
     times = word_timestamps(clip, len(words))
-    lines, cur = [], []
-    for i, w in enumerate(words):
-        cur.append(i)
-        if w[-1] in ",;:.!?…" or len(cur) >= max_words or i == len(words) - 1:
-            # tránh dòng chỉ còn 1-2 từ ở cuối
-            if i == len(words) - 1 or len(words) - 1 - i > 2 or w[-1] in ".!?…":
-                lines.append(cur)
-                cur = []
-    if cur:
-        lines.append(cur)
+    lines = split_cues(words)
     out = []
     for idx in lines:
         t0, t1 = times[idx[0]][0], times[idx[-1]][1]

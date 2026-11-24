@@ -20,6 +20,25 @@ def probe(path: Path) -> tuple[int, int]:
     return (h, w) if rot in (90, 270) else (w, h)
 
 
+def frame_rate(path: Path) -> str:
+    """Tốc độ khung của video gốc dạng "30/1" / "30000/1001" (lỗi / lạ thì "30")."""
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                          "stream=avg_frame_rate,r_frame_rate", "-of", "json", str(path)],
+                         capture_output=True, text=True).stdout
+    try:
+        st = json.loads(out)["streams"][0]
+    except (ValueError, KeyError, IndexError):
+        return "30"
+    for r in (st.get("avg_frame_rate"), st.get("r_frame_rate")):
+        try:
+            n, d = (int(x) for x in str(r).split("/"))
+            if d and 10 <= n / d <= 120:
+                return f"{n}/{d}"
+        except ValueError:
+            pass
+    return "30"
+
+
 def duration(path: Path) -> float:
     out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
                           str(path)], capture_output=True, text=True, check=True).stdout
@@ -37,16 +56,45 @@ def target_size(w: int, h: int, cfg: dict) -> tuple[int, int]:
     return _even(w * k), _even(h * k)
 
 
+def band_rows(h: int, band: tuple[float, float], feather: int) -> tuple[int, int]:
+    """Hàng trên / dưới (px) của dải làm mờ gồm cả phần mép mờ dần."""
+    f = _even(feather)
+    return max(0, _even(h * band[0]) - f), min(h, _even(h * band[1]) + f)
+
+
+def feather_mask(work: Path, w: int, h: int, band: tuple[float, float], feather: int) -> Path:
+    """Ảnh mặt nạ alpha cho dải mờ: 0 ở mép -> 255 khi vào tới lõi (smoothstep). Tạo 1 lần bằng geq rồi đưa
+    vào FFmpeg dạng ảnh lặp — tính geq mỗi khung làm xuất chậm gấp đôi."""
+    y1, y2 = band_rows(h, band, feather)
+    f = max(1, _even(feather))
+    out = work / f"mask_{w}x{y2 - y1}_{f}.png"
+    if not out.exists():
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                        f"color=c=black:s={w}x{y2 - y1}:d=0.04,format=gray,"
+                        f"geq=lum='st(0,clip(min(Y,H-1-Y)/{f},0,1));255*ld(0)*ld(0)*(3-2*ld(0))'",
+                        "-frames:v", "1", str(out)], check=True)
+    return out
+
+
 def build_filter(w: int, h: int, cfg: dict, ass_name: str | None, src_size: tuple[int, int] | None = None,
-                 band: tuple[float, float] | None = None) -> str:
+                 band: tuple[float, float] | None = None, feather: int = 0, mask_input: int | None = None,
+                 fps: str = "30") -> str:
     chain = []
     if src_size and src_size != (w, h):
         chain.append(f"scale={w}:{h}")
     if band:
-        y1, y2 = _even(h * band[0]), _even(h * band[1])
+        # lõi mờ đặc = đúng dải sub Trung; thêm `feather` px mờ dần ở mép trên / dưới (không có cạnh cứng)
+        f = _even(feather)
+        y1, y2 = band_rows(h, band, feather)
         # boxblur yêu cầu bán kính < 1/2 cạnh nhỏ của kênh màu (= 1/4 chiều cao dải)
         b = max(1, min(int(cfg.get("hide_hardsub", {}).get("blur", 20)), (y2 - y1) // 4 - 1))
-        chain.append(f"split[a][b];[b]crop={w}:{y2 - y1}:0:{y1},boxblur={b}:2[bl];[a][bl]overlay=0:{y1}")
+        blur = f"crop={w}:{y2 - y1}:0:{y1},boxblur={b}:2"
+        if f and mask_input is not None:
+            # mặt nạ alpha (feather_mask, ảnh PNG đưa vào bằng -loop 1): mép dải mờ tan dần vào hình
+            chain.append(f"split[a][b];[{mask_input}:v]format=gray,scale={w}:{y2 - y1}[mk];[b]{blur}[bb];"
+                         f"[bb][mk]alphamerge=shortest=1[bl];[a][bl]overlay=0:{y1}:shortest=1")
+        else:
+            chain.append(f"split[a][b];[b]{blur}[bl];[a][bl]overlay=0:{y1}")
     if cfg.get("hflip"):
         chain.append("hflip")
     deg = float(cfg.get("rotate_deg", 0))
@@ -59,10 +107,12 @@ def build_filter(w: int, h: int, cfg: dict, ass_name: str | None, src_size: tupl
     tint = cfg.get("tint")
     if tint and tint.get("opacity"):
         # pha màu chuẩn trên RGB: out = (1-a)*video + a*màu  (drawbox pha trong YUV cho màu đậm sai lệch)
-        chain.append(f"format=gbrp[pre];color=c={tint['color']}:s={w}x{h},format=gbrp[tint];"
+        # r= tốc độ khung video gốc: blend lấy nhịp của lớp trên ([tint]) — thiếu r thì color mặc định 25 khung/s
+        # -> video 30 khung/s ra còn 25 (mất khung, kém mượt)
+        chain.append(f"format=gbrp[pre];color=c={tint['color']}:s={w}x{h}:r={fps},format=gbrp[tint];"
                      f"[tint][pre]blend=all_mode=normal:all_opacity={tint['opacity']}:shortest=1")
     if ass_name:
-        chain.append(f"subtitles={ass_name}")
+        chain.append(f"subtitles={ass_name}:fontsdir=fonts")
     chain.append("format=yuv420p")
     return "[0:v]" + ",".join(chain) + "[v]"
 
@@ -113,8 +163,9 @@ def edit(src: Path, dst: Path, work: Path, cfg: dict) -> dict:
         progress.step("Dò vị trí phụ đề Trung")
         band = detect_band(src, duration(src), *src_size)
     if band:
-        # đặt sub tiếng Việt đè lên đúng chỗ sub Trung cũ
+        # đặt sub tiếng Việt đè lên đúng chỗ sub Trung cũ: căn giữa dải (write_ass dùng sub_cfg["band"])
         sub_cfg["margin_v_pct"] = max(0.02, 1 - band[1] + 0.005)
+        sub_cfg["band"] = band
     dub_cfg = cfg.get("dub", {})
     dub_track = None
     source = "none"
@@ -137,11 +188,24 @@ def edit(src: Path, dst: Path, work: Path, cfg: dict) -> dict:
                                                    asr=[x.get("asr", "") for x in segs])
             ass_name = subtitles.write_ass(segs, texts, work / f"{src.stem}.ass", w, h, sub_cfg).name
 
+    feather = 0
+    if band:
+        # mép mờ dần: đủ rộng để chữ Việt 2 dòng (căn giữa dải) tràn ra mà không thấy "lòi khỏi khung"
+        feather = round(subtitles.feather_px(band, w, h, sub_cfg))
+    if ass_name:
+        subtitles.ensure_fonts(work)
+    mask_args, mask_input = [], None
+    if band and feather:
+        mask_input = 2 if dub_track else 1
+        mask_args = ["-loop", "1", "-framerate", "30", "-t", f"{duration(src) + 1:.2f}",
+                     "-i", str(feather_mask(work, w, h, band, feather).resolve())]
     out = cfg.get("output", {})
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error", "-i", str(src.resolve()),
         *(["-i", str(dub_track.resolve())] if dub_track else []),
-        "-filter_complex", build_filter(w, h, cfg, ass_name, src_size, band),
+        *mask_args,
+        "-filter_complex", build_filter(w, h, cfg, ass_name, src_size, band, feather, mask_input,
+                                                frame_rate(src)),
         "-map", "[v]", "-map", "1:a" if dub_track else "0:a?",
         "-c:v", "libx264", "-crf", str(out.get("crf", 20)), "-preset", out.get("preset", "medium"),
         "-c:a", "aac", "-b:a", "128k", "-map_metadata", "-1", "-movflags", "+faststart",

@@ -48,8 +48,9 @@ edit:
                               # google (miễn phí nhưng hay bị Google chặn bằng captcha)
     anthropic_api_key: ""     # KHÔNG dùng nữa: dytool dịch bằng Claude / Codex / Gemini CLI (Cài đặt › AI)
     claude_model: claude-sonnet-5-5
-    font: Arial
-    font_size_pct: 0.040      # cỡ chữ = 4% chiều cao video
+    style: outline            # outline = chữ trắng viền đen (kiểu video ngắn) | box = hộp nền mờ
+    font: Be Vietnam Pro ExtraBold   # đóng gói ở dytool/assets/fonts
+    font_size_pct: 0.046      # cỡ chữ = 4.6% chiều cao video (tự ngắt ≤ 2 dòng, không cắt đôi từ ghép)
     margin_v_pct: 0.18        # khoảng cách sub tới đáy (% chiều cao)
   # Lồng tiếng Việt bằng VoiceStudio (https://github.com/debpalash/VoiceStudio) — mở app trước khi chạy
   dub:

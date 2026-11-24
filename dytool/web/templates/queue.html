@@ -56,10 +56,12 @@
     <td class="small nowrap">{{ v.page_name }}</td>
     <td style="max-width:300px"><span class="pill {{ cls }}">{{ STATUS_VI.get(v.status, v.status) }}</span>
       {% if v.error %}<div class="small err-text" style="margin-top:3px">{{ v.error[:160] }}</div>{% endif %}
+      {% if v.status == 'downloaded' %}<div style="margin-top:6px">{% with pid=v.page_id, vid=v.id %}{% include "_edit_btn.html" %}{% endwith %}</div>{% endif %}
       {% if v.fb_url and v.status == 'uploaded' %}<div class="small"><a href="{{ v.fb_url }}" target="_blank" rel="noopener">xem bài ↗</a></div>{% endif %}
       {% if v.status == 'scheduled' and v.scheduled_at %}<div class="small muted num">đăng lúc {{ vnt(v.scheduled_at, '%H:%M %d/%m') }}</div>{% endif %}</td>
     <td class="small muted nowrap">{{ v.updated_at|ago }}</td>
-    <td class="cell-end">{% if v.status == 'failed' %}
+    <td class="cell-end">
+    {% if v.status == 'failed' %}
       <button class="btn sm" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/retry" hx-swap="outerHTML">Thử lại</button>
     {% endif %}</td>
   </tr>

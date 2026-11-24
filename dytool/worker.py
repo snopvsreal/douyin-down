@@ -37,6 +37,11 @@ class Worker:
         self._vs_starting = False       # đã ghi log "đang bật VoiceStudio" cho lần bật này
         self._tdl_retry_at = 0.0
         self._last_cleanup = 0.0
+        # chỉ 1 việc nặng / lần trên cả máy (VoiceStudio 1 GPU): vòng chạy tự động và việc bấm tay cùng giữ khoá này
+        self._busy = threading.Lock()
+        self._manual: list[tuple[int, str]] = []      # (page_id, video_id) người dùng bấm "Edit ngay"
+        self._manual_lock = threading.Lock()
+        self._manual_thread: threading.Thread | None = None
 
     # ---------- điều khiển ----------
     _mutex = None      # khoá toàn máy: chỉ 1 tiến trình dytool được chạy worker (mở app 2 lần, thêm run_ui.bat…)
@@ -97,6 +102,120 @@ class Worker:
         self.current = "Đang dừng"
         self.store.log("Đã tắt chạy tự động")
 
+    # ---------- edit thủ công (nút "Edit ngay") ----------
+    def _loop_alive(self) -> bool:
+        return self.running and bool(self._thread and self._thread.is_alive())
+
+    def manual_queue(self) -> list[tuple[int, str]]:
+        with self._manual_lock:
+            return list(self._manual)
+
+    def request_edit(self, page_id: int, video_id: str) -> str:
+        """Người dùng bấm Edit 1 video "Đã tải": đưa vào hàng chờ edit thủ công (làm trước video tự chọn, cả khi
+        kênh đang tắt). Chạy tự động đang bật -> vòng lặp nhặt ở lượt kế; đang tắt -> mở luồng riêng làm cho xong
+        hàng chờ rồi thôi. Trả 'queued' (đã có trong hàng chờ / chờ việc đang chạy) hoặc 'started'."""
+        with self._manual_lock:
+            if (page_id, video_id) not in self._manual:
+                self._manual.append((page_id, video_id))
+            busy = len(self._manual) > 1 or self._busy.locked()
+            if self._loop_alive():
+                return "queued" if busy else "started"
+            if not (self._manual_thread and self._manual_thread.is_alive()):
+                if not self._claim_machine_lock():
+                    self._manual.remove((page_id, video_id))
+                    raise RuntimeError("Đang có 1 dytool khác chạy trên máy này — edit ở bản đó, hoặc đóng bản kia")
+                self._manual_thread = threading.Thread(target=self._manual_loop, daemon=True)
+                self._manual_thread.start()
+        return "queued" if busy else "started"
+
+    def edit_state(self, page_id: int, video_id: str) -> str:
+        """'running' (đang edit video này) / 'queued' (trong hàng chờ Edit ngay) / ''."""
+        from . import progress
+        t = progress.snapshot()
+        if t and t.get("kind") == "edit" and t.get("video") == video_id and not t.get("stopping"):
+            return "running"
+        with self._manual_lock:
+            return "queued" if (page_id, video_id) in self._manual else ""
+
+    def clear_manual(self) -> None:
+        with self._manual_lock:
+            self._manual.clear()
+
+    def cancel_manual(self, page_id: int, video_id: str) -> bool:
+        with self._manual_lock:
+            if (page_id, video_id) in self._manual:
+                self._manual.remove((page_id, video_id))
+                return True
+        return False
+
+    def _take_manual(self):
+        """Lấy việc edit thủ công kế tiếp còn hợp lệ (video vẫn "Đã tải", còn file gốc) -> (page, row) hoặc None."""
+        while True:
+            with self._manual_lock:
+                if not self._manual:
+                    return None
+                pid, vid = self._manual.pop(0)
+            page = self.store.one("SELECT p.*, a.id acc FROM pages p JOIN accounts a ON a.id=p.account_id "
+                                  "WHERE p.id=?", (pid,))
+            row = self.store.one("SELECT * FROM videos WHERE id=? AND page_id=?", (vid, pid))
+            if page and row and row["status"] == "downloaded" and (self.data / "raw" / f"{vid}.mp4").exists():
+                return page, row
+
+    def _manual_loop(self):
+        """Luồng edit thủ công khi chạy tự động đang tắt. Chạy tự động bật lên giữa chừng -> để vòng lặp làm tiếp."""
+        from . import progress
+        self._keep_awake(True)
+        try:
+            while not self._loop_alive():
+                with self._busy:
+                    job = self._take_manual()
+                    if not job:
+                        break
+                    try:
+                        self._run_manual(*job)
+                    except progress.Cancelled:
+                        pass
+                    except Exception as e:
+                        self.store.log(f"Lỗi edit thủ công: {e}", "error")
+                        traceback.print_exc()
+                    finally:
+                        stopped = progress.cancelled()
+                        progress.end()
+                    if stopped:             # bấm Dừng -> bỏ luôn các video còn trong hàng chờ edit thủ công
+                        with self._manual_lock:
+                            self._manual.clear()
+                        break
+        finally:
+            self._keep_awake(False)
+            if not self._loop_alive():
+                self.current = "Đang dừng"
+
+    def _run_manual(self, page, row):
+        """Edit 1 video người dùng bấm. Kênh bật lồng tiếng: VoiceStudio chưa chạy thì bật và CHỜ (tối đa 5 phút) —
+        khác vòng tự động (không chờ, làm việc khác trước) vì đây là việc người dùng đang đợi."""
+        from . import progress, services
+        if self.store.page_settings(page)["dub_enabled"]:
+            progress.begin("edit", "Edit + lồng tiếng", page["name"], row["id"], row["desc"] or "")
+            self.current = f"Đang bật VoiceStudio để edit {row['id']}"
+            deadline = time.time() + 300
+            while True:
+                r = services.start_voicestudio(self.cfg)
+                if r == "ok":
+                    break
+                if r != "starting" or time.time() > deadline:
+                    why = {"missing": "VoiceStudio chưa cài xong (mở app VoiceStudio 1 lần)",
+                           "crashed": "VoiceStudio bật lên rồi tắt ngay (xem data/voicestudio.log)",
+                           "starting": "VoiceStudio bật quá 5 phút chưa xong"}.get(r, "VoiceStudio không trả lời")
+                    self.store.log(f"[{page['name']}] Không edit được {row['id']}: {why} — video vẫn ở Đã tải",
+                                   "error", page["id"])
+                    return
+                progress.step("Đang bật VoiceStudio (nạp model)…")
+                for _ in range(5):
+                    progress.check()
+                    time.sleep(1)
+        self.store.log(f"[{page['name']}] Edit thủ công {row['id']}", page_id=page["id"])
+        self._edit(page, row)
+
     def scan_now(self, page_id: int):
         self._last_scan[page_id] = 0
 
@@ -144,7 +263,10 @@ class Worker:
         while self.running:
             from . import progress
             try:
-                did = self._step()
+                with self._busy:                    # chờ việc edit thủ công đang chạy (nếu có) xong
+                    if not self.running:
+                        break
+                    did = self._step()
             except progress.Cancelled:              # Dừng lúc đang quét nguồn
                 self.store.log("Đã dừng việc đang chạy (quét nguồn)")
                 did = False
@@ -266,6 +388,11 @@ class Worker:
         if cp:
             self._crosspost(cp, all_pages)
             return True
+        # 1c) video người dùng bấm "Edit ngay" (cả kênh đang tắt) — trước video tự chọn
+        job = self._take_manual()
+        if job:
+            self._run_manual(*job)
+            return True
         # 2) edit (Page bật lồng tiếng mà VoiceStudio đang tắt -> để video chờ, không tính là lỗi).
         #    Lọc Page ngay trong SQL: trước lấy 20 video nhiều like nhất rồi mới lọc -> 20 video của Page đã tắt /
         #    đang chờ VoiceStudio chắn mất, video của Page đang bật không bao giờ tới lượt
@@ -296,6 +423,12 @@ class Worker:
         pages = {p["id"]: p for p in self._pages()}
         all_pages = {p["id"]: p for p in self.store.q("SELECT * FROM pages")}
         out = []
+        for pid, vid in self.manual_queue():
+            p = all_pages.get(pid)
+            r = self.store.one("SELECT desc FROM videos WHERE id=? AND page_id=?", (vid, pid))
+            if p and r:
+                out.append({"act": "Edit ngay (bạn bấm)", "page": p["name"], "video": vid, "desc": r["desc"],
+                            "when": None})
         for r in self.store.q("SELECT * FROM videos WHERE status IN ('schedule_pending','publish_now','approved') "
                               "ORDER BY status='schedule_pending' DESC, status='publish_now' DESC, updated_at"):
             p = all_pages.get(r["page_id"])

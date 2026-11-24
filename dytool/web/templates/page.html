@@ -66,13 +66,15 @@
           <a href="https://www.douyin.com/video/{{ v.id }}" target="_blank" rel="noopener">xem gốc</a>
           {% if v.source %}<span title="{{ v.source }}"> · {{ v.source.split(':', 1)[-1][:24] }}</span>{% endif %}</div></td>
       <td><span class="pill {{ cls }}">{{ STATUS_VI.get(v.status, v.status) }}</span>
-        {% if v.error %}<div class="small err-text" style="margin-top:3px">{{ v.error[:140] }}</div>{% endif %}</td>
+        {% if v.error %}<div class="small err-text" style="margin-top:3px">{{ v.error[:140] }}</div>{% endif %}
+        {% if v.status == 'downloaded' %}<div style="margin-top:6px">{% with pid=page.id, vid=v.id %}{% include "_edit_btn.html" %}{% endwith %}</div>{% endif %}</td>
       <td class="small num nowrap">
         {% if v.status == 'uploaded' %}đăng {{ vnt(v.uploaded_at or v.scheduled_at, '%H:%M %d/%m') }}
         {% elif v.scheduled_at and v.status in ('scheduled', 'schedule_pending', 'uploading') %}hẹn {{ vnt(v.scheduled_at, '%H:%M %d/%m') }}
         {% else %}<span class="muted">{{ v.updated_at|ago }}</span>{% endif %}</td>
       <td class="cell-end">
         {% if v.status == 'failed' %}<button class="btn sm" hx-post="/videos/{{ page.id }}/{{ v.id }}/retry" hx-swap="outerHTML">Thử lại</button>
+
         {% elif v.status == 'uploaded' and v.fb_url %}<a class="small" href="{{ v.fb_url }}" target="_blank" rel="noopener">xem bài ↗</a>
         {% elif v.status == 'review' %}<button type="button" class="btn sm" data-vview="{{ page.id }}:{{ v.id }}" data-vseq="{{ page.id }}" title="Xem video và duyệt ngay tại đây — xong tự mở video chờ duyệt kế tiếp của kênh">Duyệt</button>{% endif %}</td>
     </tr>

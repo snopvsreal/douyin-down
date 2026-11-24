@@ -90,7 +90,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     tpl.env.globals.update(STATUS_VI=STATUS_VI, time=time, vnt=vn_fmt,     # vnt(ts, fmt): hiện giờ theo giờ VN
                            css_v=lambda: int((HERE / "static" / "app.css").stat().st_mtime),
                            app_ver=lambda: _updates.installed("dytool"),   # cuối menu; đọc có nhớ 60 s
-                           vs_cached_voices=lambda: __import__("dytool.vs_api", fromlist=["x"]).cached_profiles())
+                           vs_cached_voices=lambda: __import__("dytool.vs_api", fromlist=["x"]).cached_profiles(),
+                           edit_state=worker.edit_state)      # nút Edit ngay (_edit_btn.html)
     tpl.env.filters["ago"] = lambda ts: _ago(ts)
 
     def _setup_failed() -> str | None:
@@ -909,6 +910,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             return PlainTextResponse("Đang bấm đăng / lên lịch trên nền tảng — không dừng giữa chừng được (dừng thì "
                                      "không biết bài đã lên chưa). Chờ vài giây cho xong rồi tạm dừng chạy tự động.", 400)
         if res == "ok":
+            worker.clear_manual()           # các video bấm "Edit ngay" còn chờ cũng thôi
             if worker.running:
                 worker.stop()
             store.log(f"Bấm Dừng: {t['title']}{' · ' + t['page'] if t.get('page') else ''} — chạy tự động đã tạm dừng, "
@@ -2171,6 +2173,35 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         # lịch Facebook được gửi
         store.x("DELETE FROM crossposts WHERE video_id=? AND src_page_id=? AND status='pending'", (vid, pid))
         return HTMLResponse(f'<div class="done">Sẽ gửi lịch lên {where}: {vn_fmt(ts)}{note}</div>')
+
+    # khai báo TRƯỚC /videos/{pid}/{vid}/{action} (route chung đó cũng khớp ".../edit")
+    @app.post("/videos/{pid}/{vid}/edit", response_class=HTMLResponse)
+    def video_edit(request: Request, pid: int, vid: str):
+        """Nút "Edit ngay": edit 1 video Đã tải ngay, kể cả khi chạy tự động đang tắt / kênh đang tắt."""
+        row = store.one("SELECT v.status, p.name FROM videos v JOIN pages p ON p.id=v.page_id "
+                        "WHERE v.id=? AND v.page_id=?", (vid, pid))
+        if not row:
+            return PlainTextResponse("Không tìm thấy video", 404)
+        if row["status"] != "downloaded":
+            return PlainTextResponse(f'Chỉ edit được video "Đã tải" — video này đang ở '
+                                     f'"{STATUS_VI.get(row["status"], row["status"])}". Tải lại trang để xem mới.', 400)
+        if not (data / "raw" / f"{vid}.mp4").exists():
+            return PlainTextResponse("Không thấy file video gốc trên máy (có thể đã bị dọn) — bấm Bỏ rồi để tool "
+                                     "tìm lại, hoặc chờ chạy tự động tải lại", 400)
+        try:
+            r = worker.request_edit(pid, vid)
+        except RuntimeError as e:
+            return PlainTextResponse(str(e), 400)
+        store.log(f"[{row['name']}] Bấm Edit ngay {vid}"
+                  + (" — chờ việc đang chạy xong" if r == "queued" else ""), page_id=pid)
+        return render(request, "_edit_btn.html", pid=pid, vid=vid)
+
+    @app.post("/videos/{pid}/{vid}/edit-cancel", response_class=HTMLResponse)
+    def video_edit_cancel(request: Request, pid: int, vid: str):
+        """Bỏ video khỏi hàng chờ Edit ngay (đang edit rồi thì dùng nút Dừng)."""
+        if worker.cancel_manual(pid, vid):
+            store.log(f"Huỷ Edit ngay {vid}", page_id=pid)
+        return render(request, "_edit_btn.html", pid=pid, vid=vid)
 
     @app.post("/videos/{pid}/{vid}/{action}")
     def video_action(pid: int, vid: str, action: str, caption: str = Form(None)):

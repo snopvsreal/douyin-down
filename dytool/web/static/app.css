@@ -1426,3 +1426,6 @@ main { margin-inline: auto; }
 /* Hôm nay: 4 video / hàng ở laptop 1366 (3 hàng trước thì mỗi video cao ~300px) */
 .today-main .rq-grid { grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 12px; }
 .today-main .rq-item .rv-thumb { max-height: 250px; }
+
+/* nút Edit ngay (_edit_btn.html) */
+.edit-now { display: inline-flex; align-items: center; gap: 6px; }

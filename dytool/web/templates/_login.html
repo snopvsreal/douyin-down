@@ -9,7 +9,7 @@
     {% if lg.state == 'running' %}
       <span class="pill info">Bước {{ lg.steps.index(lg.step) + 1 }}/{{ lg.steps|length }} · {{ lg.elapsed // 60 }}:{{ '%02d' % (lg.elapsed % 60) }}</span>
     {% elif lg.state == 'done' %}
-      <span class="pill ok">✓ Xong</span>
+      <span class="pill ok">Xong</span>
     {% else %}
       <span class="pill err">Chưa xong</span>
       <button class="btn sm lp-close" hx-post="{{ dismiss_url }}" hx-target="closest .lp-slot" hx-swap="innerHTML"
@@ -22,7 +22,7 @@
     {% for s in lg.segs %}<div class="lp-seg s-{{ s.status }}"></div>{% endfor %}
   </div>
   <ol class="lp-steps">
-    {% for s in lg.segs %}<li class="s-{{ s.status }}">{% if s.status == 'done' %}✓ {% endif %}{{ s.name }}</li>{% endfor %}
+    {% for s in lg.segs %}<li class="s-{{ s.status }}">{{ s.name }}</li>{% endfor %}
   </ol>
 
   {% if lg.state == 'running' %}

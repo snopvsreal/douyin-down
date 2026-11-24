@@ -100,7 +100,7 @@
           hx-confirm="Đổi dấu vân tay của hồ sơ {{ prof.name }}? Cookie giữ nguyên, nhưng với trang web đây như máy khác — tài khoản đang đăng nhập có thể bị hỏi xác minh lại."
           hx-disabled-elt="find button">
       <label for="f-tpl" class="sr-only">Mẫu máy</label>
-      <select id="f-tpl" name="template" style="width:auto; max-width:100%">
+      <select id="f-tpl" name="template" class="auto">
         <option value="">Ngẫu nhiên (Windows)</option>
         {% for plat, ids in templates.items() %}
           <optgroup label="{{ plat }}">{% for t in ids %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</optgroup>
@@ -156,7 +156,7 @@
       </div>
       <div class="row" style="margin-top:12px"><button class="btn primary">Lưu</button></div>
     {% else %}
-      <p class="empty small" style="margin:0">Chưa có tiện ích nào — thêm ở tab <a href="/browsers/extensions">Tiện ích</a>.</p>
+      {% from "_macros.html" import empty %}{% call empty("box", "Chưa có tiện ích nào", sm=true, act='<a class="btn sm" href="/browsers/extensions">Thêm tiện ích</a>') %}{% endcall %}
     {% endif %}
   </form>
 </section>

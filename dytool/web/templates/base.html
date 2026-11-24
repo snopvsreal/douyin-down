@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f5f5f5" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f2f3f1" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111513" media="(prefers-color-scheme: dark)">
   {# sáng / tối chọn ở cuối menu (localStorage); đặt trước khi vẽ để không nháy màu #}
   <script>try { const t = localStorage.getItem('dy-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
   {# trong cửa sổ app desktop (không thanh tiêu đề Windows): hiện 3 nút cửa sổ ngay, không đợi pywebview sẵn sàng #}
   try { if (localStorage.getItem('dy-app') === '1') document.documentElement.classList.add('in-app'); } catch (e) {}</script>
   <title>{% block title %}dytool{% endblock %} · dytool</title>
   <link rel="icon" type="image/png" href="/static/favicon.png">
-  {# tải trước font (chữ Latin + tiếng Việt) -> chữ hiện đúng font ngay, không nháy từ font hệ thống sang Inter #}
-  <link rel="preload" href="/static/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/static/fonts/inter-vietnamese.woff2" as="font" type="font/woff2" crossorigin>
+  {# tải trước font Be Vietnam Pro (chữ Latin + tiếng Việt, độ đậm thường + đậm) -> không nháy từ font hệ thống #}
+  {% for f in ('400-latin', '400-vietnamese', '600-latin', '600-vietnamese') %}
+  <link rel="preload" href="/static/fonts/bevietnampro-{{ f }}.woff2" as="font" type="font/woff2" crossorigin>{% endfor %}
   <link rel="stylesheet" href="/static/app.css?v={{ css_v() }}">
   <script src="/static/htmx.min.js"></script>
 </head>
@@ -34,15 +34,13 @@
         <span class="label">{{ label }}</span>{{ caller() if caller }}</a>
     {% endmacro %}
     <p class="nav-sec">Làm việc</p>
-    {{ nav('/', 'Hôm nay', p == '/', 1,
-           '<path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/>') }}
-    {% call nav('/review', 'Hộp duyệt', p.startswith('/review'), 2,
-                '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m8.5 12.2 2.4 2.3 4.6-4.7"/>') %}
+    {% call nav('/', 'Hôm nay', p == '/', 1,
+           '<path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/>') %}
       {% if navc.get('review') %}<span class="badge">{{ navc.review }}<span class="sr-only"> video chờ duyệt</span></span>{% endif %}
     {% endcall %}
-    {{ nav('/calendar', 'Lịch đăng', p.startswith('/calendar'), 3,
+    {{ nav('/calendar', 'Lịch đăng', p.startswith('/calendar'), 2,
            '<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>') }}
-    {% call nav('/queue', 'Video', p.startswith('/queue'), 4,
+    {% call nav('/queue', 'Video', p.startswith('/queue'), 3,
                 '<rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="m10 9 5 3-5 3z"/>') %}
       {% if navc.get('failed') %}<span class="badge err">{{ navc.failed }}<span class="sr-only"> video lỗi</span></span>{% endif %}
     {% endcall %}
@@ -59,12 +57,14 @@
     {% endfor %}
 
     <p class="nav-sec">Hệ thống</p>
-    {{ nav('/accounts', 'Tài khoản', p.startswith('/accounts'), 5,
+    {{ nav('/accounts', 'Tài khoản', p.startswith('/accounts'), 4,
            '<circle cx="9" cy="8.5" r="3.2"/><path d="M3.5 19.5c.8-3.1 3-4.8 5.5-4.8s4.7 1.7 5.5 4.8"/><circle cx="17" cy="9.5" r="2.4"/><path d="M15.9 14.8c2 .3 3.5 1.7 4.1 4"/>') }}
-    {{ nav('/browsers', 'Trình duyệt', p.startswith('/browsers'), 6,
+    {{ nav('/browsers', 'Trình duyệt', p.startswith('/browsers'), 5,
            '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M3 9h18"/><circle cx="12" cy="14.3" r="2.6"/>') }}
-    {{ nav('/settings', 'Cài đặt', p.startswith('/settings'), 7,
-           '<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/>') }}
+    {{ nav('/voicestudio', 'VoiceStudio', p.startswith('/voicestudio'), None,
+           '<path d="M12 3.5a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0v-5a3 3 0 0 0-3-3z"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>') }}
+    {{ nav('/settings', 'Cài đặt', p.startswith('/settings'), 6,
+           '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>') }}
 
     <div class="nav-bottom-wrap">
       {# thẻ Chạy tự động: công tắc + việc đang làm (poll 3s) #}
@@ -75,7 +75,7 @@
         <button type="button" data-theme-set="dark" title="Tối"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.6 5.6 0 0 1 6.4 2.5a5.6 5.6 0 1 0 7.1 7.1z"/></svg><span>Tối</span></button>
         <button type="button" data-theme-set="auto" title="Theo máy (Windows)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="8.5" rx="1.5"/><path d="M6 14h4"/></svg><span>Tự động</span></button>
       </div>
-      <div class="app-ver"><span>dytool {{ app_ver() or '' }}</span><span>Ctrl+1–7 · Ctrl+K</span></div>
+      <div class="app-ver"><span>dytool {{ app_ver() or '' }}</span><span>Ctrl+1–6 · Ctrl+K</span></div>
     </div>
   </nav>
 
@@ -120,7 +120,7 @@
 </dialog>
 
 {# Xem lại 1 video ở mọi trạng thái: phần tử có data-vview="<page_id>:<video_id>" (trang Video, Lịch đăng…) #}
-<dialog class="vview" id="vview" aria-labelledby="vv-title"></dialog>
+<dialog class="vview" id="vview" aria-labelledby="vv-title" tabindex="-1"></dialog>
 
 {# Vùng đọc to cho trình đọc màn hình: chỉ được cập nhật (hx-swap-oob) khi bước đăng nhập đổi, không theo từng giây #}
 <div id="sr-live" class="sr-only" aria-live="polite"></div>
@@ -149,7 +149,7 @@
       !['checkbox', 'radio', 'button', 'submit', 'range', 'color', 'file', 'hidden'].includes(a.type);
     const busy = () => typing(document.activeElement) || dirty || document.getElementById('palette')?.open ||
       [...document.querySelectorAll('main video')].some(v => !v.paused) ||
-      !!document.querySelector('.dragging, .drop-on, main .htmx-request, main form.htmx-request');
+      !!document.querySelector('.dragging, .drop-on, main .htmx-request, main form.htmx-request, main [data-live-hold]');
     const refresh = async (v) => {
       const url = location.pathname + location.search;
       let html;
@@ -231,32 +231,98 @@
     document.addEventListener('click', (e) => { if (e.target.closest('[data-theme-set]')) syncBg(); });
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncBg);
   }
-  // Phím tắt: Ctrl+1..7 chuyển trang, Ctrl+K tìm / lệnh nhanh. Chỉ gắn 1 lần (boost chạy lại script này).
+  // Phím tắt: Ctrl+1..6 chuyển trang, Ctrl+K tìm / lệnh nhanh. Chỉ gắn 1 lần (boost chạy lại script này).
   // Hộp xem lại video: bấm phần tử có data-vview -> lấy /videos/<page>/<id>/view, mở <dialog>. Đóng = dừng phát.
   if (!window.__dyVview) {
     window.__dyVview = true;
     const dlg = () => document.getElementById('vview');
-    const openView = async (key) => {
+    // seq (data-vseq): mở từ danh sách chờ duyệt -> duyệt xong hộp tự mở video kế tiếp
+    const openView = async (key, seq) => {
       const [pid, vid] = key.split(':'); const d = dlg(); if (!d) return;
-      const r = await fetch(`/videos/${encodeURIComponent(pid)}/${encodeURIComponent(vid)}/view`);
+      const my = (window.__dyVvOpen = (window.__dyVvOpen || 0) + 1);      // bấm liền 2 video: chỉ lấy lần bấm sau
+      const r = await fetch(`/videos/${encodeURIComponent(pid)}/${encodeURIComponent(vid)}/view` + (seq ? '?seq=' + encodeURIComponent(seq) : ''));
       if (!r.ok) { window.__dyToast && window.__dyToast(await r.text()); return; }
-      d.innerHTML = await r.text();
+      const html = await r.text(); if (my !== window.__dyVvOpen) return;
+      d.innerHTML = html;
+      if (window.htmx) htmx.process(d);       // khối duyệt trong hộp gửi bằng hx-post: phải cho htmx biết phần tử mới
       if (!d.open) d.showModal();
     };
     document.addEventListener('click', (e) => {
       const t = e.target.closest('[data-vview]');
       const inner = e.target.closest('a[href], button, input, select');      // nút / link khác nằm trong ô thì để nó chạy
-      if (t && (!inner || inner === t || !t.contains(inner))) { e.preventDefault(); openView(t.dataset.vview); return; }
+      if (t && (!inner || inner === t || !t.contains(inner))) { e.preventDefault(); openView(t.dataset.vview, t.dataset.vseq); return; }
       const d = dlg();
       if (d && d.open && (e.target.closest('[data-vv-close]') || e.target === d)) d.close();   // nút × hoặc bấm nền mờ
+      const sw = e.target.closest('[data-vv-src]');            // Đã edit / Bản gốc trong hộp
+      if (sw) {
+        const vd = sw.closest('.vv-media')?.querySelector('video'); if (vd) { vd.src = sw.dataset.vvSrc; vd.play().catch(() => {}); }
+        sw.parentElement.querySelectorAll('[data-vv-src]').forEach(x => x.setAttribute('aria-pressed', x === sw));
+      }
     });
+    // link /?v=<page>:<id> (Ctrl+K, link Hộp duyệt cũ): mở thẳng hộp duyệt video đó
+    const openFromUrl = () => {
+      const k = new URLSearchParams(location.search).get('v');
+      if (location.pathname === '/' && k && /^\d+:\d+$/.test(k)) {
+        history.replaceState(null, '', '/' + location.hash); openView(k, '0');
+      }
+    };
+    openFromUrl(); document.addEventListener('htmx:afterSettle', openFromUrl);
     document.addEventListener('keydown', (e) => {
       const t = e.target.closest && e.target.closest('[data-vview]');
-      if (t && (e.key === 'Enter' || e.key === ' ') && t === e.target) { e.preventDefault(); openView(t.dataset.vview); }
+      if (t && (e.key === 'Enter' || e.key === ' ') && t === e.target) { e.preventDefault(); openView(t.dataset.vview, t.dataset.vseq); }
     });
     document.addEventListener('close', (e) => {
       if (e.target.id === 'vview') { e.target.querySelectorAll('video').forEach(v => v.pause()); e.target.innerHTML = ''; }
     }, true);
+    // khối duyệt dùng chung (_review_form.html, ở Hộp duyệt + hộp xem trước): đếm ký tự caption, bấm ô giờ -> chọn "Chọn giờ…"
+    document.addEventListener('input', (e) => {
+      const c = e.target.dataset && e.target.dataset.count && document.getElementById(e.target.dataset.count);
+      if (c) c.textContent = e.target.value.length;
+    });
+    document.addEventListener('focusin', (e) => {
+      if (e.target.matches && e.target.matches('[data-pick-at]')) {
+        const r = e.target.closest('form')?.querySelector('input[name=mode][value=at]'); if (r) { r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); }
+      }
+    });
+    // nút chính nói rõ sẽ làm gì: đổi chữ theo lựa chọn "Đăng lúc" (data-go trên ô chọn)
+    document.addEventListener('change', (e) => {
+      const go = e.target.dataset && e.target.dataset.go;
+      const lb = go && e.target.closest('form')?.querySelector('[data-go-label]');
+      if (lb) lb.textContent = go;
+    });
+    // phím tắt trong hộp duyệt (như Linear / Gmail): J K video sau / trước, A duyệt, X bỏ, S để sau, Z hoàn tác,
+    // E sửa caption, Space phát / dừng. Không chạy khi đang gõ trong ô nhập. Phím = nút có data-vv-key tương ứng.
+    document.addEventListener('keydown', (e) => {
+      const d = dlg(); if (!d || !d.open || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      const tag = (e.target.tagName || '').toLowerCase();
+      if (tag === 'textarea' || tag === 'select' || e.target.isContentEditable || (tag === 'input' && e.target.type !== 'radio')) {
+        if (e.key === 'Escape') { e.preventDefault(); e.target.blur(); }
+        return;
+      }
+      if (e.repeat || window.__dyVvBusy) { if (e.key.length === 1) e.preventDefault(); return; }   // giữ phím / đang gửi: không bắn lặp
+      const k = e.key.toLowerCase();
+      if (k === 'e') { const c = d.querySelector('#vv-cap'); if (c) { e.preventDefault(); c.focus(); } return; }
+      if (e.key === ' ') {        // Space trên nút / link thì để nút đó chạy; chỉ phát / dừng khi focus ở nền hộp / video
+        if (e.target !== d && tag !== 'video') return;
+        const v = d.querySelector('video'); if (v) { e.preventDefault(); v.paused ? v.play() : v.pause(); } return;
+      }
+      const b = d.querySelector('[data-vv-key="' + k + '"]');
+      if (b && !b.disabled) { e.preventDefault(); b.click(); }
+    });
+    // hộp duyệt chỉ chạy 1 yêu cầu 1 lúc (bấm Duyệt rồi J ngay: phản hồi cũ về sau không được đè video đang xem)
+    document.addEventListener('htmx:beforeRequest', (e) => {
+      const t = e.detail.target; if (!t || t.id !== 'vview') return;
+      if (window.__dyVvBusy) { e.preventDefault(); return; }
+      window.__dyVvBusy = true; t.setAttribute('aria-busy', 'true');
+    });
+    document.addEventListener('htmx:afterRequest', (e) => {
+      const t = e.detail.target; if (!t || t.id !== 'vview') return;
+      window.__dyVvBusy = false; t.removeAttribute('aria-busy');
+    });
+    // nội dung hộp đổi (duyệt xong mở video kế…): đưa focus vào hộp để phím tắt / trình đọc màn hình theo kịp
+    document.addEventListener('htmx:afterSwap', (e) => {
+      if (e.target.id === 'vview') { e.target.querySelectorAll('video').forEach(v => v.pause()); e.target.focus(); }
+    });
   }
   if (!window.__dyShell) {
     window.__dyShell = true;

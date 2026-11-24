@@ -22,7 +22,7 @@
       <td><b>{{ t.name }}</b></td>
       <td class="small">{{ vnt(t.deleted_at, '%H:%M %d/%m/%Y') if t.deleted_at else '—' }}</td>
       <td class="small">{{ t.size_mb }} MB</td>
-      <td style="white-space:nowrap; text-align:right">
+      <td class="cell-end">
         <form method="post" action="/browsers/trash/{{ t.id }}/restore" style="display:inline"><button class="btn sm">Khôi phục</button></form>
         <form method="post" action="/browsers/trash/{{ t.id }}/purge" style="display:inline"
               hx-confirm="Xoá hẳn hồ sơ {{ t.name }}? Mất dấu vân tay và cookie đăng nhập, không lấy lại được.">
@@ -33,6 +33,6 @@
 </table>
 </div>
 {% else %}
-  <p class="empty">Thùng rác trống.</p>
+  {% from "_macros.html" import empty %}{% call empty("trash", "Thùng rác trống") %}Hồ sơ bị xoá nằm ở đây {{ days }} ngày rồi tự xoá hẳn.{% endcall %}
 {% endif %}
 {% endblock %}

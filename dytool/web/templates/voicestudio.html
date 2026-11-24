@@ -1,0 +1,442 @@
+{% extends "base.html" %}
+{% block title %}VoiceStudio{% endblock %}
+{% block crumb %}Hệ thống › <b>VoiceStudio</b>{% endblock %}
+{% block body %}
+{% set st = info.state %}
+{% set names = {} %}{% for pr in profiles %}{% set _ = names.update({pr.id: pr.name}) %}{% endfor %}
+<div class="head">
+  <div><h1>VoiceStudio</h1>
+    <p class="sub">Đọc văn bản, nhân bản / thiết kế giọng, quản lý giọng và lịch sử — ngay trong dytool. dytool tự bật
+      VoiceStudio chạy ngầm khi cần (không mở cửa sổ).</p></div>
+</div>
+
+<nav class="filters" aria-label="Mục VoiceStudio">
+  {% for k, label in (('', 'Tổng quan'), ('speak', 'Tạo giọng nói'), ('voices', 'Giọng đã lưu'), ('history', 'Lịch sử'), ('pron', 'Phát âm'), ('log', 'Nhật ký')) %}
+    <a href="/voicestudio{{ '?tab=' ~ k if k }}" class="pill {{ 'on' if tab == k }}" {{ 'aria-current=page' if tab == k }}>{{ label }}</a>
+  {% endfor %}
+</nav>
+
+{% if tab in ('speak', 'voices', 'history', 'pron') and st != 'ok' %}
+  {% include "_vs_status.html" %}
+  <div hx-get="/partials/vs-ready" hx-trigger="every 3s [!document.hidden]" hx-swap="none"></div>
+  <p class="hint">Mục này cần VoiceStudio đang chạy — bấm <b>Bật</b> rồi đợi chấm xanh (khoảng 1 phút), trang tự hiện.</p>
+
+{% elif tab in ('speak', 'voices', 'history', 'pron') and err %}
+  {% from "_macros.html" import empty %}
+  {% call empty('box', 'Không lấy được dữ liệu từ VoiceStudio', act='<a class="btn sm" href="/voicestudio?tab=' ~ tab ~ '">Thử lại</a>') %}{{ err }}{% endcall %}
+
+{# ======================= Tạo giọng nói ======================= #}
+{% elif tab == 'speak' %}
+  {% set rz = reuse or {} %}
+  {% set src0 = 'saved' if (rz.profile_id or (not rz and profiles)) else 'design' %}
+  <form class="vs-speak" id="sp-form" hx-post="/voicestudio/speak" hx-encoding="multipart/form-data" hx-target="#job-speak"
+        hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]">
+    <div class="vs-speak-main">
+      <div class="card">
+        <div class="vs-tools" role="toolbar" aria-label="Công cụ văn bản">
+          <details class="check-menu">
+            <summary class="btn sm ghost" title="Chèn âm thanh biểu cảm vào chỗ con trỏ">Biểu cảm</summary>
+            <div class="check-pop">{% for tok, label in va.EXPRESSIONS %}<button type="button" data-ins="{{ tok }} ">{{ label }} <code>{{ tok }}</code></button>{% endfor %}</div>
+          </details>
+          <details class="check-menu">
+            <summary class="btn sm ghost" title="Chèn khoảng nghỉ">Ngắt nghỉ</summary>
+            <div class="check-pop">{% for tok, label in va.PAUSES %}<button type="button" data-ins=" {{ tok }} ">{{ label }} <code>{{ tok }}</code></button>{% endfor %}</div>
+          </details>
+          <button type="button" class="btn sm ghost" data-wrap="[[|]]" title="Đọc 1 từ theo cách viết khác: chọn từ rồi bấm, gõ cách đọc sau dấu |">Sửa cách đọc</button>
+          <label class="btn sm ghost" style="margin:0" title="Mở file .txt / .srt (chỉ lấy chữ)">Mở file…
+            <input type="file" accept=".txt,.srt,.md,text/plain" id="sp-txt" hidden></label>
+          <div class="spacer"></div>
+          <span class="small muted"><span id="sp-n">{{ (rz.text or '')|length }}</span> / 20.000</span>
+        </div>
+        <label for="sp-text" class="sr-only">Văn bản cần đọc</label>
+        <textarea id="sp-text" name="text" rows="11" maxlength="20000" required
+                  placeholder="Gõ hoặc dán văn bản cần đọc… Văn bản dài được tự chia đoạn rồi nối lại.">{{ rz.text or '' }}</textarea>
+        <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap">
+          <button type="submit" class="btn primary">Đọc</button>
+          <span class="small muted">Ctrl + Enter</span>
+          <div class="spacer"></div>
+          <button type="button" class="btn sm ghost" id="sp-clear">Xoá văn bản</button>
+        </div>
+        {% with key = 'speak', t = jobs.get('speak'), fresh = false %}{% include "_vs_job.html" %}{% endwith %}
+      </div>
+
+    </div>
+
+    <div class="card vs-speak-opts">
+      <fieldset class="vs-src">
+        <legend>Giọng</legend>
+        <div class="seg" role="radiogroup">
+          {% for k, l in (('saved', 'Đã lưu'), ('file', 'File ghi âm'), ('design', 'Thiết kế')) %}
+            <label><input type="radio" name="src" value="{{ k }}" {{ 'checked' if src0 == k }}><span>{{ l }}</span></label>
+          {% endfor %}
+        </div>
+        <div class="vs-src-panel" data-src="saved">
+          {% if profiles %}
+            <label for="sp-voice" class="sr-only">Giọng đã lưu</label>
+            <select id="sp-voice" name="voice">
+              {% for pr in profiles %}<option value="{{ pr.id }}" {{ 'selected' if (v or rz.profile_id) == pr.id }}>{{ pr.name }}{{ ' · ' ~ va.LANG_NAMES.get(pr.language, pr.language) if pr.language and pr.language != 'vi' }}</option>{% endfor %}
+            </select>
+            <audio controls preload="none" id="sp-voice-audio" aria-label="Nghe giọng mẫu"></audio>
+            <p class="hint" style="margin:0">Quản lý giọng ở <a href="/voicestudio?tab=voices">Giọng đã lưu</a>.</p>
+          {% else %}<p class="hint">Chưa có giọng nào — tạo ở <a href="/voicestudio?tab=voices">Giọng đã lưu</a>.</p>{% endif %}
+        </div>
+        <div class="vs-src-panel" data-src="file">
+          <label for="sp-ref">File giọng mẫu <span class="muted">(5–15 giây, 1 người nói rõ)</span></label>
+          <input id="sp-ref" type="file" name="ref_file" accept="audio/*,video/mp4">
+          <label for="sp-reftext">Lời trong file <span class="muted">(trống = tự nghe)</span></label>
+          <textarea id="sp-reftext" name="ref_text" rows="2" maxlength="1000"></textarea>
+          <label for="sp-style">Kiểu nói <span class="muted">(tuỳ chọn, tiếng Anh — vd. whisper)</span></label>
+          <input id="sp-style" type="text" name="style_extra" maxlength="120" autocomplete="off">
+          <p class="hint" style="margin:4px 0 0">Ưng giọng thì bấm “Lưu thành giọng” ở bản đọc. Chỉ dùng giọng của bạn hoặc người đã đồng ý.</p>
+        </div>
+        <div class="vs-src-panel" data-src="design">
+          {% with prefix = 'sp', vd = reuse_vd or {}, describe = '', tags = '' %}{% include "_vs_design.html" %}{% endwith %}
+        </div>
+      </fieldset>
+
+      <div class="grid g2" style="gap:0 10px">
+        <div><label for="sp-lang">Ngôn ngữ</label>
+          <select id="sp-lang" name="language">{% for k, l in va.LANGS %}<option value="{{ k }}" {{ 'selected' if (rz.language or 'vi') == k }}>{{ l }}</option>{% endfor %}</select></div>
+        <div><label for="sp-fx">Xử lý âm thanh</label>
+          <select id="sp-fx" name="effect">{% for k, l in va.EFFECTS %}<option value="{{ k }}" title="{{ l }}">{{ l.split(' — ')[0] }}</option>{% endfor %}</select></div>
+      </div>
+      <label for="sp-speed">Tốc độ: <output id="sp-sv">1×</output></label>
+      <input id="sp-speed" type="range" name="speed" min="0.5" max="2" step="0.05" value="1">
+      <div class="grid g2" style="gap:0 10px">
+        <div><label for="sp-seed">Seed</label>
+          <div class="row" style="gap:4px"><input id="sp-seed" type="number" name="seed" value="{{ rz.seed or '' }}" placeholder="ngẫu nhiên" style="flex:1; min-width:0">
+            <button type="button" class="btn sm ghost" id="sp-reroll" title="Seed ngẫu nhiên mới, giữ cố định">🎲</button></div></div>
+        <div><label for="sp-dur">Độ dài (giây)</label>
+          <input id="sp-dur" type="number" name="duration" min="0.3" max="600" step="0.1" placeholder="tự động"></div>
+      </div>
+      <p class="hint" style="margin:4px 0 0">Seed trống = mỗi lần đọc khác nhau. Độ dài: ép đọc vừa đúng số giây (lồng tiếng khớp hình).</p>
+
+      <details class="vs-adv">
+        <summary>Tinh chỉnh giọng</summary>
+        <div class="grid g2" style="gap:0 10px">
+          {% for key, label, lo, hi, step, hint in va.ADVANCED %}
+            <div><label for="sp-adv-{{ key }}" title="{{ hint }}">{{ label }}</label>
+              <input id="sp-adv-{{ key }}" type="number" name="adv_{{ key }}" min="{{ lo }}" max="{{ hi }}" step="{{ step }}" placeholder="mặc định" title="{{ hint }}"></div>
+          {% endfor %}
+        </div>
+        <label class="check"><input type="checkbox" name="denoise" checked> Khử nhiễu giọng mẫu</label>
+        <label class="check"><input type="checkbox" name="postprocess" checked> Hậu xử lý (cắt lặng, chuẩn âm lượng)</label>
+        <label class="check"><input type="checkbox" name="pronounce" checked> Áp dụng <a href="/voicestudio?tab=pron">từ điển phát âm</a></label>
+        <button type="button" class="btn sm ghost" id="sp-reset">Đặt lại mặc định</button>
+      </details>
+    </div>
+  </form>
+
+  <section class="section" aria-labelledby="h-recent" style="margin-top:16px">
+    <div class="row"><h2 id="h-recent">Bản đọc gần đây</h2><div class="spacer"></div>
+      {% if history %}<a class="small" href="/voicestudio?tab=history">Tất cả ({{ history|length }})</a>{% endif %}</div>
+    {% if history %}
+      <div class="card" style="padding:0">{% for h in history[:6] %}{% include "_vs_hist_row.html" %}{% endfor %}</div>
+    {% else %}<p class="hint">Chưa có bản đọc nào.</p>{% endif %}
+  </section>
+
+
+{# ======================= Giọng đã lưu ======================= #}
+{% elif tab == 'voices' %}
+  <section class="section" aria-labelledby="h-new" style="margin-top:0">
+    <h2 id="h-new">Tạo giọng mới</h2>
+    <div class="grid g2">
+      <form class="card" method="post" action="/voicestudio/voices/clone" enctype="multipart/form-data" hx-encoding="multipart/form-data"
+            hx-disabled-elt="find button">
+        <h3 style="margin:0 0 4px">Nhân bản từ file ghi âm</h3>
+        <p class="hint" style="margin-top:0">5–30 giây, 1 người nói rõ, không nhạc nền. Dùng giọng của bạn hoặc người đã đồng ý.</p>
+        <label for="cl-name">Tên giọng</label>
+        <input id="cl-name" type="text" name="name" maxlength="40" required autocomplete="off" placeholder="vd. Giọng kể chuyện">
+        <label for="cl-file">File ghi âm (wav, mp3, m4a…)</label>
+        <input id="cl-file" type="file" name="file" accept="audio/*,video/mp4" required>
+        <div class="grid g2" style="gap:0 10px">
+          <div><label for="cl-lang">Ngôn ngữ</label>
+            <select id="cl-lang" name="language">{% for k, l in va.LANGS %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></div>
+        </div>
+        <label for="cl-text">Lời nói trong file <span class="muted">(để trống = tự nghe ra chữ)</span></label>
+        <textarea id="cl-text" name="ref_text" rows="2" maxlength="1000"></textarea>
+        <label class="check"><input type="checkbox" name="consent" required> Tôi có quyền dùng giọng này</label>
+        <button class="btn primary" style="margin-top:8px">Nhân bản giọng</button>
+        <span class="hint htmx-indicator" style="margin-left:8px">Đang nhân bản (10–60 giây)…</span>
+      </form>
+
+      <form class="card" method="post" action="/voicestudio/voices/design-save" hx-disabled-elt="find button">
+        <h3 style="margin:0 0 4px">Thiết kế theo mô tả</h3>
+        <p class="hint" style="margin-top:0">Chọn đặc điểm, nghe thử, đổi seed tới khi ưng rồi lưu thành giọng cố định.</p>
+        <label for="ds-name">Tên giọng</label>
+        <input id="ds-name" type="text" name="name" maxlength="40" required autocomplete="off" placeholder="vd. Nữ trẻ trong trẻo">
+        {% with prefix = 'ds', vd = {'gender': 'female', 'age': 'young adult', 'pitch': 'moderate pitch'}, describe = '', tags = '' %}{% include "_vs_design.html" %}{% endwith %}
+        <label for="ds-seed">Seed <span class="muted">(seed khác = giọng khác)</span></label>
+        <div class="row" style="gap:6px"><input id="ds-seed" type="number" name="seed" value="7" required style="flex:1">
+          <button type="button" class="btn sm ghost" title="Seed ngẫu nhiên"
+                  onclick="document.getElementById('ds-seed').value=Math.floor(Math.random()*99999)">🎲 Đổi</button></div>
+        <div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap">
+          <button type="button" class="btn" hx-post="/voicestudio/voices/design-preview" hx-include="closest form"
+                  hx-target="#job-design" hx-swap="outerHTML" hx-disabled-elt="this">Nghe thử</button>
+          <button class="btn primary">Lưu giọng</button>
+        </div>
+        {% with key = 'design', t = jobs.get('design'), fresh = false %}{% include "_vs_job.html" %}{% endwith %}
+      </form>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="h-saved">
+    <h2 id="h-saved">Giọng đã lưu <span class="count">{{ profiles|length }}</span></h2>
+    {% if not profiles %}
+      <p class="hint">Chưa có giọng nào — tạo ở trên, hoặc dytool tự tạo khi lồng tiếng video đầu tiên.</p>
+    {% endif %}
+    <div class="grid g2">
+      {% for pr in profiles %}
+        {% set used = usage.get((pr.name or '')|lower, []) %}
+        <div class="card vs-voice">
+          <div class="row" style="gap:8px">
+            <h3 class="trunc" title="{{ pr.name }}">{{ pr.name }}</h3>
+            {% if pr.is_demo %}<span class="pill">Mẫu</span>{% endif %}
+            {% if (pr.name or '').startswith('dy-') %}<span class="pill">dytool tự tạo</span>{% endif %}
+            <div class="spacer"></div>
+            <span class="small muted">{{ va.ago(pr.created_at) }}</span>
+          </div>
+          <p class="small muted" style="margin:4px 0 0">
+            {{ va.LANG_NAMES.get(pr.language, pr.language) }}{% if pr.instruct %} · {{ pr.instruct }}{% endif %}</p>
+          <p class="small" style="margin:6px 0 0">
+            {% if used %}Đang dùng: {% for u in used %}<span class="tag">{{ u }}</span> {% endfor %}
+            {% else %}<span class="muted">Chưa gắn kênh nào</span>{% endif %}</p>
+          <audio controls preload="none" src="/voicestudio/voices/{{ pr.id }}/audio" aria-label="Giọng mẫu {{ pr.name }}"></audio>
+          <div class="row" style="gap:6px; flex-wrap:wrap">
+            <a class="btn sm" href="/voicestudio?tab=speak&amp;v={{ pr.id }}">Đọc văn bản</a>
+            <details class="vs-rename">
+              <summary class="btn sm ghost">Đổi tên</summary>
+              <form method="post" action="/voicestudio/voices/{{ pr.id }}/rename" class="row" style="gap:6px; margin-top:6px">
+                <label for="rn-{{ pr.id }}" class="sr-only">Tên mới</label>
+                <input id="rn-{{ pr.id }}" type="text" name="name" value="{{ pr.name }}" maxlength="40" required style="flex:1">
+                <button class="btn sm">Lưu</button></form>
+            </details>
+            <div class="spacer"></div>
+            <form method="post" action="/voicestudio/voices/{{ pr.id }}/delete"
+                  hx-confirm="Xoá giọng “{{ pr.name }}”? Không khôi phục được." hx-disabled-elt="find button">
+              <button class="btn sm ghost danger" {{ 'disabled title=\"Đang dùng cho kênh — chọn giọng khác trước\"'|safe if used }}>Xoá</button></form>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+
+{# ======================= Lịch sử ======================= #}
+{% elif tab == 'history' %}
+  {% set shown = history|selectattr('starred')|list if star else history %}
+  <div class="row" style="margin-bottom:12px; gap:10px; flex-wrap:wrap">
+    <div class="chips" style="display:flex; gap:6px" role="group" aria-label="Lọc">
+      <a href="/voicestudio?tab=history" class="fchip {{ 'on' if not star }}">Tất cả <span class="count">{{ history|length }}</span></a>
+      <a href="/voicestudio?tab=history&amp;star=1" class="fchip {{ 'on' if star }}">Đã đánh dấu <span class="count">{{ history|selectattr('starred')|list|length }}</span></a>
+    </div>
+    <span class="small muted">Bản dytool lồng tiếng video không lưu ở đây.</span>
+    <div class="spacer"></div>
+    {% if history %}<form method="post" action="/voicestudio/history/clear" hx-confirm="Xoá toàn bộ lịch sử (cả file âm thanh)? Không khôi phục được.">
+      <button class="btn sm ghost danger">Xoá hết</button></form>{% endif %}
+  </div>
+  {% if shown %}
+    <div class="card" style="padding:0">{% for h in shown %}{% include "_vs_hist_row.html" %}{% endfor %}</div>
+  {% elif star and history %}
+    <p class="hint">Chưa đánh dấu bản đọc nào — bấm ngôi sao ở bản đọc để giữ lại dễ tìm.</p>
+  {% else %}
+    {% from "_macros.html" import empty %}
+    {% call empty('clock', 'Chưa có bản đọc nào', act='<a class="btn sm primary" href="/voicestudio?tab=speak">Tạo giọng nói</a>') %}Văn bản bạn cho VoiceStudio đọc sẽ lưu ở đây để nghe lại / tải về.{% endcall %}
+  {% endif %}
+
+{# ======================= Từ điển phát âm ======================= #}
+{% elif tab == 'pron' %}
+  <div class="grid g2" style="align-items:start">
+    <form class="card" method="post" action="/voicestudio/pron/add" hx-disabled-elt="find button">
+      <h3 style="margin:0 0 4px">Thêm từ</h3>
+      <p class="hint" style="margin-top:0">VoiceStudio thay từ bằng cách đọc trước khi đọc — áp dụng cho mọi giọng, cả lồng
+        tiếng video. Hợp với tên riêng, từ viết tắt, tiếng Anh (vd. <code>TikTok</code> → <code>tích tốc</code>).</p>
+      <div class="grid g2" style="gap:0 10px">
+        <div><label for="pr-term">Từ / cụm từ</label><input id="pr-term" type="text" name="term" maxlength="100" required autocomplete="off"></div>
+        <div><label for="pr-rep">Đọc thành</label><input id="pr-rep" type="text" name="replacement" maxlength="200" required autocomplete="off"></div>
+      </div>
+      <label for="pr-lang">Áp dụng cho</label>
+      <select id="pr-lang" name="language"><option value="*">Mọi ngôn ngữ</option>
+        {% for k, l in va.LANGS %}{% if k != 'Auto' %}<option value="{{ k }}">{{ l }}</option>{% endif %}{% endfor %}</select>
+      <button class="btn primary" style="margin-top:10px">Thêm</button>
+    </form>
+    <form class="card" hx-post="/voicestudio/pron/test" hx-target="#pr-out" hx-swap="innerHTML">
+      <h3 style="margin:0 0 4px">Thử</h3>
+      <label for="pr-test">Câu thử</label>
+      <textarea id="pr-test" name="text" rows="3" maxlength="1000" required placeholder="Gõ câu có từ trong từ điển…"></textarea>
+      <input type="hidden" name="language" value="vi">
+      <button class="btn" style="margin-top:8px">Xem sẽ đọc thành</button>
+      <div id="pr-out" aria-live="polite"></div>
+      <p class="hint">Sửa 1 chỗ ngay trong văn bản: <code>[[từ|cách đọc]]</code> (nút “Sửa cách đọc” ở Tạo giọng nói).</p>
+    </form>
+  </div>
+  <section class="section">
+    <h2>Từ điển <span class="count">{{ (pron or [])|length }}</span></h2>
+    {% if pron %}
+      <div class="card" style="padding:0">
+        {% for e in pron %}
+          <div class="vs-hist">
+            <form method="post" action="/voicestudio/pron/{{ e.id }}/toggle">
+              <input type="hidden" name="on" value="{{ '' if e.enabled else '1' }}">
+              <button class="pin-btn{{ ' on' if e.enabled }}" aria-pressed="{{ 'true' if e.enabled else 'false' }}" title="{{ 'Tắt' if e.enabled else 'Bật' }}"
+                      aria-label="{{ 'Tắt' if e.enabled else 'Bật' }} mục {{ e.term }}">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{% if e.enabled %}<path d="M20 6 9 17l-5-5"/>{% else %}<circle cx="12" cy="12" r="8"/>{% endif %}</svg></button></form>
+            <div class="vs-hist-main"><b>{{ e.term }}</b> → {{ e.replacement }}
+              <span class="small muted"> · {{ 'mọi ngôn ngữ' if (e.language or '*') == '*' else va.LANG_NAMES.get(e.language, e.language) }}{{ ' · đang tắt' if not e.enabled }}</span></div>
+            <form method="post" action="/voicestudio/pron/{{ e.id }}/delete"><button class="btn sm ghost danger" aria-label="Xoá {{ e.term }}">Xoá</button></form>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}<p class="hint">Chưa có từ nào.</p>{% endif %}
+  </section>
+
+{# ======================= Nhật ký ======================= #}
+{% elif tab == 'log' %}
+  <div class="card" style="padding:0" data-live-hold>
+    <div hx-get="/partials/vs-log" hx-trigger="load, every 4s [!document.hidden]" hx-swap="innerHTML" class="vs-log-wrap">
+      <pre class="vs-log">Đang tải…</pre></div>
+  </div>
+  <p class="hint">Nhật ký backend VoiceStudio do dytool bật (<code>data/voicestudio.log</code>), 120 dòng cuối, tự cập nhật.</p>
+
+{# ======================= Tổng quan ======================= #}
+{% else %}
+  {% include "_vs_status.html" %}
+
+  <section class="section" aria-labelledby="h-voice">
+    <h2 id="h-voice">Giọng lồng tiếng của các kênh</h2>
+    <div class="card" style="padding:0">
+      {% for ch in channels %}
+        <div class="vs-ch{{ ' off' if not ch.dub }}">
+          <div class="vs-ch-name"><a href="/pages/{{ ch.id }}?tab=edit">{{ ch.name }}</a>
+            {% if not ch.dub %}<span class="small muted"> · tắt lồng tiếng</span>{% endif %}</div>
+          {% for g, label in (('male', 'Nam'), ('female', 'Nữ')) %}
+            {% set vc = ch.voices[g] %}
+            <div class="vs-ch-voice">
+              <span class="small"><b>{{ label }}:</b> {{ vc.name }}{% if not vc.fixed %} <span class="muted">· {{ vc.instruct }}</span>{% endif %}</span>
+              {% if ch.dub %}
+                <form hx-post="/voicestudio/test" hx-target="#job-ch{{ ch.id }}-{{ g }}" hx-swap="outerHTML" hx-disabled-elt="find button" style="display:inline">
+                  <input type="hidden" name="pid" value="{{ ch.id }}"><input type="hidden" name="gender" value="{{ g }}">
+                  <button class="btn sm ghost" {{ 'disabled' if st != 'ok' }}>Đọc thử</button></form>
+                {% with key = 'ch' ~ ch.id ~ '-' ~ g, t = jobs.get('ch' ~ ch.id ~ '-' ~ g), fresh = false %}{% include "_vs_job.html" %}{% endwith %}
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="hint" style="padding:14px 18px; margin:0">Chưa có kênh nào.</p>
+      {% endfor %}
+    </div>
+    <p class="hint">Đổi giọng của kênh ở trang kênh › Cài đặt kênh › Edit &amp; lồng tiếng: chọn 1 giọng trong
+      <a href="/voicestudio?tab=voices">Giọng đã lưu</a> hoặc mô tả giọng.</p>
+  </section>
+
+  <section class="section" aria-labelledby="h-vs-set">
+    <h2 id="h-vs-set">Chạy ngầm &amp; bộ nhớ</h2>
+    <div class="card">
+      <div class="set-row">
+        <div class="set-label"><b>Tự tắt khi rảnh</b>
+          <p class="hint">Không có video cần lồng tiếng trong khoảng này thì tắt để trả RAM / VRAM. Cần lại thì tool tự bật
+            (mất khoảng 1 phút).</p></div>
+        <form hx-post="/voicestudio/idle" hx-trigger="change" hx-swap="none">
+          <label for="vs-idle" class="sr-only">Tự tắt sau</label>
+          <select id="vs-idle" name="minutes" class="auto">
+            {% for mnt in idle_choices %}
+              <option value="{{ mnt }}" {{ 'selected' if (info.idle|int) == mnt }}>{{ 'Không tự tắt' if mnt == 0 else 'Sau ' ~ mnt ~ ' phút' }}</option>
+            {% endfor %}
+          </select>
+        </form>
+      </div>
+      {% if st == 'ok' %}
+      <div class="set-row">
+        <div class="set-label"><b>Chuyển model sang RAM sau mỗi lần đọc</b>
+          <p class="hint">Trả VRAM ngay sau khi đọc — nên bật nếu card ≤ 4 GB (dùng chung với tách giọng Demucs).
+            Lần đọc sau chậm hơn vài giây.</p></div>
+        <form hx-post="/voicestudio/offload" hx-trigger="change" hx-swap="none">
+          <label class="check" style="margin:0"><input type="checkbox" name="on" {{ 'checked' if (info.offload or {}).get('enabled') }}> Bật</label>
+        </form>
+      </div>
+      <div class="set-row">
+        <div class="set-label"><b>Bộ nhớ</b>
+          {% set sy = info.sys or {} %}
+          <p class="hint">{% if sy %}RAM {{ '%.1f'|format(sy.ram or 0) }} / {{ '%.1f'|format(sy.total_ram or 0) }} GB
+            {% if sy.total_vram %} · VRAM {{ '%.1f'|format(sy.vram or 0) }} / {{ '%.1f'|format(sy.total_vram) }} GB{% endif %}
+            {% else %}—{% endif %}. Giải phóng = gỡ model khỏi card đồ hoạ, lần đọc sau tự nạp lại.</p></div>
+        <button class="btn" hx-post="/voicestudio/flush" hx-swap="none" hx-disabled-elt="this">Giải phóng bộ nhớ</button>
+      </div>
+      {% endif %}
+      <div class="set-row">
+        <div class="set-label"><b>App VoiceStudio</b>
+          <p class="hint">Chỉ cần lần đầu (cài runtime, tải model, chấp nhận license). Mọi việc khác làm ngay ở trang này.</p></div>
+        <div>{% if vs_installed %}<button class="btn" hx-post="/services/voicestudio-app" hx-swap="none" hx-disabled-elt="this">Mở app VoiceStudio</button>
+          {% else %}<a class="btn" href="https://github.com/debpalash/VoiceStudio/releases/latest" target="_blank" rel="noopener">Tải VoiceStudio</a>{% endif %}</div>
+      </div>
+      {% if info.runtime %}
+      <div class="set-row">
+        <div class="set-label"><b>Thư mục</b></div>
+        <dl class="kv" style="margin:0"><dt>Runtime</dt><dd><code>{{ info.runtime }}</code></dd>
+          <dt>Địa chỉ</dt><dd><code>{{ info.api }}</code></dd></dl>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+{% endif %}
+<script>
+  (() => {   // Tạo giọng nói — chạy lại mỗi lần vẽ trang: cờ trên form
+    const f = document.getElementById('sp-form');
+    if (!f || f.dataset.ready) return;
+    f.dataset.ready = '1';
+    const ta = f.querySelector('#sp-text'), n = f.querySelector('#sp-n');
+    const count = () => { n.textContent = ta.value.length.toLocaleString('vi-VN'); };
+    ta.addEventListener('input', count);
+    const insert = (txt) => {
+      const a = ta.selectionStart ?? ta.value.length, b = ta.selectionEnd ?? a;
+      ta.setRangeText(txt, a, b, 'end'); ta.focus(); count();
+    };
+    f.querySelectorAll('[data-ins]').forEach(b => b.addEventListener('click', () => {
+      insert(b.dataset.ins); b.closest('details')?.removeAttribute('open');
+    }));
+    f.querySelector('[data-wrap]')?.addEventListener('click', () => {   // [[từ|cách đọc]]
+      const a = ta.selectionStart, b = ta.selectionEnd, word = ta.value.slice(a, b) || 'từ';
+      ta.setRangeText('[[' + word + '|]]', a, b, 'end');
+      ta.selectionStart = ta.selectionEnd = a + word.length + 3; ta.focus(); count();
+    });
+    f.querySelector('#sp-txt')?.addEventListener('change', async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      let t = await file.text();
+      if (/\.srt$/i.test(file.name)) t = t.replace(/^\d+\s*$/gm, '').replace(/^[\d:,.]+ --> [\d:,.]+.*$/gm, '').replace(/\n{2,}/g, '\n').trim();
+      ta.value = t.slice(0, 20000); count(); e.target.value = '';
+    });
+    f.querySelector('#sp-clear').addEventListener('click', () => { ta.value = ''; count(); ta.focus(); });
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); f.requestSubmit(); }
+    });
+    // nguồn giọng: chỉ hiện ô của nguồn đang chọn; ô ẩn không gửi file
+    const panels = f.querySelectorAll('.vs-src-panel');
+    const srcSync = () => {
+      const v = f.querySelector('input[name=src]:checked')?.value;
+      panels.forEach(p => { p.hidden = p.dataset.src !== v; });
+    };
+    f.querySelectorAll('input[name=src]').forEach(r => r.addEventListener('change', srcSync)); srcSync();
+    const sel = f.querySelector('#sp-voice'), au = f.querySelector('#sp-voice-audio');
+    const voiceSync = () => { if (sel && au) au.src = '/voicestudio/voices/' + sel.value + '/audio'; };
+    sel?.addEventListener('change', voiceSync); voiceSync();
+    const sp = f.querySelector('#sp-speed'), sv = f.querySelector('#sp-sv');
+    const spSync = () => { sv.value = (+sp.value).toString() + '×'; };
+    sp.addEventListener('input', spSync); spSync();
+    f.querySelector('#sp-reroll').addEventListener('click', () => { f.querySelector('#sp-seed').value = Math.floor(Math.random() * 2147483647); });
+    f.querySelector('#sp-reset').addEventListener('click', () => {
+      f.querySelectorAll('.vs-adv input[type=number]').forEach(i => { i.value = ''; });
+      f.querySelectorAll('.vs-adv input[type=checkbox]').forEach(i => { i.checked = true; });
+      sp.value = 1; spSync(); f.querySelector('#sp-dur').value = '';
+    });
+    // menu Biểu cảm / Ngắt nghỉ: bấm ra ngoài thì đóng
+    document.addEventListener('click', (e) => {
+      document.querySelectorAll('details.check-menu[open]').forEach(d => { if (!d.contains(e.target)) d.removeAttribute('open'); });
+    });
+    // "Giữ seed này" ở bản đọc vừa xong
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-keep-seed]');
+      if (b && document.getElementById('sp-seed')) document.getElementById('sp-seed').value = b.dataset.keepSeed;
+    });
+  })();
+</script>
+{% endblock %}

@@ -3,9 +3,10 @@
 {% block crumb %}Kênh › <b>{{ page.name }}</b>{% endblock %}
 {% block body %}
 {% from "_ch_live.html" import pill, summary %}
+{% from "_macros.html" import empty %}
 {% set tt = page.platform == 'tiktok' %}
 {% set gender_vi = {'auto': 'tự nhận nam / nữ', 'male': 'luôn giọng nam', 'female': 'luôn giọng nữ'} %}
-<div class="ch-head">
+<div class="head ch-head">
   <span class="ch-av lg" style="background:{{ color }}" aria-hidden="true">{{ page.name[:1]|upper }}</span>
   <div style="min-width:0">
     <div class="row" style="gap:10px"><h1 class="trunc" style="max-width:none">{{ page.name }}</h1>
@@ -20,18 +21,139 @@
   <label class="ch-switch">{{ 'Bật kênh' }}
     <input type="checkbox" class="switch" role="switch" name="enabled" form="settings" {{ 'checked' if page.enabled }}
            aria-label="Bật kênh {{ page.name }} — tool tự quét, edit, lồng tiếng và đăng"></label>
+  {# cài đặt kênh nằm sau 1 nút: phần chính của trang là video của kênh #}
+  <button type="button" class="btn" data-goto="nguon" data-view-btn="video">
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style="fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+    Cài đặt kênh</button>
+  <button type="button" class="btn primary" data-goto="" data-view-btn="settings" hidden>← Về video của kênh</button>
 </div>
 {% if request.query_params.get('copied') %}<div class="notice" role="status">Đã chép cài đặt sang kênh này.</div>{% endif %}
 {% if request.query_params.get('saved') %}<div class="notice" role="status">Đã lưu.</div>{% endif %}
 
-<nav class="flow f4" aria-label="Video của kênh này">
-  <a href="/review?page={{ page.id }}" class="{{ 'is-hot' if stats.get('review') }}"><span class="n">{{ stats.get('review', 0) }}</span><span class="l">Chờ duyệt</span></a>
-  <a href="/calendar?page={{ page.id }}"><span class="n">{{ week_n }}</span><span class="l">Lịch 7 ngày tới</span></a>
-  <a href="/queue?status=uploaded&ch={{ page.id }}" class="is-fin"><span class="n">{{ month_n }}</span><span class="l">Đã đăng 30 ngày</span></a>
-  <a href="/queue?status=failed&ch={{ page.id }}"><span class="n" style="{{ 'color:var(--err)' if stats.get('failed') }}">{{ stats.get('failed', 0) }}</span><span class="l">Lỗi</span></a>
-</nav>
+{# ---------- Phần chính: video của kênh ---------- #}
+<div id="ch-videos">
+<div class="ch-layout">
+<div style="min-width:0">
+  {% set keep = '&q=' ~ vids.q|urlencode if vids.q else '' %}
+  <form method="get" action="/pages/{{ page.id }}" class="toolbar" role="search">
+    {% if vids.st %}<input type="hidden" name="st" value="{{ vids.st }}">{% endif %}
+    <label class="search-field"><span class="sr-only">Tìm video của kênh</span>
+      <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+      <input type="text" id="chq" name="q" value="{{ vids.q }}" placeholder="Tìm mã, mô tả, caption…" autocomplete="off"></label>
+    {% if vids.q %}<a class="btn ghost" href="/pages/{{ page.id }}{{ '?st=' ~ vids.st if vids.st }}">Bỏ lọc</a>{% endif %}
+    <span class="spacer"></span>
+    {% set first = vids.videos|selectattr('status', 'equalto', 'review')|first %}
+    {% if vids.st == 'review' and first %}<button type="button" class="btn primary" data-vview="{{ page.id }}:{{ first.id }}" data-vseq="{{ page.id }}">Duyệt {{ vids.total }} video</button>{% endif %}
+  </form>
+  {# 1 dòng: tab gọn, số 0 không hiện; cửa sổ quá hẹp thì cuộn ngang (không xuống 2 dòng) #}
+  <div class="filters ch-filters" role="navigation" aria-label="Lọc video theo trạng thái">
+    <a class="pill {{ 'on' if not vids.st }}" {{ 'aria-current=page' if not vids.st }} href="/pages/{{ page.id }}?{{ keep[1:] }}">Tất cả<span class="count">{{ vids.all_n }}</span></a>
+    {% for g in vids.groups if g.n or g.key in ('review', 'queued', 'uploaded') %}
+      <a class="pill {{ 'on' if vids.st == g.key }}" {{ 'aria-current=page' if vids.st == g.key }} href="/pages/{{ page.id }}?st={{ g.key }}{{ keep }}">{{ g.label }}{% if g.n %}<span class="count{{ ' err' if g.key == 'failed' }}">{{ g.n }}</span>{% endif %}</a>
+    {% endfor %}
+  </div>
 
-<nav class="tabs" role="tablist" aria-label="Cài đặt kênh">
+  <div class="card table-card">
+  <table class="ch-vtable">
+    <tr><th>Video</th><th style="width:170px">Trạng thái</th><th style="width:118px">Thời điểm</th><th style="width:86px"></th></tr>
+    {% for v in vids.videos %}
+    {% set cls = {'uploaded':'ok','scheduled':'ok','failed':'err','review':'warn','approved':'info','publish_now':'info','schedule_pending':'info','uploading':'info'}.get(v.status, '') %}
+    <tr>
+      <td><button type="button" class="vv-open" data-vview="{{ page.id }}:{{ v.id }}" title="Xem lại video, caption, giờ đăng">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7-4.5z"/></svg>
+          <span class="trunc">{{ v.title }}</span></button>
+        <div class="small muted num">♥ {{ '{:,}'.format(v.likes or 0) }} · {{ (v.duration or 0)|round|int }}s ·
+          <a href="https://www.douyin.com/video/{{ v.id }}" target="_blank" rel="noopener">xem gốc</a>
+          {% if v.source %}<span title="{{ v.source }}"> · {{ v.source.split(':', 1)[-1][:24] }}</span>{% endif %}</div></td>
+      <td><span class="pill {{ cls }}">{{ STATUS_VI.get(v.status, v.status) }}</span>
+        {% if v.error %}<div class="small err-text" style="margin-top:3px">{{ v.error[:140] }}</div>{% endif %}</td>
+      <td class="small num nowrap">
+        {% if v.status == 'uploaded' %}đăng {{ vnt(v.uploaded_at or v.scheduled_at, '%H:%M %d/%m') }}
+        {% elif v.scheduled_at and v.status in ('scheduled', 'schedule_pending', 'uploading') %}hẹn {{ vnt(v.scheduled_at, '%H:%M %d/%m') }}
+        {% else %}<span class="muted">{{ v.updated_at|ago }}</span>{% endif %}</td>
+      <td class="cell-end">
+        {% if v.status == 'failed' %}<button class="btn sm" hx-post="/videos/{{ page.id }}/{{ v.id }}/retry" hx-swap="outerHTML">Thử lại</button>
+        {% elif v.status == 'uploaded' and v.fb_url %}<a class="small" href="{{ v.fb_url }}" target="_blank" rel="noopener">xem bài ↗</a>
+        {% elif v.status == 'review' %}<button type="button" class="btn sm" data-vview="{{ page.id }}:{{ v.id }}" data-vseq="{{ page.id }}" title="Xem video và duyệt ngay tại đây — xong tự mở video chờ duyệt kế tiếp của kênh">Duyệt</button>{% endif %}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4">
+      {% if vids.q or vids.st %}{% call empty('search', 'Không có video nào khớp bộ lọc', act='<a class="btn sm" href="/pages/' ~ page.id ~ '">Bỏ lọc</a>') %}Thử từ khoá hoặc trạng thái khác.{% endcall %}
+      {% elif not o.sources %}{% call empty('video', 'Kênh chưa có video', act='<button type="button" class="btn sm primary" data-goto="nguon">Thêm nguồn Douyin</button>') %}Thêm từ khoá hoặc kênh Douyin rồi bật kênh — tool tự tìm, tải, edit video.{% endcall %}
+      {% else %}{% call empty('video', 'Kênh chưa có video') %}Bấm <b>Quét nguồn ngay</b>, hoặc bật kênh để tool tự quét.{% endcall %}{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% if vids.pages > 1 %}
+  {% set qq = ('&st=' ~ vids.st if vids.st else '') ~ keep %}
+  <nav class="pager" aria-label="Chuyển trang">
+    {% if vids.pg > 1 %}<a class="btn sm" href="/pages/{{ page.id }}?pg={{ vids.pg - 1 }}{{ qq }}">← Trang trước</a>{% endif %}
+    <span class="small muted num">Trang {{ vids.pg }} / {{ vids.pages }} · {{ vids.total }} video</span>
+    {% if vids.pg < vids.pages %}<a class="btn sm" href="/pages/{{ page.id }}?pg={{ vids.pg + 1 }}{{ qq }}">Trang sau →</a>{% endif %}
+  </nav>
+  {% endif %}
+</div>
+
+{# ---------- cột phải: hôm nay, nhịp đăng, nguồn, nhật ký ---------- #}
+<aside class="ch-side">
+  <section class="card" aria-labelledby="h-now">
+    <div class="card-h"><h2 id="h-now">Hôm nay</h2><span class="spacer"></span><a class="small" href="/calendar?page={{ page.id }}">Mở lịch</a></div>
+    <div class="row" style="align-items:baseline; gap:6px"><span class="big-n">{{ o.today_n }}</span>
+      <span class="muted">/ {{ o.cap }} bài</span></div>
+    <div class="ch-bar" style="margin:8px 0 14px"><span style="width:{{ o.today_pct }}%; background:{{ color }}"></span></div>
+    <dl class="kv">
+      <dt>Khung trống kế tiếp</dt><dd>{{ o.next_slot or '—' }}</dd>
+      <dt>Duyệt</dt><dd>{{ 'tự đăng' if s.auto_publish else 'bạn duyệt' }}{{ ' · tự xếp lịch' if s.auto_schedule }}</dd>
+      <dt>Đăng 30 ngày</dt><dd>{{ o.month_n }} video</dd>
+      {% if mirror_to %}<dt>Đăng kèm sang</dt><dd><a href="/pages/{{ mirror_to.id }}">{{ mirror_to.name }}</a></dd>{% endif %}
+      {% if mirrored_by %}<dt>Nhận đăng kèm từ</dt><dd>{% for m in mirrored_by %}<a href="/pages/{{ m.id }}">{{ m.name }}</a>{{ ', ' if not loop.last }}{% endfor %}</dd>{% endif %}
+    </dl>
+    {% if not page.enabled %}<p class="hint">Kênh đang tắt — bật công tắc ở trên để tool tự quét, edit và đăng.</p>{% endif %}
+  </section>
+
+  <section class="card" aria-labelledby="h-pace">
+    <div class="card-h"><h2 id="h-pace">Nhịp đăng</h2><span class="small muted">14 ngày qua · 6 ngày tới</span></div>
+    <div class="pace" role="img" aria-label="Số bài mỗi ngày: {% for d in o.days %}{{ d.date }} {{ d.up }} đã đăng{% if d.sch %}, {{ d.sch }} hẹn giờ{% endif %}; {% endfor %}">
+      {% for d in o.days %}
+      <div class="pace-col" title="{{ d.dow }} {{ d.date }}{{ ' (hôm nay)' if d.today }}: {{ d.up }} đã đăng{% if d.sch or d.future or d.today %}, {{ d.sch }} hẹn giờ{% endif %}">
+        {% if d.sch %}<i class="sch" style="height:{{ d.h_sch }}%; background-color:{{ color }}"></i>{% endif %}
+        {% if d.up %}<i style="height:{{ d.h_up }}%; background:{{ color }}"></i>{% endif %}
+      </div>
+      {% endfor %}
+      <div class="pace-cap" style="bottom:{{ o.cap_pct }}%"><span>giới hạn {{ o.cap }}</span></div>
+    </div>
+    <div class="pace-x" aria-hidden="true">{% for d in o.days %}<span class="{{ 'today' if d.today }}">{{ d.date[:2] }}</span>{% endfor %}</div>
+    <div class="pace-legend"><span><i style="background:{{ color }}"></i>Đã đăng</span>
+      <span><i class="sch" style="background:{{ color }}"></i>Hẹn giờ</span><span><i class="cap"></i>Giới hạn / ngày</span></div>
+  </section>
+
+  <section class="card" aria-labelledby="h-src">
+    <div class="card-h"><h2 id="h-src">Nguồn video</h2><span class="spacer"></span>
+      <button type="button" class="linkbtn" data-goto="nguon">Sửa</button></div>
+    {% for src in o.sources %}
+    <div class="ov-src {{ 'off' if not src.enabled }}">
+      <b class="trunc" style="max-width:100%"><span lang="zh">{{ src.value }}</span>{% if src.vi %} <span class="muted" style="font-weight:400">· {{ src.vi }}</span>{% endif %}</b>
+      <span class="small num">{{ src.n }} tìm · {{ src.up }} đăng</span>
+      <span class="small muted">{{ 'Từ khoá' if src.kind == 'keyword' else 'Kênh' }}{% if src.skip %} · {{ src.skip }} bị lọc{% endif %}{% if not src.enabled %} · đang tắt{% endif %}</span>
+      <span class="small muted">{% if src.last %}{{ src.last|ago }}{% endif %}</span>
+    </div>
+    {% else %}{% call empty("search", "Chưa có nguồn", sm=true, act='<button type="button" class="btn sm" data-goto="nguon">Thêm nguồn</button>') %}Từ khoá hoặc kênh Douyin để tool tìm video.{% endcall %}{% endfor %}
+  </section>
+
+  <details class="card fold" aria-labelledby="h-log">
+    <summary id="h-log">Nhật ký kênh</summary>
+    <div class="ov-log" style="margin-top:8px">
+      {% for l in o.logs %}<div class="{{ l.level }}"><time>{{ vnt(l.ts, '%H:%M %d/%m') }}</time>{{ l.msg }}</div>
+      {% else %}<p class="muted small">Chưa có nhật ký.</p>{% endfor %}
+    </div>
+  </details>
+</aside>
+</div>
+</div>
+
+{# ---------- Cài đặt kênh: mở bằng nút "Cài đặt kênh" (#nguon, #lich… trên URL) ---------- #}
+<div id="ch-settings" hidden>
+<nav class="tabs" role="tablist" aria-label="Cài đặt kênh {{ page.name }}">
   <button type="button" role="tab" data-tab="nguon" aria-selected="true">Nguồn video</button>
   <button type="button" role="tab" data-tab="lich">Đăng &amp; lịch</button>
   <button type="button" role="tab" data-tab="edit">Edit &amp; lồng tiếng</button>
@@ -45,7 +167,7 @@
 <div class="ch-body">
 <div>
   {# ---------- Nguồn: các form riêng, nằm ngoài form cài đặt ---------- #}
-  <section class="card tabpanel" data-panel="nguon" role="tabpanel">
+  <section class="card tabpanel" data-panel="nguon" role="tabpanel" hidden>
     <div class="row" style="align-items:baseline"><h2 style="margin:0">Nguồn Douyin</h2>
       <span class="small muted">quét lại mỗi {{ s.poll_minutes|int }} phút</span></div>
     {% macro source_fields(kind='keyword', value='', prm={}, uid='new') %}
@@ -100,7 +222,7 @@
       <form method="post" action="/sources/{{ src.id }}/delete" hx-confirm="Xoá nguồn {{ src.value }}?">
         <button class="btn sm ghost danger" aria-label="Xoá nguồn {{ src.value }}">Xoá</button></form>
     </div>
-    {% else %}<p class="empty">Chưa có nguồn — thêm ít nhất 1 từ khoá hoặc kênh Douyin bên dưới.</p>{% endfor %}
+    {% else %}{% call empty("search", "Chưa có nguồn", sm=true) %}Thêm ít nhất 1 từ khoá hoặc kênh Douyin ở ô bên dưới.{% endcall %}{% endfor %}
 
     <details class="fold add-src" {{ 'open' if not sources }}>
       <summary>Thêm nguồn</summary>
@@ -155,7 +277,7 @@
           <td class="num">{% if c.scheduled_at %}{{ vnt(c.scheduled_at, '%H:%M %d/%m') }}{% else %}đăng ngay{% endif %}</td>
           <td>{% set cls = {'uploaded':'ok','scheduled':'ok','failed':'err','pending':'info'}[c.status] %}
             <span class="pill {{ cls }}">{{ {'pending':'Chờ đăng','scheduled':'Đã hẹn giờ','uploaded':'Đã đăng','failed':'Lỗi'}[c.status] }}</span>
-            {% if c.error %}<div style="color:var(--err)">{{ c.error[:160] }}</div>{% endif %}</td>
+            {% if c.error %}<div class="err-text">{{ c.error[:160] }}</div>{% endif %}</td>
           <td style="text-align:right; padding-right:0">{% if c.status == 'failed' %}
             <button type="button" class="btn sm" hx-post="/crossposts/{{ c.src_page_id }}/{{ c.dst_page_id }}/{{ c.video_id }}/retry"
                     hx-swap="outerHTML" hx-target="this">Thử lại</button>{% endif %}</td>
@@ -214,6 +336,20 @@
         <div><label for="seed">Seed (đổi số để ra giọng khác)</label>
           <input type="number" id="seed" name="voice_seed" value="{{ s.voice_seed }}"></div>
       </div>
+      {% set lib = vs_cached_voices() %}
+      <div class="grid g2" style="gap:0 12px">
+        {% for g, label in (('male', 'Giọng nam'), ('female', 'Giọng nữ')) %}
+          {% set cur = s['voice_' ~ g ~ '_profile'] %}
+          <div><label for="vp-{{ g }}">{{ label }}</label>
+            <select id="vp-{{ g }}" name="voice_{{ g }}_profile">
+              <option value="">Thiết kế theo mô tả bên dưới</option>
+              {% for pr in lib %}<option value="{{ pr.name }}" {{ 'selected' if cur == pr.name }}>{{ pr.name }}</option>{% endfor %}
+              {% if cur and cur not in lib|map(attribute='name')|list %}<option value="{{ cur }}" selected>{{ cur }} (không thấy trong VoiceStudio)</option>{% endif %}
+            </select></div>
+        {% endfor %}
+      </div>
+      <p class="hint">Giọng có sẵn lấy từ <a href="/voicestudio?tab=voices">VoiceStudio › Giọng đã lưu</a> (nhân bản từ file
+        ghi âm hoặc thiết kế rồi nghe thử ở đó).</p>
       <label for="vm">Mô tả giọng nam</label>
       <input type="text" autocomplete="off" id="vm" name="voice_male" value="{{ s.voice_male }}">
       <label for="vf">Mô tả giọng nữ</label>
@@ -241,6 +377,7 @@
   {% endif %}
 </aside>
 </div>
+</div>
 
 <script>
   // bấm 1 "cụm khác" ở phần xem trước từ khoá -> dùng cụm đó (gắn 1 lần cho mọi trang kênh)
@@ -255,14 +392,26 @@
   }
   (() => {
     // tab: nhớ tab đang mở trên URL (#lich…) để tải lại / quay lại vẫn đúng tab
+    // Phần chính = video của kênh (#ch-videos). Nút "Cài đặt kênh" mở #ch-settings ở tab đang ghi trên URL (#lich…),
+    // hoặc ?tab=nguon (chuyển hướng sau khi thêm / sửa nguồn — hx-boost làm mất phần #). Không có tab = xem video.
     const tabs = [...document.querySelectorAll('[data-tab]')], panels = [...document.querySelectorAll('[data-panel]')];
+    const vids = document.getElementById('ch-videos'), sets = document.getElementById('ch-settings');
     const show = (name) => {
-      if (!tabs.some(t => t.dataset.tab === name)) name = 'nguon';
+      const inSet = tabs.some(t => t.dataset.tab === name);
+      vids.hidden = inSet; sets.hidden = !inSet;
+      document.querySelectorAll('[data-view-btn]').forEach(b => b.hidden = b.dataset.viewBtn !== (inSet ? 'settings' : 'video'));
+      if (!inSet) return;
       tabs.forEach(t => t.setAttribute('aria-selected', t.dataset.tab === name));
       panels.forEach(p => p.hidden = p.dataset.panel !== name);
     };
-    tabs.forEach(t => t.addEventListener('click', () => { show(t.dataset.tab); history.replaceState(null, '', '#' + t.dataset.tab); }));
-    show((location.hash || '#nguon').slice(1));
+    const go = (name) => {
+      show(name);
+      const u = new URLSearchParams(location.search); u.delete('tab'); u.delete('saved'); u.delete('copied');
+      history.replaceState(null, '', location.pathname + (u.toString() ? '?' + u : '') + (name ? '#' + name : ''));
+    };
+    tabs.forEach(t => t.addEventListener('click', () => go(t.dataset.tab)));
+    document.querySelectorAll('[data-goto]').forEach(b => b.addEventListener('click', () => { go(b.dataset.goto); b.closest('main')?.scrollTo?.(0, 0); }));
+    show(location.hash.slice(1) || new URLSearchParams(location.search).get('tab') || '');
     // tự lưu: ô chữ / số lưu sau khi ngừng gõ 0,7 s; ô tick / chọn lưu ngay
     const form = document.getElementById('settings'), status = document.getElementById('save-status');
     let t = null;

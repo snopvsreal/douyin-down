@@ -209,7 +209,9 @@ def publish(data_dir: Path, video: Path, caption: str, cfg: dict, dry_run: bool 
 
             with page.expect_file_chooser(timeout=20000) as fc:
                 page.get_by_role("button", name="Thêm video").first.click()
-            fc.value.set_files(str(video.resolve()))
+            # gắn file chỉ xong khi Facebook xử lý xong sự kiện chọn file: video ~20 MB mất ~35 s (đo trên nhân
+            # ShardX) — mặc định 30 s của Playwright làm lỗi "FileChooser.set_files: Timeout 30000ms exceeded"
+            fc.value.set_files(str(video.resolve()), timeout=300000)
             progress.step("Tải video lên Facebook")
             # chờ upload xong: nút Tiếp cuối trang bật lên
             nxt = page.get_by_role("button", name="Tiếp", exact=True).last

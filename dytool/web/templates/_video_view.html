@@ -1,10 +1,14 @@
 {# Hộp xem lại 1 video (mọi trạng thái): mở từ trang Video, ô Lịch đăng, danh sách lịch. Nạp vào <dialog id="vview"> (base.html) #}
+{% from "_review_form.html" import review_form with context %}
 {% set tt = v.platform == 'tiktok' %}
 {% set cls = {'uploaded':'ok','scheduled':'ok','failed':'err','review':'warn','approved':'info','publish_now':'info','schedule_pending':'info','uploading':'info'}.get(v.status, '') %}
 <div class="vv">
   <div class="vv-media">
     {% if edited %}
       <video class="vv-video" src="/media/edited/p{{ v.page_id }}_{{ v.id }}.mp4" controls preload="metadata" playsinline></video>
+      {% if raw %}<div class="seg vv-seg" role="group" aria-label="Xem bản">
+        <button type="button" data-vv-src="/media/edited/p{{ v.page_id }}_{{ v.id }}.mp4" aria-pressed="true">Đã edit</button>
+        <button type="button" data-vv-src="/media/raw/{{ v.id }}" aria-pressed="false">Bản gốc</button></div>{% endif %}
     {% elif raw %}
       <video class="vv-video" src="/media/raw/{{ v.id }}" controls preload="metadata" playsinline></video>
       <p class="small muted" style="margin:6px 0 0">Chưa edit xong — đây là video gốc.</p>
@@ -13,35 +17,68 @@
     {% endif %}
   </div>
   <div class="vv-info">
+    {% if pos %}
+    {# mở từ danh sách Chờ duyệt: vị trí + video trước / sau (phím K / J), như chế độ duyệt lần lượt của Planable / Gmail #}
+    <div class="vv-nav">
+      <span class="small muted">Chờ duyệt · <b class="num">{{ pos }} / {{ total }}</b></span>
+      <span class="spacer"></span>
+      <button type="button" class="btn icon sm ghost" data-vv-key="k" {{ 'disabled' if not prv }} aria-label="Video trước (K)" title="Video trước (K)"
+              {% if prv %}hx-get="/videos/{{ prv|replace(':', '/') }}/view?seq={{ seq }}" hx-target="#vview" hx-swap="innerHTML"{% endif %}>
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m10 3.5-4.5 4.5 4.5 4.5"/></svg></button>
+      <button type="button" class="btn icon sm ghost" data-vv-key="j" {{ 'disabled' if not nxt }} aria-label="Video sau (J)" title="Video sau (J)"
+              {% if nxt %}hx-get="/videos/{{ nxt|replace(':', '/') }}/view?seq={{ seq }}" hx-target="#vview" hx-swap="innerHTML"{% endif %}>
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5"/></svg></button>
+    </div>
+    {% endif %}
     <div class="row" style="gap:8px; align-items:flex-start">
       <div style="flex:1; min-width:0">
-        <h2 id="vv-title" style="margin:0 0 4px">{{ v.page_name }}{% if tt %} <span class="tag tt">TikTok</span>{% endif %}</h2>
+        <h2 id="vv-title" style="margin:0 0 4px">{{ v.page_name }} <span class="tag {{ 'tt' if tt }}">{{ 'TikTok' if tt else 'Facebook' }}</span></h2>
         <span class="pill {{ cls }}">{{ STATUS_VI.get(v.status, v.status) }}</span>
       </div>
       <button type="button" class="btn icon ghost" data-vv-close aria-label="Đóng">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style="fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
     </div>
 
+    {% set kv %}
     <dl class="kv" style="margin-top:12px">
       {% if v.scheduled_at and v.status in ('scheduled', 'schedule_pending', 'approved', 'uploading') %}
         <dt>Giờ đăng</dt><dd><b class="num">{{ vnt(v.scheduled_at, '%H:%M') }}</b> {{ vnt(v.scheduled_at, '%d/%m/%Y') }}</dd>
       {% endif %}
       {% if v.uploaded_at %}<dt>Đã đăng</dt><dd class="num">{{ vnt(v.uploaded_at, '%H:%M %d/%m/%Y') }}</dd>{% endif %}
       <dt>Gốc</dt><dd><a href="https://www.douyin.com/video/{{ v.id }}" target="_blank" rel="noopener">Douyin ↗</a>
-        <span class="small muted num">· ❤ {{ '{:,}'.format(v.likes or 0) }} · {{ (v.duration or 0)|round|int }}s</span></dd>
+        <span class="small muted num">· ♥ {{ '{:,}'.format(v.likes or 0) }} · {{ (v.duration or 0)|round|int }}s</span></dd>
     </dl>
+    {% endset %}
+    {% if not can_review %}{{ kv }}{% endif %}
 
-    {% if v.error %}<div class="notice {{ 'warn' if v.status != 'failed' }}" style="margin:10px 0 0">{{ v.error }}</div>{% endif %}
+    {% if msg %}<div class="notice vv-msg {{ '' if msg_ok else 'warn' }}" role="status">
+      <span>{{ msg }}</span>
+      {% if undo %}<button type="button" class="linkbtn" data-vv-key="z" hx-post="/review/undo" hx-vals='{{ undo }}' hx-target="#vview" hx-swap="innerHTML"
+              title="Trả video vừa xử lý về như cũ (Z)">Hoàn tác <kbd>Z</kbd></button>{% endif %}</div>{% endif %}
+    {% if done %}<div class="empty-state ok sm" style="margin-top:12px"><b>Đã duyệt hết video chờ duyệt</b>
+      <p>Video edit xong sẽ hiện ở mục Chờ duyệt trên trang Hôm nay.</p></div>{% endif %}
+    {% if v.error %}
+      {# lỗi kỹ thuật (vd. "Đăng Facebook chưa xong: FileChooser… — kiểm tra…") -> câu dễ hiểu + chi tiết thu gọn #}
+      {% set head, hint = (v.error.split(' — ', 1) + [''])[:2] %}
+      {% set title, tech = (head.split(': ', 1) + [''])[:2] %}
+      <div class="notice {{ 'err' if v.status == 'failed' else 'warn' }}" style="margin:10px 0 0">
+        <div><b>{{ title }}</b>{% if hint %} — {{ hint }}{% endif %}
+          {% if tech %}<details class="vv-tech"><summary>Chi tiết kỹ thuật</summary><code>{{ tech }}</code></details>{% endif %}</div></div>
+    {% endif %}
 
-    <p class="small muted" style="margin:14px 0 4px">Caption</p>
+    {% if can_review %}
+    {# khối duyệt (_review_form.html): duyệt ngay tại đây, hộp tự cập nhật, không rời trang #}
+    {% if not done %}<div style="margin-top:14px">{{ review_form(v, slot, slot_label, suggest, mirror=mirror, auto_pub=auto_pub, seq=seq, nxt=nxt) }}</div>{% endif %}
+    <details class="vv-src"><summary>Thông tin nguồn</summary>{{ kv }}</details>
+    {% else %}
+    <p class="cap-label" style="margin:14px 0 4px">Caption</p>
     <div class="vv-cap">{{ v.caption or v.desc or '—' }}</div>
+    {% if v.status in ('review', 'approved', 'publish_now', 'schedule_pending') %}
+    <p class="hint">Video chưa có bản edit trên máy nên chưa duyệt được ở đây.</p>
+    {% endif %}
+    {% endif %}
 
     <div class="row" style="gap:6px; margin-top:14px; flex-wrap:wrap">
-      {% if v.status == 'review' %}
-        <a class="btn sm primary" href="/review?v={{ v.page_id }}:{{ v.id }}">Mở ở Hộp duyệt</a>
-      {% elif v.status in ('approved', 'publish_now', 'schedule_pending') %}
-        <a class="btn sm primary" href="/review?v={{ v.page_id }}:{{ v.id }}">Đổi giờ / giữ lại ở Hộp duyệt</a>
-      {% endif %}
       {% if v.status == 'scheduled' %}
         {% if tt %}
           <a class="btn sm" target="_blank" rel="noopener" href="https://www.tiktok.com/tiktokstudio/content">Xem trong TikTok Studio ↗</a>

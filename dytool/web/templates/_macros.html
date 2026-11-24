@@ -1,5 +1,27 @@
 {# Macro dùng chung — import kèm "with context" để đọc biến shard của trang #}
 
+{# trạng thái trống dùng chung: {% call empty('video', 'Chưa có video') %}1 câu hướng dẫn{% endcall %}
+   tone: '' | 'ok' | 'info'; act: HTML nút (tuỳ chọn); sm: bản gọn (trong thẻ / cột hẹp) #}
+{% macro empty(icon, title, tone='', act='', sm=false) %}
+{% set ic = {
+  'ok': '<path d="m6 12.5 4 4 8-9"/>',
+  'video': '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m10 9.5 4.5 2.5-4.5 2.5z"/>',
+  'calendar': '<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  'user': '<circle cx="12" cy="8.5" r="3.5"/><path d="M5 19.5c1-3.3 3.8-5 7-5s6 1.7 7 5"/>',
+  'browser': '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M3 9h18M6.5 6.8h.01M9 6.8h.01"/>',
+  'search': '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>',
+  'clock': '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  'box': '<path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5z"/><path d="m4 8.5 8 4.5 8-4.5M12 13v7"/>',
+  'trash': '<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13"/>',
+  'link': '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>'} %}
+<div class="empty-state{{ ' sm' if sm }}">
+  <span class="es-ic {{ tone }}"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">{{ ic.get(icon, ic['box'])|safe }}</svg></span>
+  <b>{{ title }}</b>
+  {% if caller %}{% set body = caller() %}{% if body|trim %}<p>{{ body }}</p>{% endif %}{% endif %}
+  {% if act %}<div class="es-act">{{ act|safe }}</div>{% endif %}
+</div>
+{% endmacro %}
+
 {# hồ sơ trình duyệt của 1 tài khoản / của đăng nhập Douyin: hiện tên, "Đổi" để chọn hồ sơ khác hoặc tạo mới #}
 {% macro profile_line(action, new_action, ch, fid, later) %}
 <details class="small" style="margin-top:10px">

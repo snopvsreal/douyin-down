@@ -1,0 +1,40 @@
+{# Thiết kế giọng theo mô tả (dùng ở Tạo giọng nói — prefix "sp" — và Giọng đã lưu — prefix "ds").
+   vd = {gender, age, pitch, style, accent, dialect}; mô tả tự do -> /voicestudio/describe điền lại khối này;
+   điểm khởi đầu -> /voicestudio/preset (kèm biểu cảm chèn đầu văn bản). #}
+{% set vd = vd or {} %}
+<div class="vs-design" id="{{ prefix }}-design">
+  <label for="{{ prefix }}-describe">Mô tả giọng <span class="muted">(tiếng Anh — vd. warm elderly male storyteller, british)</span></label>
+  <div class="row" style="gap:6px">
+    <input id="{{ prefix }}-describe" type="text" name="describe" value="{{ describe or '' }}" maxlength="300" autocomplete="off" style="flex:1">
+    <button type="button" class="btn sm" hx-post="/voicestudio/describe" hx-include="#{{ prefix }}-describe"
+            hx-vals='{"prefix": "{{ prefix }}"}' hx-target="#{{ prefix }}-design" hx-swap="outerHTML" hx-disabled-elt="this">Điền theo mô tả</button>
+  </div>
+  {% if vd.unmatched %}<p class="hint" style="margin:4px 0 0">Chưa hiểu: {{ vd.unmatched|join(', ') }}</p>{% endif %}
+  <div class="vs-presets" role="group" aria-label="Điểm khởi đầu">
+    {% for name, attrs, t in va.DESIGN_PRESETS %}
+      <button type="button" class="fchip" hx-post="/voicestudio/preset" hx-vals='{"i": {{ loop.index0 }}, "prefix": "{{ prefix }}"}'
+              hx-target="#{{ prefix }}-design" hx-swap="outerHTML">{{ name }}</button>
+    {% endfor %}
+  </div>
+  <div class="grid g3 vs-vd" style="gap:0 8px">
+    {% for key, label, opts in va.VD_GROUPS %}
+      <div><label for="{{ prefix }}-vd-{{ key }}">{{ label }}</label>
+        <select id="{{ prefix }}-vd-{{ key }}" name="vd_{{ key }}">
+          <option value="">Tự động</option>
+          {% for k, l in opts %}<option value="{{ k }}" {{ 'selected' if vd.get(key) == k }}>{{ l }}</option>{% endfor %}
+        </select></div>
+    {% endfor %}
+  </div>
+  <label for="{{ prefix }}-vd-extra">Thêm <span class="muted">(tiếng Anh, tuỳ chọn — vd. calm, raspy)</span></label>
+  <input id="{{ prefix }}-vd-extra" type="text" name="vd_extra" value="{{ vd.get('extra', '') }}" maxlength="120" autocomplete="off">
+  <p class="hint" style="margin:4px 0 0">Giọng vùng tiếng Trung và giọng tiếng Anh theo nước không dùng cùng nhau.
+    Cùng mô tả + cùng seed = cùng giọng.</p>
+  {% if tags and prefix == 'sp' %}
+    <script>
+      (() => {   // điểm khởi đầu có biểu cảm -> chèn vào đầu văn bản (1 lần, không chèn trùng)
+        const ta = document.getElementById('sp-text');
+        if (ta && !ta.value.startsWith({{ tags|tojson }})) { ta.value = {{ tags|tojson }} + ta.value; ta.dispatchEvent(new Event('input')); }
+      })();
+    </script>
+  {% endif %}
+</div>

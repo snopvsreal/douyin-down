@@ -69,11 +69,29 @@ _login_cache: dict[str, tuple[float, bool]] = {}
 
 def logged_in(provider: str, fresh: bool = False) -> bool:
     """Đã đăng nhập? Hỏi chính CLI (`claude auth status` JSON loggedIn, `codex login status`) — file đăng nhập cũ / hết
-    hạn vẫn còn trên đĩa nên chỉ xem file là không đủ. Gemini chưa có lệnh này -> xem file. Nhớ 20 giây."""
-    info = PROVIDERS[provider]
+    hạn vẫn còn trên đĩa nên chỉ xem file là không đủ. Gemini chưa có lệnh này -> xem file. Nhớ 20 giây.
+    Hết 20 giây: trả ngay kết quả cũ, hỏi lại CLI ở luồng nền — hỏi CLI mất 1,5 s lúc rảnh, 5-10 s lúc máy bận (đang
+    đăng bài); trang Hôm nay / Cài đặt đứng chờ việc này làm cả app như bị đơ."""
     hit = _login_cache.get(provider)
-    if hit and not fresh and time.time() - hit[0] < 20:
+    if hit and not fresh:
+        if time.time() - hit[0] >= 20 and provider not in _login_refreshing:
+            _login_refreshing.add(provider)
+
+            def bg():
+                try:
+                    _check_login(provider)
+                finally:
+                    _login_refreshing.discard(provider)
+            threading.Thread(target=bg, daemon=True, name=f"ai-login-{provider}").start()
         return hit[1]
+    return _check_login(provider)
+
+
+_login_refreshing: set[str] = set()
+
+
+def _check_login(provider: str) -> bool:
+    info = PROVIDERS[provider]
     files = any(p.is_file() and p.stat().st_size > 2 for p in info["creds"])
     ok = files
     e = exe(provider)

@@ -2,12 +2,13 @@
 (store.vn_time / vn_ts), không theo múi giờ máy."""
 
 import datetime as dt
+import json
 import time
 
 from ..store import vn_fmt, vn_time, vn_ts
 
 # màu từng kênh (theo thứ tự id) — dùng chung ở menu, Hôm nay, Lịch đăng
-PALETTE = ["#535efd", "#0e9f8e", "#e8164a", "#c66f01", "#7c3aed", "#0284c7", "#db2777", "#65a30d"]
+PALETTE = ["#0f766e", "#2563eb", "#e11d48", "#c2620a", "#7c3aed", "#0891b2", "#db2777", "#65a30d"]
 LIVE = ("schedule_pending", "scheduled", "uploading", "approved", "publish_now")
 
 
@@ -164,3 +165,111 @@ def auto_place(store, page_settings, page_id: int | None = None) -> tuple[int, i
             store.log(f"[{page['name']}] Xếp lịch {r['id']} lúc {vn_fmt(ts)}", page_id=page["id"])
             done += 1
     return done, full
+
+
+# ---------------- Tổng quan 1 kênh ----------------
+
+def _title(r) -> str:
+    return ((r["caption"] or "").split("\n", 1)[0] or r["desc"] or r["id"])[:90]
+
+
+def channel_overview(store, page_settings, pid: int) -> dict:
+    """Trang tổng quan kênh (/pages/<id>): số video từng bước, nhịp đăng 14 ngày qua + 7 ngày tới, sắp đăng,
+    mới đăng, lỗi, nguồn (mỗi nguồn đã tìm / đăng được bao nhiêu), nhật ký riêng của kênh."""
+    page = store.one("SELECT * FROM pages WHERE id=?", (pid,))
+    s = page_settings(page)
+    now = time.time()
+    today = vn_time(now).date()
+    t_today = day_start(today)
+    counts = store.counts(pid)
+
+    # nhịp đăng: 14 ngày qua (đã đăng) + hôm nay + 6 ngày tới (đã / chờ hẹn giờ) — 1 cột / ngày giờ VN
+    d0 = today - dt.timedelta(days=13)
+    t0, t1 = day_start(d0), day_start(today + dt.timedelta(days=7))
+    per_day: dict[int, list[int]] = {}
+    for r in store.q("SELECT status, scheduled_at, uploaded_at FROM videos WHERE page_id=? AND ("
+                     "(status='uploaded' AND COALESCE(uploaded_at, scheduled_at)>=? AND COALESCE(uploaded_at, scheduled_at)<?) OR "
+                     "(status IN ('schedule_pending','scheduled','uploading') AND scheduled_at>=? AND scheduled_at<?))",
+                     (pid, t0, t1, t0, t1)):
+        done = r["status"] == "uploaded"
+        ts = (r["uploaded_at"] or r["scheduled_at"]) if done else r["scheduled_at"]
+        i = (vn_time(ts).date() - d0).days
+        per_day.setdefault(i, [0, 0])[0 if done else 1] += 1
+    cap = int(s["max_posts_per_day"]) or 1
+    days = []
+    for i in range(20):
+        d = d0 + dt.timedelta(days=i)
+        up, sch = per_day.get(i, [0, 0])
+        days.append({"date": d.strftime("%d/%m"), "dow": ["T2", "T3", "T4", "T5", "T6", "T7", "CN"][d.weekday()],
+                     "up": up, "sch": sch, "today": d == today, "future": d > today})
+    top = max([cap] + [x["up"] + x["sch"] for x in days]) * 1.2      # chừa chỗ trên cùng cho nhãn giới hạn
+    for x in days:
+        x["h_up"], x["h_sch"] = round(100 * x["up"] / top), round(100 * x["sch"] / top)
+
+    n_today = sum(per_day.get(13, [0, 0]))
+
+    # nguồn: video.source = "<kind>:<value>" (worker._scan)
+    by_src = {r["source"]: r for r in store.q(
+        "SELECT source, COUNT(*) n, SUM(status='uploaded') up, SUM(status='skipped') skip, MAX(found_at) last "
+        "FROM videos WHERE page_id=? GROUP BY source", (pid,))}
+    sources = []
+    for r in store.q("SELECT * FROM sources WHERE page_id=? ORDER BY enabled DESC, id", (pid,)):
+        st = by_src.get(f"{r['kind']}:{r['value']}")
+        try:
+            vi = json.loads(r["params"] or "{}").get("vi")
+        except ValueError:
+            vi = None
+        sources.append({"kind": r["kind"], "value": r["value"], "vi": vi, "enabled": bool(r["enabled"]),
+                        "n": st["n"] if st else 0, "up": (st["up"] or 0) if st else 0,
+                        "skip": (st["skip"] or 0) if st else 0, "last": st["last"] if st else None})
+
+    return {
+        "counts": counts,
+        "queued": sum(counts.get(k, 0) for k in ("approved", "publish_now", "schedule_pending", "uploading")),
+        "working": counts.get("new", 0) + counts.get("downloaded", 0),
+        "month_n": store.one("SELECT COUNT(*) n FROM videos WHERE page_id=? AND uploaded_at>=?",
+                             (pid, int(now) - 30 * 86400))["n"],
+        "total_up": counts.get("uploaded", 0),
+        "today_n": n_today, "cap": cap, "today_pct": min(100, round(100 * n_today / cap)),
+        "days": days, "top": top, "cap_pct": round(100 * cap / top),
+        "sources": sources,
+        "logs": store.q("SELECT * FROM logs WHERE page_id=? ORDER BY id DESC LIMIT 15", (pid,)),
+        "next_slot": vn_fmt(store.next_free_slot(pid, s["schedule_slots"], cap), "%H:%M %d/%m") if s["schedule_slots"] else "",
+        "t_today": t_today,
+    }
+
+
+# nhóm trạng thái cho bộ lọc video của trang kênh: (khoá, nhãn, trạng thái, sắp xếp)
+VIDEO_GROUPS = [
+    ("work", "Đang xử lý", ("new", "downloaded"), "v.updated_at DESC"),
+    ("review", "Chờ duyệt", ("review",), "v.updated_at DESC"),
+    ("queued", "Chờ đăng", ("approved", "publish_now", "schedule_pending", "uploading"), "COALESCE(v.scheduled_at, 0), v.updated_at DESC"),
+    ("scheduled", "Đã hẹn giờ", ("scheduled",), "v.scheduled_at"),
+    ("uploaded", "Đã đăng", ("uploaded",), "v.uploaded_at DESC"),
+    ("failed", "Lỗi", ("failed",), "v.updated_at DESC"),
+    ("dropped", "Đã bỏ / lọc", ("rejected", "skipped"), "v.updated_at DESC"),
+]
+
+
+def channel_videos(store, pid: int, st: str = "", q: str = "", pg: int = 1, per: int = 50) -> dict:
+    """Danh sách video của 1 kênh (phần chính của trang kênh): lọc theo nhóm trạng thái + tìm, chia trang."""
+    counts = store.counts(pid)
+    groups = [{"key": k, "label": l, "n": sum(counts.get(x, 0) for x in sts)} for k, l, sts, _ in VIDEO_GROUPS]
+    g = next((x for x in VIDEO_GROUPS if x[0] == st), None)
+    conds, args = ["v.page_id=?"], [pid]
+    if g:
+        conds.append(f"v.status IN ({','.join('?' * len(g[2]))})"); args += list(g[2])
+    else:   # "Tất cả" = trừ video bị bỏ / lọc (thường rất nhiều, ít khi cần xem)
+        conds.append("v.status NOT IN ('rejected','skipped')")
+    if q.strip():
+        like = f"%{q.strip()}%"
+        conds.append("(v.id LIKE ? OR v.desc LIKE ? OR v.caption LIKE ?)"); args += [like, like, like]
+    where = " WHERE " + " AND ".join(conds)
+    total = store.one("SELECT COUNT(*) n FROM videos v" + where, tuple(args))["n"]
+    pages = max(1, -(-total // per))
+    pg = min(max(1, pg), pages)
+    rows = store.q("SELECT v.* FROM videos v" + where + " ORDER BY " + (g[3] if g else "v.updated_at DESC")
+                   + " LIMIT ? OFFSET ?", (*args, per, (pg - 1) * per))
+    return {"groups": groups, "all_n": sum(n for s, n in counts.items() if s not in ("rejected", "skipped")),
+            "st": g[0] if g else "", "q": q.strip(), "pg": pg, "pages": pages, "total": total,
+            "videos": [{**dict(r), "title": _title(r)} for r in rows]}

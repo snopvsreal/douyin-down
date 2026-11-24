@@ -1,6 +1,7 @@
+{% from "_macros.html" import empty %}
 {% macro dur(s) %}{% if s >= 60 %}{{ (s // 60)|int }} phút {{ (s % 60)|int }}s{% else %}{{ s|int }}s{% endif %}{% endmacro %}
-<div class="row" style="margin-bottom:8px">
-  <h2 style="margin:0">Đang làm</h2><div class="spacer"></div>
+<div class="card-h">
+  <h2>Đang làm</h2><div class="spacer"></div>
   {% if task %}<span class="pill info num">{{ dur(task.elapsed) }}</span>
     {% if task.stopping %}<span class="pill warn">Đang dừng…</span>
     {% elif task.no_return %}<span class="pill" title="Đã bấm đăng trên nền tảng — chờ biết bài đã lên chưa rồi mới dừng được">Đang bấm đăng</span>
@@ -18,21 +19,21 @@
   <table class="steps">
     {% for s in task.steps %}
     <tr class="{{ 'run' if s.running }}">
-      <td class="st">{{ '⏳' if s.running else '✓' }}</td>
+      <td class="st">{% if s.running %}<span class="spin" aria-label="Đang chạy"></span>{% else %}<svg viewBox="0 0 16 16" width="14" height="14" aria-label="Xong"><path d="m3.5 8.5 3 3 6-7"/></svg>{% endif %}</td>
       <td>{% if s.running %}<b>{{ s.name }}</b>{% if task.detail %}<div class="small muted">{{ task.detail }}</div>{% endif %}
           {% else %}<span class="muted">{{ s.name }}</span>{% endif %}</td>
-      <td class="small muted num" style="text-align:right; white-space:nowrap">{{ dur(s.secs) }}</td>
+      <td class="small muted num cell-end">{{ dur(s.secs) }}</td>
     </tr>
     {% endfor %}
   </table>
 {% elif worker.running %}
-  <p class="empty">Đang chờ việc mới — tool quét lại nguồn theo chu kỳ của từng kênh.</p>
+  {% call empty("clock", "Đang chờ việc mới", sm=true) %}Tool quét lại nguồn theo chu kỳ của từng kênh.{% endcall %}
 {% else %}
-  <p class="empty">Chạy tự động đang tắt.</p>
+  {% call empty("clock", "Chạy tự động đang tắt", sm=true) %}Bật công tắc Chạy tự động ở cuối menu trái để tool tự làm việc.{% endcall %}
 {% endif %}
 
-<div class="row" style="margin:18px 0 6px">
-  <h2 style="margin:0">Tiếp theo</h2><div class="spacer"></div>
+<div class="card-h" style="margin-top:18px">
+  <h2>Tiếp theo</h2><div class="spacer"></div>
   <span class="small muted num">{{ backlog.new }} chờ tải, {{ backlog.downloaded }} chờ edit</span>
 </div>
 {% if upcoming %}
@@ -41,10 +42,10 @@
   <tr>
     <td><b>{{ u.act }}</b> <span class="small muted">{{ u.page }}</span>
       {% if u.desc %}<div class="small muted trunc">{{ u.desc }}</div>{% endif %}</td>
-    <td class="small muted num" style="text-align:right; white-space:nowrap">
+    <td class="small muted num cell-end">
       {% if u.act == 'Quét nguồn' %}{% if u.when <= now %}đến hạn{% else %}sau {{ ((u.when - now) // 60)|int }} phút{% endif %}
       {% elif u.when %}{{ vnt(u.when, '%H:%M %d/%m') }}{% endif %}</td>
   </tr>
   {% endfor %}
 </table>
-{% else %}<p class="empty">Không có việc nào đang chờ.</p>{% endif %}
+{% else %}{% call empty("ok", "Không có việc nào đang chờ", tone="ok", sm=true) %}{% endcall %}{% endif %}

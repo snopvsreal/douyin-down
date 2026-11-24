@@ -3,12 +3,13 @@
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -88,7 +89,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     from .. import updates as _updates
     tpl.env.globals.update(STATUS_VI=STATUS_VI, time=time, vnt=vn_fmt,     # vnt(ts, fmt): hiện giờ theo giờ VN
                            css_v=lambda: int((HERE / "static" / "app.css").stat().st_mtime),
-                           app_ver=lambda: _updates.installed("dytool"))   # cuối menu; đọc có nhớ 60 s
+                           app_ver=lambda: _updates.installed("dytool"),   # cuối menu; đọc có nhớ 60 s
+                           vs_cached_voices=lambda: __import__("dytool.vs_api", fromlist=["x"]).cached_profiles())
     tpl.env.filters["ago"] = lambda ts: _ago(ts)
 
     def _setup_failed() -> str | None:
@@ -117,13 +119,27 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         store.log("Đang cài lại thư viện — dytool sẽ tự đóng rồi mở lại khi xong")
         return HTMLResponse('<div class="done">Đã mở cửa sổ cài lại thư viện</div>')
 
-    health_cache: dict = {"at": 0.0, "v": {}}
+    health_cache: dict = {"at": 0.0, "v": None}
 
     def health() -> dict:
         """Backend tải + VoiceStudio có đang chạy. 2 kiểm tra chạy song song, chờ kết nối 0.3 s, nhớ 3 s
         (thanh trạng thái hỏi mỗi 5 s trên mọi trang — trước mất ~4 s / lần khi 2 dịch vụ đang tắt)."""
-        if time.time() - health_cache["at"] < 3:
+        # Có kết quả cũ thì trả ngay, hỏi lại ở luồng nền: lúc máy bận (đang đăng bài, ShardX tải video lên) mỗi lần hỏi
+        # chờ tới 3 s -> các yêu cầu tự làm mới dồn lại, bấm gì cũng phải chờ = app như bị đơ.
+        if health_cache.get("v") is not None:
+            if time.time() - health_cache["at"] >= 3 and not health_cache.get("busy"):
+                health_cache["busy"] = True
+
+                def bg():
+                    try:
+                        _health_check()
+                    finally:
+                        health_cache["busy"] = False
+                threading.Thread(target=bg, daemon=True, name="dytool-health").start()
             return health_cache["v"]
+        return _health_check()
+
+    def _health_check() -> dict:
         from concurrent.futures import ThreadPoolExecutor
         from ..services import LOCAL_TIMEOUT
 
@@ -136,6 +152,10 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                 "voicestudio": cfg["edit"].get("dub", {}).get("api", "http://127.0.0.1:3900") + "/health"}
         with ThreadPoolExecutor(2) as ex:
             v = dict(zip(urls, ex.map(ok, urls.values())))
+        from .. import services
+        # 'ok' / 'starting' (backend dytool bật đang nạp) / 'off'; 'missing' = chưa cài xong runtime (mở app 1 lần)
+        v["vs"] = ("ok" if v["voicestudio"] else "starting" if services.vs_ours_running()
+                   else "off" if services.vs_runtime() else "missing")
         health_cache.update(at=time.time(), v=v)
         return v
 
@@ -143,12 +163,618 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         return cfg["edit"].setdefault("subtitles", {})
 
     def voicestudio_exe() -> Path | None:
-        import os
-        for base in (os.environ.get("LOCALAPPDATA", ""), os.environ.get("ProgramFiles", "")):
-            p = Path(base) / ("Programs" if "Local" in base else "") / "VoiceStudio" / "VoiceStudio.exe"
-            if base and p.exists():
-                return p
+        from ..services import vs_app_exe
+        return vs_app_exe()
+
+    # ---------------- Màn hình khởi động (app desktop) ----------------
+    # Mở app: bật hết dịch vụ (song song) rồi mới vào màn hình chính -> lúc màn hình chính hiện là mọi thứ đã sẵn sàng.
+    # Worker chỉ bật sau khi xong (không tranh bật backend tải / VoiceStudio với màn hình này).
+    STARTUP_STEPS = [("ui", "Giao diện"), ("tdl", "Tải video Douyin"), ("vs", "VoiceStudio (lồng tiếng)"),
+                     ("browser", "Trình duyệt (nhân ShardX)"), ("douyin", "Đăng nhập Douyin"), ("ai", "AI dịch / viết lời")]
+    startup: dict = {"begun": False, "done": False, "at": 0.0,
+                     "steps": {k: {"name": n, "state": "wait", "detail": ""} for k, n in STARTUP_STEPS}}
+
+    def _st(key: str, state: str | None = None, detail: str | None = None) -> None:
+        step = startup["steps"][key]
+        if state:
+            step["state"] = state
+        if detail is not None:
+            step["detail"] = detail
+
+    def _step_tdl():
+        from ..services import ensure_tdl, tdl_alive
+        _st("tdl", "run", "đang bật backend tải…")
+        if tdl_alive(cfg) or ensure_tdl(cfg, config_path):
+            _st("tdl", "ok", "")
+        else:
+            _st("tdl", "err", "chưa bật được — tool sẽ thử lại khi cần tải (xem data/tdl_server.log)")
+
+    def _step_vs():
+        from .. import services
+        _st("vs", "run", "đang bật chạy ngầm…")
+        r = services.start_voicestudio(cfg)
+        if r == "missing":
+            _st("vs", "warn", "chưa cài xong — mở app VoiceStudio 1 lần (tải model, chấp nhận license)" if voicestudio_exe()
+                else "chưa cài — cần cho lồng tiếng (Cài đặt › VoiceStudio)")
+            return
+        if r == "remote":
+            _st("vs", "warn", f"đặt ở máy khác ({services.vs_api(cfg)})")
+            return
+        api = services.vs_api(cfg)
+        deadline = time.time() + 300
+        while time.time() < deadline:
+            try:   # giai đoạn 1: backend nạp thư viện (/startup/progress); 2: nạp model giọng (/model/status)
+                m = httpx.get(api + "/model/status", timeout=3)
+                if m.status_code == 200:
+                    j = m.json()
+                    if j.get("loaded"):
+                        _st("vs", "ok", "")
+                        return
+                    if j.get("error"):
+                        _st("vs", "err", f"nạp model lỗi: {str(j['error'])[:160]}")
+                        return
+                    _st("vs", None, f"nạp model giọng… {int(j.get('progress') or 0)}%")
+                else:
+                    p = httpx.get(api + "/startup/progress", timeout=3).json()
+                    _st("vs", None, (p.get("label") or "đang khởi động…").rstrip("…. ") + "…")
+            except (httpx.HTTPError, ValueError):
+                if services.start_voicestudio(cfg) == "crashed":
+                    _st("vs", "err", "bật lên rồi tắt ngay — xem data/voicestudio.log")
+                    return
+            time.sleep(1.5)
+        _st("vs", "err", "quá 5 phút chưa xong — tool sẽ thử lại khi cần lồng tiếng")
+
+    def _step_browser():
+        from .. import browsers
+        t = browsers.install_engine_background()
+        if not browsers.engine_installed():
+            _st("browser", "run", "tải nhân lần đầu (~440 MB)…")
+        else:
+            _st("browser", "run", "kiểm tra bản mới…")
+        t.join(900)
+        _st("browser", "ok" if browsers.engine_installed() else "err",
+            "" if browsers.engine_installed() else "chưa tải được — xem Cài đặt › Trình duyệt")
+
+    def _step_douyin():
+        from ..cookies import cookie_status
+        _st("douyin", "run", "")
+        dy = cookie_status(cfg["douyin"].get("cookie", ""))
+        if not dy["logged_in"]:
+            _st("douyin", "warn", "hết hạn — đăng nhập lại" if dy.get("expired") else "chưa đăng nhập")
+        elif dy["days_left"] is not None and dy["days_left"] < 7:
+            _st("douyin", "warn", f"còn {dy['days_left']} ngày — nên gia hạn")
+        else:
+            _st("douyin", "ok", f"còn {dy['days_left']} ngày" if dy["days_left"] is not None else "")
+
+    def _step_ai():
+        from .. import ai
+        _st("ai", "run", "")
+        p = ai.active()
+        if p and ai.ready():
+            _st("ai", "ok", ai.PROVIDERS[p]["name"])
+        else:
+            _st("ai", "warn", "chưa cài / chưa đăng nhập — dùng dịch máy (Cài đặt › AI)")
+
+    def begin_startup():
+        if startup["begun"]:
+            return
+        startup.update(begun=True, at=time.time())
+        _st("ui", "ok")
+
+        def run():
+            from concurrent.futures import ThreadPoolExecutor
+            jobs = {"tdl": _step_tdl, "vs": _step_vs, "browser": _step_browser, "douyin": _step_douyin, "ai": _step_ai}
+
+            def safe(key):
+                try:
+                    jobs[key]()
+                except Exception as e:      # 1 dịch vụ lỗi không được chặn cả app
+                    _st(key, "err", str(e)[:200])
+            with ThreadPoolExecutor(len(jobs)) as pool:
+                list(pool.map(safe, jobs))
+            from .. import updates
+            worker.start()
+            updates.start_background_checks()
+            startup["done"] = True
+        threading.Thread(target=run, daemon=True, name="dytool-startup").start()
+
+    app.state.begin_startup = begin_startup
+
+    @app.get("/startup", response_class=HTMLResponse)
+    def startup_page(request: Request):
+        if not startup["begun"] or startup["done"]:
+            return RedirectResponse("/", 303)
+        return tpl.TemplateResponse(request, "startup.html", {"steps": startup["steps"]})
+
+    @app.get("/startup/status")
+    def startup_status():
+        return JSONResponse({"done": startup["done"], "elapsed": int(time.time() - startup["at"]),
+                             "steps": [{"key": k, **v} for k, v in startup["steps"].items()]})
+
+    # ---------------- Trang VoiceStudio: điều khiển + toàn bộ tính năng VoiceStudio bằng giao diện dytool ----------------
+    # (không nhúng giao diện của VoiceStudio — mọi trang gọi API backend qua vs_api.py)
+    VS_TABS = ("speak", "voices", "history", "pron", "log")
+
+    def _voice_usage() -> dict[str, list[str]]:
+        """tên giọng (chữ thường) -> kênh đang dùng nó để lồng tiếng."""
+        from ..dub import page_voices
+        use: dict[str, list[str]] = {}
+        for pg in store.q("SELECT * FROM pages ORDER BY id"):
+            s = store.page_settings(pg)
+            if not s.get("dub_enabled"):
+                continue
+            for g, v in page_voices(s).items():
+                use.setdefault(v["name"].lower(), []).append(f"{pg['name']} · {'nam' if g == 'male' else 'nữ'}")
+        return use
+
+    def _channel_voices() -> list[dict]:
+        from ..dub import page_voices
+        out = []
+        for pg in store.q("SELECT * FROM pages ORDER BY id"):
+            s = store.page_settings(pg)
+            out.append({"id": pg["id"], "name": pg["name"], "dub": bool(s.get("dub_enabled")), "voices": page_voices(s)})
+        return out
+
+    @app.get("/voicestudio", response_class=HTMLResponse)
+    def vs_page(request: Request, tab: str = "", v: str = "", star: int = 0, reuse: str = ""):
+        from .. import services, vs_api
+        tab = tab if tab in VS_TABS else ""
+        ctx: dict = {"info": services.vs_info(cfg), "tab": tab, "vs_installed": bool(voicestudio_exe()),
+                     "jobs": _vs_jobs, "va": vs_api, "err": "", "v": v}
+        if tab in ("speak", "voices", "history") and ctx["info"]["state"] == "ok":
+            try:
+                ctx["profiles"] = vs_api.profiles(cfg)
+                if tab in ("speak", "history"):
+                    ctx["history"] = vs_api.history(cfg)
+                    if reuse:            # "Dùng lại văn bản" từ Lịch sử -> điền sẵn ô văn bản + giọng
+                        ctx["reuse"] = next((h for h in ctx["history"] if h.get("id") == reuse), None)
+                        rz = ctx["reuse"] or {}
+                        if rz.get("instruct") and not rz.get("profile_id"):
+                            try:            # giọng thiết kế: mô tả cũ -> điền lại các ô thiết kế
+                                ctx["reuse_vd"] = vs_api.describe(cfg, rz["instruct"])
+                            except vs_api.VSError:
+                                pass
+            except vs_api.VSError as e:
+                ctx["err"] = str(e)
+        if tab == "pron" and ctx["info"]["state"] == "ok":
+            try:
+                ctx["pron"] = vs_api.pron_list(cfg)
+            except vs_api.VSError as e:
+                ctx["err"] = str(e)
+        ctx["star"] = bool(star)
+        ctx.setdefault("profiles", [])
+        ctx.setdefault("history", [])
+        ctx["usage"] = _voice_usage()
+        if not tab:
+            ctx["idle_choices"] = services.IDLE_CHOICES
+            ctx["channels"] = _channel_voices()
+        return render(request, "voicestudio.html", **ctx)
+
+    @app.get("/partials/vs-ready")
+    def vs_ready_partial():
+        """Trang VoiceStudio đang chờ backend: bật xong -> tải lại trang để hiện mục vừa mở."""
+        from .. import services
+        if services.vs_info(cfg).get("state") == "ok":
+            return HTMLResponse("", headers={"HX-Refresh": "true"})
+        return HTMLResponse("")
+
+    @app.get("/partials/vs-status", response_class=HTMLResponse)
+    def vs_status_partial(request: Request):
+        from .. import services
+        return tpl.TemplateResponse(request, "_vs_status.html", {"info": services.vs_info(cfg)})
+
+    @app.get("/partials/vs-log", response_class=HTMLResponse)
+    def vs_log_partial():
+        from html import escape
+        from .. import services
+        text = services.vs_log_tail()
+        return HTMLResponse(f"<pre class='vs-log'>{escape(text) or 'Chưa có nhật ký.'}</pre>")
+
+    def _vs_done(msg: str = "") -> HTMLResponse:
+        from .. import services
+        services._vs_info["at"] = 0                 # lần hỏi kế lấy trạng thái mới ngay
+        health_cache["at"] = 0
+        if msg:
+            store.log(msg)
+        return HTMLResponse("", headers={"HX-Trigger": "services-changed, vs-changed"})
+
+    def _editing() -> bool:
+        from .. import progress
+        t = progress.STATE.get("task")
+        return bool(t and t.get("kind") == "edit")
+
+    @app.post("/voicestudio/start")
+    def vs_start():
+        return start_voicestudio()
+
+    @app.post("/voicestudio/stop")
+    def vs_stop():
+        from .. import services
+        if _editing():
+            return PlainTextResponse("Đang edit / lồng tiếng 1 video — đợi xong (hoặc bấm Dừng) rồi tắt VoiceStudio.", 400)
+        if services.stop_voicestudio():
+            return _vs_done("Đã tắt VoiceStudio chạy ngầm")
+        if services.vs_state(cfg) != "off":
+            return PlainTextResponse("VoiceStudio này do app VoiceStudio bật — tắt bằng cách đóng app VoiceStudio.", 400)
+        return _vs_done()
+
+    @app.post("/voicestudio/restart")
+    def vs_restart():
+        from .. import services
+        if _editing():
+            return PlainTextResponse("Đang edit / lồng tiếng 1 video — đợi xong rồi khởi động lại.", 400)
+        if not services.stop_voicestudio() and services.vs_state(cfg) != "off":
+            return PlainTextResponse("VoiceStudio này do app VoiceStudio bật — khởi động lại trong app VoiceStudio.", 400)
+        services.start_voicestudio(cfg)
+        return _vs_done("Đang khởi động lại VoiceStudio chạy ngầm")
+
+    @app.post("/voicestudio/idle")
+    def vs_idle(minutes: int = Form(...)):
+        from .. import services
+        try:
+            services.vs_set_idle_minutes(minutes)
+        except ValueError:
+            return PlainTextResponse("Giá trị không hợp lệ", 400)
+        services.vs_touch()                         # tính lại giờ rảnh từ lúc đổi
+        return _vs_done()
+
+    @app.post("/voicestudio/offload")
+    def vs_offload(on: str = Form("")):
+        from .. import services, vs_api
+        try:
+            vs_api.set_offload(cfg, on == "on")
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        services._vs_info["at"] = 0
+        return HTMLResponse("")
+
+    @app.post("/voicestudio/flush")
+    def vs_flush():
+        from .. import services, vs_api
+        if _editing():
+            return PlainTextResponse("Đang lồng tiếng 1 video — đợi xong rồi giải phóng bộ nhớ.", 400)
+        try:
+            vs_api.flush_memory(cfg)
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        return _vs_done("Đã giải phóng bộ nhớ card đồ hoạ của VoiceStudio (model nạp lại khi cần đọc)")
+
+    # ----- việc chạy nền (đọc thử / tạo giọng nói / nghe thử giọng thiết kế): ô kết quả tự hỏi lại -----
+    _vs_jobs: dict = {}         # khoá -> {"state": "run"|"ok"|"err", "msg", "at", "label", "file"}
+    JOB_RE = __import__("re").compile(r"^[a-z0-9-]{1,40}$")
+
+    def _job_file(key: str) -> Path:
+        return data / "work" / f"vs_job_{key}.wav"
+
+    def _start_job(request: Request, key: str, label: str, fn) -> HTMLResponse:
+        """fn() -> bytes âm thanh. Chạy ở luồng nền (đọc mất 10 giây – vài phút)."""
+        from .. import services
+        cur = _vs_jobs.get(key)
+        if not (cur and cur["state"] == "run"):
+            _vs_jobs[key] = {"state": "run", "msg": "", "at": time.time(), "label": label}
+
+            def run():
+                try:
+                    res = fn()
+                    audio, meta = res if isinstance(res, tuple) else (res, {})
+                    out = _job_file(key)
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    out.write_bytes(audio)
+                    services.vs_touch()
+                    _vs_jobs[key] = {"state": "ok", "msg": "", "at": time.time(), "label": label, "meta": meta}
+                except Exception as e:      # lỗi VoiceStudio / mạng: hiện trong ô kết quả
+                    _vs_jobs[key] = {"state": "err", "msg": str(e)[:400], "at": time.time(), "label": label}
+            threading.Thread(target=run, daemon=True, name=f"vs-job-{key}").start()
+        return vs_job_partial(request, key)
+
+    @app.get("/partials/vs-job", response_class=HTMLResponse)
+    def vs_job_partial(request: Request, key: str):
+        if not JOB_RE.match(key):
+            return PlainTextResponse("", 400)
+        t = _vs_jobs.get(key)
+        return tpl.TemplateResponse(request, "_vs_job.html", {"key": key, "t": t,
+                                                              "fresh": bool(t and time.time() - t["at"] < 6)})
+
+    @app.get("/voicestudio/job.wav")
+    def vs_job_wav(key: str, dl: int = 0):
+        from fastapi.responses import FileResponse
+        if not JOB_RE.match(key) or not _job_file(key).exists():
+            return PlainTextResponse("", 404)
+        name = f"dytool-{key}-{time.strftime('%Y%m%d-%H%M%S')}.wav" if dl else None
+        return FileResponse(_job_file(key), media_type="audio/wav", filename=name, headers={"Cache-Control": "no-store"})
+
+    def _vs_ready() -> PlainTextResponse | None:
+        from .. import services
+        if services.vs_state(cfg) != "ok":
+            return PlainTextResponse("VoiceStudio chưa sẵn sàng — bấm Bật ở trang VoiceStudio rồi đợi chấm xanh.", 400)
         return None
+
+    @app.post("/voicestudio/test", response_class=HTMLResponse)
+    def vs_test(request: Request, pid: int = Form(...), gender: str = Form(...)):
+        """Đọc thử 1 câu bằng giọng nam / nữ của 1 kênh (đúng cách worker lồng tiếng, giọng chưa có thì tạo)."""
+        from ..dub import VoiceStudio, page_voices
+        if gender not in ("male", "female"):
+            return PlainTextResponse("Giọng không hợp lệ", 400)
+        if (bad := _vs_ready()):
+            return bad
+        pg = store.one("SELECT * FROM pages WHERE id=?", (pid,))
+        if not pg:
+            return PlainTextResponse("Không có kênh này", 404)
+        spec = page_voices(store.page_settings(pg))[gender]
+
+        def fn():
+            import tempfile
+            vs = VoiceStudio(cfg["edit"].get("dub", {}))
+            out = _job_file(f"ch{pid}-{gender}").with_suffix(".tmp.wav")
+            with tempfile.TemporaryDirectory() as tmp:
+                name = vs.ensure_voice(Path(tmp), spec)
+                vs.speak("Xin chào, đây là giọng lồng tiếng dytool đang dùng cho video của kênh này.", out,
+                         duration=5.0, voice=name)
+            b = out.read_bytes()
+            out.unlink(missing_ok=True)
+            return b
+        return _start_job(request, f"ch{pid}-{gender}", "Đọc thử", fn)
+
+    # ----- Tạo giọng nói -----
+    def _vd(form) -> dict:
+        """Các ô thiết kế giọng của form -> tham số instruct_of."""
+        return {k: str(form.get(f"vd_{k}", "") or "") for k in ("gender", "age", "pitch", "style", "accent", "dialect")}
+
+    @app.post("/voicestudio/speak", response_class=HTMLResponse)
+    async def vs_speak(request: Request):
+        """Tạo giọng nói (như trang Generate của VoiceStudio): giọng đã lưu / file ghi âm dùng 1 lần / thiết kế theo
+        mô tả, ngôn ngữ, tốc độ, hiệu ứng, seed, độ dài, tham số giọng nâng cao. Chạy nền, ô kết quả tự hỏi lại."""
+        from .. import vs_api
+        if (bad := _vs_ready()):
+            return bad
+        form = await request.form()
+        g = lambda k, d="": str(form.get(k, d) or d)
+        text = g("text")
+        if not text.strip():
+            return PlainTextResponse("Gõ văn bản cần đọc", 400)
+        language = g("language", "vi") if g("language", "vi") in dict(vs_api.LANGS) else "vi"
+        src = g("src", "saved")
+        seed = g("seed").strip()
+        sd = int(seed) if seed.lstrip("-").isdigit() else None
+        prof, instruct, ref, ref_name = "", "", None, ""
+        if src == "saved":
+            prof = g("voice")
+            if not prof:
+                return PlainTextResponse("Chọn 1 giọng đã lưu (hoặc chuyển sang File ghi âm / Thiết kế)", 400)
+        elif src == "file":
+            f = form.get("ref_file")
+            if not getattr(f, "filename", None):
+                return PlainTextResponse("Chọn file ghi âm giọng mẫu (5–15 giây, 1 người nói)", 400)
+            ref, ref_name = await f.read(), f.filename
+            instruct = g("style_extra").strip()[:120]
+        else:
+            instruct = vs_api.instruct_of(extra=g("vd_extra"), **_vd(form))
+        adv = {k: g(f"adv_{k}") for k, *_ in vs_api.ADVANCED}
+        try:
+            speed = float(g("speed", "1"))
+        except ValueError:
+            speed = 1.0
+        kw = dict(profile_id=prof, instruct=instruct, language=language, speed=speed, seed=sd,
+                  effect=g("effect", "broadcast"), duration=g("duration"), ref_audio=ref, ref_name=ref_name,
+                  ref_text=g("ref_text"), advanced=adv, denoise=g("denoise") == "on",
+                  postprocess=g("postprocess") == "on", pronounce=g("pronounce") == "on")
+        return _start_job(request, "speak", "Bản đọc", lambda: vs_api.generate(cfg, text, **kw))
+
+    @app.post("/voicestudio/describe", response_class=HTMLResponse)
+    def vs_describe(request: Request, describe: str = Form(""), prefix: str = Form("sp")):
+        """Mô tả tự do -> điền sẵn các ô thiết kế giọng (như ô "Describe your voice" của VoiceStudio)."""
+        from .. import vs_api
+        if prefix not in ("sp", "ds"):
+            prefix = "sp"
+        try:
+            d = vs_api.describe(cfg, describe)
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        return tpl.TemplateResponse(request, "_vs_design.html", {"va": vs_api, "vd": d, "prefix": prefix,
+                                                                 "describe": describe})
+
+    @app.post("/voicestudio/preset", response_class=HTMLResponse)
+    def vs_preset(request: Request, i: int = Form(...), prefix: str = Form("sp")):
+        from .. import vs_api
+        if not 0 <= i < len(vs_api.DESIGN_PRESETS) or prefix not in ("sp", "ds"):
+            return PlainTextResponse("Mẫu không hợp lệ", 400)
+        name, attrs, tags = vs_api.DESIGN_PRESETS[i]
+        return tpl.TemplateResponse(request, "_vs_design.html", {"va": vs_api, "vd": attrs, "prefix": prefix,
+                                                                 "describe": "", "tags": tags})
+
+    @app.post("/voicestudio/history/{hid}/save-voice")
+    def vs_take_save(request: Request, hid: str, name: str = Form(""), save_name: str = Form("")):
+        from .. import vs_api
+        name = name or save_name
+        try:
+            vs_api.save_take(cfg, hid, name)
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        store.log(f"VoiceStudio: đã lưu bản đọc thành giọng '{name.strip()}'")
+        if request.headers.get("HX-Request") == "true":
+            return HTMLResponse("", headers={"HX-Redirect": "/voicestudio?tab=voices"})
+        return RedirectResponse("/voicestudio?tab=voices", 303)
+
+    # ----- Từ điển phát âm -----
+    @app.post("/voicestudio/pron/add")
+    def vs_pron_add(term: str = Form(""), replacement: str = Form(""), language: str = Form("*")):
+        from .. import vs_api
+        if language != "*" and language not in dict(vs_api.LANGS):
+            language = "*"
+        try:
+            vs_api.pron_add(cfg, term, replacement, language)
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        return RedirectResponse("/voicestudio?tab=pron", 303)
+
+    @app.post("/voicestudio/pron/{eid}/toggle")
+    def vs_pron_toggle(eid: str, on: str = Form("")):
+        from .. import vs_api
+        try:
+            vs_api.pron_toggle(cfg, eid, on == "1")
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        return RedirectResponse("/voicestudio?tab=pron", 303)
+
+    @app.post("/voicestudio/pron/{eid}/delete")
+    def vs_pron_delete(eid: str):
+        from .. import vs_api
+        try:
+            vs_api.pron_delete(cfg, eid)
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        return RedirectResponse("/voicestudio?tab=pron", 303)
+
+    @app.post("/voicestudio/pron/test", response_class=HTMLResponse)
+    def vs_pron_test(text: str = Form(""), language: str = Form("vi")):
+        from html import escape
+        from .. import vs_api
+        try:
+            out = vs_api.pron_test(cfg, text, language)
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        return HTMLResponse(f"<p class='small' style='margin:8px 0 0'>Sẽ đọc thành: <b>{escape(out)}</b></p>")
+
+    # ----- Giọng đã lưu: nhân bản / thiết kế / đổi tên / xoá -----
+    def _vs_back(msg: str = "", tab: str = "voices"):
+        if msg:
+            store.log(msg)
+        return RedirectResponse(f"/voicestudio?tab={tab}", 303)
+
+    @app.post("/voicestudio/voices/clone")
+    async def vs_clone(request: Request):
+        from starlette.concurrency import run_in_threadpool
+        from .. import vs_api
+        if (bad := _vs_ready()):
+            return bad
+        form = await request.form()
+        f = form.get("file")
+        if not getattr(f, "filename", None):
+            return PlainTextResponse("Chọn file ghi âm giọng mẫu", 400)
+        if form.get("consent") != "on":
+            return PlainTextResponse("Xác nhận bạn có quyền dùng giọng này (giọng của bạn hoặc người đã đồng ý)", 400)
+        audio = await f.read()
+        lang = str(form.get("language") or "vi")
+        try:
+            await run_in_threadpool(vs_api.clone, cfg, str(form.get("name", "")), audio, f.filename,
+                                    str(form.get("ref_text", "")), lang if lang in dict(vs_api.LANGS) else "vi")
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        return _vs_back(f"VoiceStudio: đã nhân bản giọng '{form.get('name')}'")
+
+    @app.post("/voicestudio/voices/design-preview", response_class=HTMLResponse)
+    async def vs_design_preview(request: Request):
+        from .. import vs_api
+        if (bad := _vs_ready()):
+            return bad
+        form = await request.form()
+        instruct = vs_api.instruct_of(extra=str(form.get("vd_extra", "")), **_vd(form))
+        seed = vs_api._num(form.get("seed"), -2**31, 2**31, as_int=True) or 7
+        return _start_job(request, "design", f"Nghe thử · seed {seed}",
+                          lambda: vs_api.design_preview(cfg, instruct, seed))
+
+    @app.post("/voicestudio/voices/design-save")
+    async def vs_design_save(request: Request):
+        from starlette.concurrency import run_in_threadpool
+        from .. import vs_api
+        if (bad := _vs_ready()):
+            return bad
+        form = await request.form()
+        name = str(form.get("name", ""))
+        seed = vs_api._num(form.get("seed"), -2**31, 2**31, as_int=True) or 7
+        try:
+            await run_in_threadpool(vs_api.design_save, cfg, name,
+                                    vs_api.instruct_of(extra=str(form.get("vd_extra", "")), **_vd(form)), seed)
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        return _vs_back(f"VoiceStudio: đã lưu giọng thiết kế '{name.strip()}'")
+
+    @app.post("/voicestudio/voices/{vid}/rename")
+    def vs_voice_rename(vid: str, name: str = Form("")):
+        from .. import vs_api
+        prof = next((p for p in _safe_profiles() if p.get("id") == vid), None)
+        if prof and _voice_usage().get((prof.get("name") or "").lower()):
+            return PlainTextResponse("Giọng này đang dùng cho kênh — đổi tên sẽ làm kênh mất giọng. Chọn giọng khác cho "
+                                     "kênh trước.", 400)
+        try:
+            vs_api.rename_profile(cfg, vid, name)
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        return _vs_back()
+
+    @app.post("/voicestudio/voices/{vid}/delete")
+    def vs_voice_delete(vid: str):
+        from .. import vs_api
+        prof = next((p for p in _safe_profiles() if p.get("id") == vid), None)
+        if not prof:
+            return PlainTextResponse("Không còn giọng này", 404)
+        used = _voice_usage().get((prof.get("name") or "").lower())
+        if used:
+            return PlainTextResponse(f"Giọng đang dùng cho {', '.join(used)} — chọn giọng khác cho kênh trước rồi xoá", 400)
+        try:
+            vs_api.delete_profile(cfg, vid)
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        return _vs_back(f"VoiceStudio: đã xoá giọng '{prof.get('name')}'")
+
+    def _safe_profiles() -> list[dict]:
+        from .. import vs_api
+        try:
+            return vs_api.profiles(cfg)
+        except vs_api.VSError:
+            return []
+
+    @app.get("/voicestudio/voices/{vid}/audio")
+    def vs_voice_audio(vid: str):
+        from fastapi.responses import Response
+        from .. import vs_api
+        try:
+            return Response(vs_api.profile_audio(cfg, vid), media_type="audio/wav",
+                            headers={"Cache-Control": "private, max-age=300"})
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 404)
+
+    # ----- Lịch sử -----
+    @app.get("/voicestudio/history/{hid}/audio")
+    def vs_history_audio(hid: str, dl: int = 0):
+        from fastapi.responses import Response
+        from .. import vs_api
+        try:
+            body, mime = vs_api.history_audio(cfg, hid)
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 404)
+        ext = "wav" if mime == "audio/wav" else "ogg"
+        h = {"Cache-Control": "private, max-age=3600"}
+        if dl:
+            h["Content-Disposition"] = f'attachment; filename="voicestudio-{hid}.{ext}"'
+        return Response(body, media_type=mime, headers=h)
+
+    @app.post("/voicestudio/history/{hid}/star")
+    def vs_history_star(hid: str, on: str = Form("")):
+        from .. import vs_api
+        try:
+            vs_api.star(cfg, hid, on == "1")
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        return RedirectResponse("/voicestudio?tab=history", 303)
+
+    @app.post("/voicestudio/history/{hid}/delete")
+    def vs_history_delete(hid: str):
+        from .. import vs_api
+        try:
+            vs_api.delete_history(cfg, hid)
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        return RedirectResponse("/voicestudio?tab=history", 303)
+
+    @app.post("/voicestudio/history/clear")
+    def vs_history_clear():
+        from .. import vs_api
+        try:
+            vs_api.clear_history(cfg)
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        return _vs_back("VoiceStudio: đã xoá lịch sử tạo giọng nói", "history")
 
     # ---------------- App desktop ----------------
     @app.post("/app/show")
@@ -160,11 +786,27 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         return HTMLResponse("no window", status_code=404)
 
     @app.post("/services/voicestudio")
-    def open_voicestudio():
+    def start_voicestudio():
+        """Bật VoiceStudio chạy ngầm (chỉ backend, không cửa sổ). Chưa cài xong runtime -> mở app để cài nốt."""
+        from .. import services
+        r = services.start_voicestudio(cfg)
+        health_cache["at"] = 0
+        if r == "starting":
+            store.log("Đang bật VoiceStudio chạy ngầm — sẵn sàng sau khoảng 15 giây – 1 phút")
+        elif r == "missing":
+            return open_voicestudio_app()
+        elif r == "remote":
+            store.log(f"VoiceStudio đặt ở máy khác ({services.vs_api(cfg)}) — bật trên máy đó", "error")
+        return HTMLResponse("", headers={"HX-Trigger": "services-changed"})
+
+    @app.post("/services/voicestudio-app")
+    def open_voicestudio_app():
+        """Mở app VoiceStudio (cửa sổ): lần đầu tải model / chấp nhận license, quản lý giọng. Backend dytool đang bật
+        thì app dùng chung backend đó."""
         exe = voicestudio_exe()
         if exe:
             subprocess.Popen([str(exe)], cwd=str(exe.parent))
-            store.log("Đang mở VoiceStudio — chờ khoảng 1–3 phút để app khởi động xong")
+            store.log("Đang mở app VoiceStudio — chờ khoảng 1–3 phút để app khởi động xong")
         else:
             store.log("Không tìm thấy VoiceStudio — cài từ https://github.com/debpalash/VoiceStudio/releases", "error")
         return HTMLResponse("", headers={"HX-Trigger": "services-changed"})
@@ -201,7 +843,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
 
     # ---------------- Hôm nay (trang đầu) ----------------
     @app.get("/", response_class=HTMLResponse)
-    def home(request: Request):
+    def home(request: Request, msg: str = ""):
         import os
         from . import plan
         from .. import browsers
@@ -211,12 +853,11 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         need_key = not ai.ready()
         # "Cần bạn xử lý": gom mọi việc người dùng phải làm vào 1 chỗ
         todo = []
-        if totals.get("review"):
-            by = store.q("SELECT p.name, COUNT(*) n FROM videos v JOIN pages p ON p.id=v.page_id WHERE v.status='review' "
-                         "GROUP BY p.id ORDER BY n DESC")
-            todo.append({"kind": "review", "n": totals["review"], "title": "Video chờ duyệt",
-                         "sub": " · ".join(f"{r['name']} {r['n']}" for r in by[:3]), "href": "/review",
-                         "btn": "Mở hộp duyệt", "primary": True})
+        # mục "Chờ duyệt" của trang này (thay trang Hộp duyệt cũ — không lặp lại thành 1 thẻ "Cần bạn xử lý"):
+        # video chờ duyệt + nhóm riêng video đã duyệt nhưng chưa gửi lên nền tảng (đổi giờ / giữ lại / bỏ được)
+        rq_all = review_list()
+        rq = review_list(only_review=True)      # cùng danh sách với duyệt lần lượt ("2 / 5")
+        rq_auto = [r for r in rq_all if r["status"] != "review"]
         if totals.get("failed"):
             todo.append({"kind": "err", "n": totals["failed"], "title": "Video lỗi", "sub": "Xem lý do rồi bấm Thử lại",
                          "href": "/queue?status=failed", "btn": "Xem video lỗi"})
@@ -232,16 +873,21 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                          "href": "/settings#douyin", "btn": "Đăng nhập Douyin"})
         dub_wait = store.one("SELECT COUNT(*) n FROM videos v JOIN pages p ON p.id=v.page_id WHERE v.status='downloaded' "
                              "AND p.enabled=1 AND p.settings LIKE '%\"dub_enabled\": true%'")["n"]
-        if dub_wait and not health().get("voicestudio"):
-            todo.append({"kind": "vs", "n": dub_wait, "title": "Chờ VoiceStudio", "sub": "Video cần lồng tiếng — app đang tắt",
-                         "action": "/services/voicestudio", "btn": "Mở VoiceStudio"})
+        vs = health().get("vs")
+        if dub_wait and vs == "missing":
+            todo.append({"kind": "vs", "n": dub_wait, "title": "Chờ VoiceStudio",
+                         "sub": "Video cần lồng tiếng — mở app VoiceStudio 1 lần để cài nốt (tải model)",
+                         "action": "/services/voicestudio-app", "btn": "Mở VoiceStudio"})
+        elif dub_wait and vs == "off" and not (app.state.worker and app.state.worker.running):
+            todo.append({"kind": "vs", "n": dub_wait, "title": "Chờ VoiceStudio", "sub": "Video cần lồng tiếng — VoiceStudio đang tắt",
+                         "action": "/services/voicestudio", "btn": "Bật VoiceStudio"})
         if need_key:
             todo.append({"kind": "key", "n": None, "title": "Chưa cài AI", "sub": "Cài và đăng nhập Claude / Codex / Gemini CLI để dịch, lồng tiếng",
                          "href": "/settings#ai", "btn": "Cài AI"})
         logs = store.q("SELECT * FROM logs ORDER BY id DESC LIMIT 6")
         return render(request, "home.html", totals=totals, todo=todo, today=plan.today_items(store),
-                      chans=plan.channel_today(store, store.page_settings), logs=logs,
-                      today_label=vn_fmt(time.time(), "%d/%m"))
+                      chans=plan.channel_today(store, store.page_settings), logs=logs, rq=rq, rq_auto=rq_auto, msg=msg,
+                      colors=plan.colors(store), today_label=vn_fmt(time.time(), "%d/%m"))
 
     @app.get("/partials/rev")
     def data_rev():
@@ -282,7 +928,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     def palette(request: Request, q: str = ""):
         from . import plan
         ql = q.strip().lower()
-        cmds = [("Hôm nay", "/", "Trang"), ("Hộp duyệt", "/review", "Trang"), ("Lịch đăng", "/calendar", "Trang"),
+        cmds = [("Hôm nay", "/", "Trang"), ("Duyệt video", "/#cho-duyet", "Trang"), ("Lịch đăng", "/calendar", "Trang"),
                 ("Video", "/queue", "Trang"), ("Video lỗi", "/queue?status=failed", "Trang"),
                 ("Tài khoản", "/accounts", "Trang"), ("Trình duyệt · hồ sơ", "/browsers", "Trang"),
                 ("Proxy", "/browsers/proxies", "Trang"), ("Cài đặt", "/settings", "Trang"),
@@ -297,7 +943,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             for v in store.q("SELECT v.id, v.page_id, v.desc, v.caption, v.status, p.name page_name FROM videos v "
                              "JOIN pages p ON p.id=v.page_id WHERE v.id LIKE ? OR v.desc LIKE ? OR v.caption LIKE ? "
                              "ORDER BY v.updated_at DESC LIMIT 8", (like, like, like)):
-                href = (f"/review?v={v['page_id']}:{v['id']}" if v["status"] in ("review",) + QUEUED
+                href = (f"/?v={v['page_id']}:{v['id']}" if v["status"] in ("review",) + QUEUED
                         else f"/queue?q={v['id']}")
                 items.append({"label": (v["caption"] or v["desc"] or v["id"])[:80], "href": href,
                               "kind": STATUS_VI.get(v["status"], v["status"]), "sub": v["page_name"]})
@@ -552,13 +1198,97 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         return browsers.read_meta(pid).get("name") or pid
 
     @app.get("/browsers", response_class=HTMLResponse)
-    def browsers_page(request: Request, tag: str = ""):
+    def browsers_page(request: Request, tag: str = "", q: str = ""):
         from .. import browsers
         profiles = browsers.profile_details()
         tags = sorted({t for p in profiles for t in p["tags"]}, key=str.lower)
-        shown = [p for p in profiles if not tag or tag in p["tags"]]
-        return render(request, "browsers.html", profiles=shown, all_count=len(profiles), tags=tags, tag=tag,
-                      usage=_profile_usage(), total_mb=round(sum(p["size_mb"] or 0 for p in profiles), 1), **_bctx())
+        usage = _profile_usage()
+        needle = q.strip().lower()
+
+        def hit(p) -> bool:
+            if not needle:
+                return True
+            hay = " ".join([p["name"], p["notes"], " ".join(p["tags"]), " ".join(usage.get(p["id"], []))]).lower()
+            return needle in hay
+        shown = [p for p in profiles if (not tag or tag in p["tags"]) and hit(p)]
+        shown.sort(key=lambda p: (not p["pinned"], not p["running"]))      # ghim lên đầu, rồi hồ sơ đang mở
+        return render(request, "browsers.html", profiles=shown, all_count=len(profiles), tags=tags, tag=tag, q=q,
+                      usage=usage, total_mb=round(sum(p["size_mb"] or 0 for p in profiles), 1),
+                      check_sites=browsers.CHECK_SITES, **_bctx())
+
+    @app.post("/browsers/{pid}/pin")
+    def browsers_pin(pid: str, back: str = Form("/browsers")):
+        from .. import browsers
+        back = back if back.startswith("/browsers") else "/browsers"
+        return _bop(lambda: browsers.write_meta(pid, pinned=None if browsers.read_meta(pid).get("pinned") else True),
+                    back)
+
+    @app.post("/browsers/{pid}/check")
+    def browsers_check(pid: str, site: str = Form(...), back: str = Form("")):
+        """Mở hồ sơ tới 1 trang kiểm tra dấu vân tay / IP (danh sách cố định browsers.CHECK_SITES)."""
+        from .. import browsers
+        if site not in browsers.CHECK_SITES:
+            return PlainTextResponse("Trang kiểm tra không hợp lệ", 400)
+        url = browsers.CHECK_SITES[site][1]
+        return _bop(lambda: browsers.open_url(pid, url), f"/browsers/{pid}" if back == "detail" else "/browsers")
+
+    @app.post("/browsers/bulk")
+    async def browsers_bulk(request: Request):
+        """Thao tác nhiều hồ sơ 1 lần (như ShardBrowser): mở / đóng / gắn proxy / thêm nhãn / bỏ nhãn / ghim / xoá."""
+        from .. import browser_mgr, browsers
+        form = await request.form()
+        ids = [i for i in form.getlist("ids") if browsers._valid_id(i)]
+        act = form.get("act", "")
+        if not ids:
+            return PlainTextResponse("Chưa chọn hồ sơ nào — tick ô ở góc từng hồ sơ", 400)
+        usage = _profile_usage()
+        done, errs = 0, []
+        for pid in ids:
+            name = _pname(pid)
+            try:
+                if act == "open":
+                    browsers.open_window(pid)
+                elif act == "close":
+                    if pid in usage and not browsers.profile_details(pid)[0]["opened_here"]:
+                        errs.append(f"{name}: đang được dytool dùng, không đóng")
+                        continue
+                    browsers.close_window(pid)
+                elif act == "proxy":
+                    m = browsers.read_meta(pid)
+                    proxy_id = str(form.get("proxy_id", ""))
+                    if proxy_id and not browser_mgr.get_proxy(proxy_id):
+                        return PlainTextResponse("Proxy không tồn tại", 400)
+                    browser_mgr.save_network(pid, proxy_id, m.get("webrtc") or "auto")
+                elif act in ("tag", "untag"):
+                    tag = " ".join(str(form.get("tag", "")).split())[:30]
+                    if not tag:
+                        return PlainTextResponse("Gõ tên nhãn", 400)
+                    tags = [t for t in browsers.read_meta(pid).get("tags") or [] if t != tag]
+                    browsers.write_meta(pid, tags=tags + [tag] if act == "tag" else tags)
+                elif act in ("pin", "unpin"):
+                    browsers.write_meta(pid, pinned=True if act == "pin" else None)
+                elif act == "trash":
+                    if usage.get(pid):
+                        errs.append(f"{name}: đang dùng cho {', '.join(usage[pid])}")
+                        continue
+                    if browsers.is_running(pid):
+                        errs.append(f"{name}: đang mở — đóng trước")
+                        continue
+                    browser_mgr.trash(pid)
+                else:
+                    return PlainTextResponse("Thao tác không hợp lệ", 400)
+                done += 1
+            except (browsers.BrowserError, ValueError, OSError) as e:
+                errs.append(f"{name}: {e}")
+        if act in ("open", "close", "trash", "proxy") and done:
+            store.log({"open": "Đã mở", "close": "Đã đóng", "trash": "Đã bỏ vào thùng rác",
+                       "proxy": "Đã đổi proxy cho"}[act] + f" {done} hồ sơ trình duyệt")
+        if errs and not done:
+            return PlainTextResponse("Không làm được: " + "; ".join(errs[:4]), 400)
+        back = str(form.get("back", "/browsers"))
+        if errs:          # làm được một phần: ghi nhật ký những hồ sơ bị bỏ qua
+            store.log(f"Hồ sơ trình duyệt: xong {done}, bỏ qua {len(errs)} — " + "; ".join(errs[:5]))
+        return RedirectResponse(back if back.startswith("/browsers") else "/browsers", 303)
 
     @app.post("/browsers/new")
     def browsers_new(name: str = Form(""), lang: str = Form("auto")):
@@ -983,25 +1713,35 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                       f"(dữ liệu đăng nhập vẫn giữ ở data/accounts/{aid})")
         return RedirectResponse("/accounts", 303)
 
-    # ---------------- Cài đặt Page ----------------
+    # ---------------- Kênh: tổng quan + cài đặt kênh (1 trang, nhiều tab) ----------------
     @app.get("/pages/{pid}", response_class=HTMLResponse)
-    def page_view(request: Request, pid: int):
+    def page_view(request: Request, pid: int, st: str = "", q: str = "", pg: int = 1):
+        """Bấm tên kênh ở menu: phần chính = video của kênh (lọc st / tìm q / trang pg) + cột phải nhịp đăng, hôm nay,
+        nguồn, nhật ký. Cài đặt kênh ở cùng trang, mở bằng nút "Cài đặt kênh" (#nguon, #lich…)."""
         page = store.one("SELECT p.*, a.name acc_name FROM pages p JOIN accounts a ON a.id=p.account_id "
                          "WHERE p.id=?", (pid,))
         if not page:        # kênh đã bị xoá / tab cũ -> về danh sách, không lỗi 500
             return RedirectResponse("/accounts", 303)
+        from . import plan
+        s = store.page_settings(page)
         sources = store.q("SELECT * FROM sources WHERE page_id=? ORDER BY id", (pid,))
         mirror = store.q("SELECT c.*, p.name dst_name FROM crossposts c JOIN pages p ON p.id=c.dst_page_id "
                          "WHERE c.src_page_id=? ORDER BY c.updated_at DESC LIMIT 10", (pid,))
-        from . import plan
         others = store.q("SELECT id, name, platform FROM pages WHERE id<>? ORDER BY platform, id", (pid,))
         week_n = store.one("SELECT COUNT(*) n FROM videos WHERE page_id=? AND status IN ('schedule_pending','scheduled') "
                            "AND scheduled_at BETWEEN ? AND ?", (pid, int(time.time()), int(time.time()) + 7 * 86400))["n"]
-        month_n = store.one("SELECT COUNT(*) n FROM videos WHERE page_id=? AND uploaded_at>=?",
-                            (pid, int(time.time()) - 30 * 86400))["n"]
-        return render(request, "page.html", page=page, s=store.page_settings(page), sources=sources,
-                      stats=store.counts(pid), json=json, tiktoks=store.tiktok_channels(), mirror=mirror,
-                      others=others, week_n=week_n, month_n=month_n, color=plan.colors(store).get(pid, plan.PALETTE[0]))
+        # đăng kèm: Page này đăng kèm sang kênh TikTok nào / kênh TikTok này nhận đăng kèm từ Page nào
+        mirror_to = None
+        if page["platform"] != "tiktok" and int(s.get("tiktok_mirror") or 0):
+            mirror_to = store.one("SELECT id, name FROM pages WHERE id=?", (int(s["tiktok_mirror"]),))
+        mirrored_by = [r for r in store.q("SELECT * FROM pages WHERE platform<>'tiktok'")
+                       if int(store.page_settings(r).get("tiktok_mirror") or 0) == pid]
+        o = plan.channel_overview(store, store.page_settings, pid)
+        vids = plan.channel_videos(store, pid, st, q, pg)
+        return render(request, "page.html", page=page, s=s, sources=sources, o=o, vids=vids,
+                      stats=o["counts"], json=json, tiktoks=store.tiktok_channels(), mirror=mirror,
+                      others=others, week_n=week_n, month_n=o["month_n"], mirror_to=mirror_to,
+                      mirrored_by=mirrored_by, color=plan.colors(store).get(pid, plan.PALETTE[0]))
 
     @app.post("/crossposts/{src}/{dst}/{vid}/retry")
     def crosspost_retry(src: int, dst: int, vid: str):
@@ -1042,7 +1782,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             if auto:
                 return PlainTextResponse("Chưa lưu — ô sau không phải số: " + ", ".join(bad), 400)
             from urllib.parse import quote
-            return RedirectResponse(f"/pages/{pid}?bad={quote(','.join(bad))}", 303)
+            return RedirectResponse(f"/pages/{pid}?tab=lich&bad={quote(','.join(bad))}", 303)
         store.save_page_settings(pid, s)
         was = page["enabled"]
         store.x("UPDATE pages SET enabled=? WHERE id=?", (1 if form.get("enabled") == "on" else 0, pid))
@@ -1056,7 +1796,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                           ch=next((c for c in plan.nav_pages(store) if c["id"] == pid), None),
                           saved_at=vn_fmt(time.time(), "%H:%M:%S"))
         store.log(f"Đã lưu cài đặt Page #{pid}", page_id=pid)
-        return RedirectResponse(f"/pages/{pid}?saved=1", 303)
+        return RedirectResponse(f"/pages/{pid}?saved=1&tab=lich", 303)
 
     @app.post("/pages/{pid}/copy-settings")
     def copy_settings(pid: int, to: int = Form(...), with_sources: str = Form(None)):
@@ -1080,7 +1820,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                             (to, r["kind"], r["value"], r["params"], r["enabled"]))
                     n += 1
         store.log(f"Chép cài đặt {src['name']} -> {dst['name']}" + (f" (+{n} nguồn)" if n else ""), page_id=to)
-        return RedirectResponse(f"/pages/{to}?copied={pid}", 303)
+        return RedirectResponse(f"/pages/{to}?copied={pid}&tab=lich", 303)
 
     def _keyword(kind: str, value: str, zh: str, params: dict):
         """Từ khoá tiếng Việt -> tìm Douyin bằng cụm tiếng Trung (keywords.translate, dùng lại kết quả lúc xem trước).
@@ -1124,7 +1864,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                 (pid, kind, value, json.dumps(params, ensure_ascii=False)))
         if params.get("vi"):
             store.log(f"Thêm nguồn '{params['vi']}' → tìm Douyin bằng '{value}'", page_id=pid)
-        return RedirectResponse(f"/pages/{pid}", 303)
+        return RedirectResponse(f"/pages/{pid}?tab=nguon", 303)
 
     @app.post("/sources/{sid}/update")
     def update_source(sid: int, kind: str = Form(...), value: str = Form(...), max_results: int = Form(20),
@@ -1141,7 +1881,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         store.x("UPDATE sources SET kind=?, value=?, params=?, enabled=? WHERE id=?",
                 (kind, value, json.dumps(params, ensure_ascii=False), 1 if enabled == "on" else 0, sid))
         store.log(f"Đã sửa nguồn '{params.get('vi') or value}'", page_id=row["page_id"])
-        return RedirectResponse(f"/pages/{row['page_id']}?saved=1", 303)
+        return RedirectResponse(f"/pages/{row['page_id']}?saved=1&tab=nguon", 303)
 
     @app.post("/sources/{sid}/toggle")
     def toggle_source(sid: int):
@@ -1149,7 +1889,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         if not row:
             return RedirectResponse("/accounts", 303)
         store.x("UPDATE sources SET enabled=1-enabled WHERE id=?", (sid,))
-        return RedirectResponse(f"/pages/{row['page_id']}", 303)
+        return RedirectResponse(f"/pages/{row['page_id']}?tab=nguon", 303)
 
     @app.post("/sources/{sid}/delete")
     def del_source(sid: int):
@@ -1157,7 +1897,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         if not row:         # bấm Xoá 2 lần / tab cũ
             return RedirectResponse("/accounts", 303)
         store.x("DELETE FROM sources WHERE id=?", (sid,))
-        return RedirectResponse(f"/pages/{row['page_id']}", 303)
+        return RedirectResponse(f"/pages/{row['page_id']}?tab=nguon", 303)
 
     @app.post("/pages/{pid}/scan")
     def scan_now(pid: int):
@@ -1165,41 +1905,56 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         store.log(f"Yêu cầu quét ngay Page #{pid}", page_id=pid)
         return RedirectResponse(f"/pages/{pid}", 303)
 
-    # ---------------- Hộp duyệt ----------------
-    @app.get("/review", response_class=HTMLResponse)
-    def review(request: Request, page: int | None = None, v: str = "", msg: str = ""):
-        from . import plan
-        # chờ duyệt + video ĐÃ DUYỆT (kênh bật "Tự đăng" duyệt luôn) nhưng chưa gửi lên nền tảng: vẫn xem / đổi giờ /
-        # giữ lại / bỏ được (trước không hiện ở đâu -> "chờ đăng mà Hộp duyệt không thấy")
+    # ---------------- Duyệt (trên trang Hôm nay, trong hộp xem trước video) ----------------
+    def review_list(page: int | None = None, only_review: bool = False) -> list[dict]:
+        """Video chờ duyệt + video ĐÃ DUYỆT (kênh bật "Tự đăng") nhưng chưa gửi lên nền tảng — vẫn đổi giờ / giữ lại /
+        bỏ được. Chờ duyệt trước, nhiều tim trước. only_review: chỉ video chờ duyệt (danh sách duyệt lần lượt, "2 / 5")."""
+        sts = ("review",) if only_review else ("review",) + QUEUED
         sql = ("SELECT v.*, p.name page_name, p.platform, p.enabled page_enabled FROM videos v JOIN pages p ON p.id=v.page_id "
-               f"WHERE v.status IN {REVIEWABLE}" + (" AND v.page_id=?" if page else "") +
+               f"WHERE v.status IN ({','.join('?' * len(sts))})" + (" AND v.page_id=?" if page else "") +
                " ORDER BY v.status!='review', v.likes DESC, v.updated_at DESC")
-        vids = store.q(sql, (page,) if page else ())
-        keys = [f"{x['page_id']}:{x['id']}" for x in vids]
-        i = keys.index(v) if v in keys else 0
-        cur = vids[i] if vids else None
-        slot = slot_label = None
+        rows = [dict(r) for r in store.q(sql, sts + ((page,) if page else ()))]
+        for r in rows:
+            r["key"] = f"{r['page_id']}:{r['id']}"
+        if only_review:      # duyệt lần lượt: bỏ video chưa có bản edit (hộp không duyệt được -> ngõ cụt)
+            rows = [r for r in rows if (data / "edited" / f"p{r['page_id']}_{r['id']}.mp4").is_file()]
+        return rows
+
+    def review_next(pid: int, vid: str, seq: str, before: list[str]) -> str:
+        """Video chờ duyệt kế tiếp để hộp duyệt tự mở sau khi duyệt / bỏ: video đứng SAU video này trong danh sách lúc
+        trước khi bấm (before), vòng lại đầu; video mới vào hàng chờ xếp cuối. seq = "0" (mọi kênh) hoặc id kênh."""
+        now = [r["key"] for r in review_list(int(seq) if seq.isdigit() and seq != "0" else None, only_review=True)]
+        key = f"{pid}:{vid}"
+        i = before.index(key) if key in before else -1
+        order = before[i + 1:] + before[:max(i, 0)] + [k for k in now if k not in before]
+        return next((k for k in order if k in now and k != key), "")
+
+    @app.get("/review")
+    def review_old(v: str = ""):
+        """Trang Hộp duyệt cũ đã bỏ: duyệt ngay trên trang Hôm nay (hộp xem trước video). Link cũ -> mở đúng video."""
+        import re
+        return RedirectResponse("/?v=" + v if re.fullmatch(r"\d+:\d{6,30}", v) else "/#cho-duyet", 303)
+
+    def review_ctx(pid: int) -> dict:
+        """Dữ liệu cho khối duyệt dùng chung (_review_form.html): khung giờ trống kế tiếp, giờ gợi ý, kênh đăng kèm.
+        Dùng ở Hộp duyệt và hộp xem trước video."""
+        pg = store.one("SELECT * FROM pages WHERE id=?", (pid,))
+        s = store.page_settings(pg)
+        slot = store.next_free_slot(pid, s["schedule_slots"], int(s["max_posts_per_day"]))
         mirror = None
-        if cur:
-            pg = store.one("SELECT * FROM pages WHERE id=?", (cur["page_id"],))
-            s = store.page_settings(pg)
-            slot = store.next_free_slot(pg["id"], s["schedule_slots"], int(s["max_posts_per_day"]))
-            slot_label = vn_fmt(slot, "%H:%M %d/%m") if slot else None
-            if int(s.get("tiktok_mirror") or 0):
-                mirror = store.one("SELECT name FROM pages WHERE id=?", (int(s["tiktok_mirror"]),))
-        by_page = store.q("SELECT p.id, p.name, COUNT(*) n FROM videos v JOIN pages p ON p.id=v.page_id "
-                          f"WHERE v.status IN {REVIEWABLE} GROUP BY p.id ORDER BY n DESC")
-        nxt = keys[i + 1] if cur and i + 1 < len(keys) else (keys[i - 1] if cur and i > 0 else "")
-        return render(request, "review.html", videos=vids, cur=cur, idx=i, keys=keys, cur_page=page, by_page=by_page,
-                      slot=slot, slot_label=slot_label, suggest=suggest_slot(cur["page_id"]) if cur else "",
-                      raw=bool(cur and (data / "raw" / f"{cur['id']}.mp4").exists()), msg=msg, nxt=nxt,
-                      mirror=mirror, colors=plan.colors(store))
+        if int(s.get("tiktok_mirror") or 0):
+            mirror = store.one("SELECT name FROM pages WHERE id=?", (int(s["tiktok_mirror"]),))
+        return {"slot": slot, "slot_label": vn_fmt(slot, "%H:%M %d/%m") if slot else None, "mirror": mirror,
+                "auto_pub": bool(s.get("auto_publish")),
+                "suggest": suggest_slot(pid)}
 
     @app.post("/review/act")
-    def review_act(pid: int = Form(...), vid: str = Form(...), mode: str = Form("slot"), when: str = Form(""),
-                   caption: str = Form(None), page: str = Form(""), nxt: str = Form(""), act: str = Form("")):
+    def review_act(request: Request, pid: int = Form(...), vid: str = Form(...), mode: str = Form("slot"), when: str = Form(""),
+                   caption: str = Form(None), page: str = Form(""), nxt: str = Form(""), act: str = Form(""),
+                   ret: str = Form(""), seq: str = Form("")):
         """Nút Duyệt / Bỏ ở Hộp duyệt. mode: slot = khung giờ trống tiếp theo, approve = theo cài đặt kênh,
-        now = đăng ngay, at = giờ tự chọn, reject = bỏ. Xong -> mở video kế tiếp."""
+        now = đăng ngay, at = giờ tự chọn, reject = bỏ. Xong -> mở video kế tiếp.
+        ret=view: gửi từ hộp xem trước video (trang kênh / Video / Lịch) -> trả lại hộp đó đã cập nhật, không rời trang."""
         import datetime as dt
         from urllib.parse import urlencode
         from ..store import vn_ts
@@ -1209,6 +1964,10 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         msg = ""
         # video đã tự duyệt nhưng chưa gửi lên nền tảng cũng đổi được; worker đang đăng ('uploading') thì không
         allowed = ("review",) + QUEUED
+        prev = store.one("SELECT status, scheduled_at FROM videos WHERE id=? AND page_id=?", (vid, pid))
+        before = ([r["key"] for r in review_list(int(seq) if seq != "0" else None, only_review=True)]
+                  if seq.isdigit() else [])
+        new = "schedule_pending"
         if mode in ("slot", "at"):
             if mode == "slot":
                 pg = store.one("SELECT * FROM pages WHERE id=?", (pid,))
@@ -1242,8 +2001,39 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                 store.x("DELETE FROM crossposts WHERE video_id=? AND src_page_id=? AND status='pending'", (vid, pid))
         if not ok:
             msg = "Video không còn ở Hộp duyệt (tool đang / đã đăng, hoặc đã được xử lý)"
-        q = {k: v for k, v in (("page", page), ("v", nxt), ("msg", msg)) if v}
-        return RedirectResponse("/review?" + urlencode(q), 303)
+        if ret == "view" and request.headers.get("HX-Request"):
+            # Hoàn tác (như Gmail / Superhuman) thay cho hỏi lại: trả video về đúng trạng thái + giờ cũ
+            undo = ({"pid": pid, "vid": vid, "frm": new, "to": prev["status"], "at": prev["scheduled_at"] or "", "seq": seq,
+                     "t": int(time.time())}
+                    if ok and prev and mode != "hold" else None)
+            # mở từ danh sách Chờ duyệt (seq): duyệt / bỏ xong tự mở video chờ duyệt kế tiếp; Giữ lại thì ở lại
+            if ok and seq and mode != "hold":
+                n = review_next(pid, vid, seq, before)
+                if n:
+                    npid, nvid = n.split(":")
+                    return view_html(request, int(npid), nvid, msg=f"Video vừa rồi: {msg[0].lower() + msg[1:]}",
+                                     msg_ok=True, seq=seq, undo=undo)
+                return view_html(request, pid, vid, msg=msg, msg_ok=True, seq=seq, undo=undo, done=True)
+            return view_html(request, pid, vid, msg=msg, msg_ok=ok, seq=seq, undo=undo)
+        return RedirectResponse("/?" + urlencode({"msg": msg}) + "#cho-duyet", 303)
+
+    @app.post("/review/undo")
+    def review_undo(request: Request, pid: int = Form(...), vid: str = Form(...), frm: str = Form(...), to: str = Form(...),
+                    at: str = Form(""), seq: str = Form(""), t: str = Form("0")):
+        """Nút Hoàn tác sau Duyệt / Bỏ trong hộp duyệt: trả trạng thái + giờ đăng như trước. Chỉ đổi khi video VẪN ở
+        trạng thái vừa đặt (worker chưa nhận đi đăng) -> không bao giờ kéo lại bài đang / đã đăng; chỉ trong 10 phút
+        (nút Hoàn tác cũ để lâu không ghi đè quyết định mới hơn). Trạng thái đích chỉ là chờ duyệt / chờ đăng."""
+        ok_states = ("review", "rejected") + QUEUED
+        if frm not in ok_states or to not in ("review",) + QUEUED:
+            return PlainTextResponse("Không hoàn tác được", 400)
+        if not t.isdigit() or time.time() - int(t) > 600:
+            return PlainTextResponse("Đã quá 10 phút — không hoàn tác nữa, hãy duyệt / đổi giờ lại video này", 400)
+        sched = int(at) if at.isdigit() else None
+        ok = store.set_video_if(vid, pid, (frm,), status=to, scheduled_at=sched)
+        if ok:
+            store.log(f"Hoàn tác duyệt {vid}", page_id=pid)
+        return view_html(request, pid, vid, seq=seq, msg_ok=ok,
+                         msg="Đã hoàn tác" if ok else "Không hoàn tác được — tool đã nhận video này đi đăng")
 
     @app.get("/media/raw/{vid}")
     def media_raw(vid: str):
@@ -1255,19 +2045,43 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         return FileResponse(data / "raw" / f"{vid}.mp4", media_type="video/mp4")
 
     @app.get("/videos/{pid}/{vid}/view", response_class=HTMLResponse)
-    def video_view(request: Request, pid: int, vid: str):
+    def video_view(request: Request, pid: int, vid: str, seq: str = ""):
         """Hộp xem lại 1 video ở mọi trạng thái (trước chỉ Hộp duyệt mới xem được — video tự lên lịch thì không thấy
         đâu): video đã edit / gốc, caption, giờ hẹn, chỗ xem bài trên Facebook / TikTok."""
+        return view_html(request, pid, vid, seq=seq)
+
+    def view_html(request: Request, pid: int, vid: str, msg: str = "", msg_ok: bool = True, seq: str = "",
+                  undo: dict | None = None, done: bool = False):
+        """Vẽ hộp xem trước 1 video; video còn duyệt được (REVIEWABLE) thì kèm khối duyệt dùng chung."""
         import re
         if not re.fullmatch(r"\d{6,30}", vid):
             return PlainTextResponse("Mã video không hợp lệ", 400)
-        v = store.one("SELECT v.*, p.name page_name, p.asset_id, p.platform, p.profile_id FROM videos v "
-                      "JOIN pages p ON p.id=v.page_id WHERE v.page_id=? AND v.id=?", (pid, vid))
+        v = store.one("SELECT v.*, p.name page_name, p.asset_id, p.platform, p.profile_id, p.enabled page_enabled "
+                      "FROM videos v JOIN pages p ON p.id=v.page_id WHERE v.page_id=? AND v.id=?", (pid, vid))
         if not v:
             return PlainTextResponse("Không tìm thấy video", 404)
         edited = (data / "edited" / f"p{pid}_{vid}.mp4").is_file()
         raw = (data / "raw" / f"{vid}.mp4").is_file()
-        return render(request, "_video_view.html", v=v, edited=edited, raw=raw)
+        # chỉ duyệt được khi đã có bản edit (giống Hộp duyệt: ở đó chỉ có video đã edit)
+        can_review = v["status"] in ("review",) + QUEUED and edited
+        seq = seq if seq.isdigit() else ""
+        # vị trí trong danh sách chờ duyệt ("2 / 5") + video trước / sau (J / K) khi mở từ danh sách
+        pos = total = 0
+        prv = nxt = ""
+        if seq:
+            keys = [r["key"] for r in review_list(int(seq) if seq != "0" else None, only_review=True)]
+            total = len(keys)
+            key = f"{pid}:{vid}"
+            if key in keys:
+                i = keys.index(key)
+                pos = i + 1
+                prv = keys[i - 1] if i > 0 else ""
+                nxt = keys[i + 1] if i + 1 < total else ""
+        import json
+        return render(request, "_video_view.html", v=v, edited=edited, raw=raw, msg=msg, msg_ok=msg_ok, seq=seq,
+                      nxt=nxt, prv=prv, pos=pos, total=total, done=done,
+                      undo=json.dumps({k: str(x) for k, x in undo.items()}) if undo else "",
+                      can_review=can_review, **(review_ctx(pid) if can_review else {}))
 
     # ---------------- Lịch đăng ----------------
     @app.get("/calendar", response_class=HTMLResponse)

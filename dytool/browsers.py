@@ -188,8 +188,14 @@ def install_engine() -> None:
         raise BrowserError(f"Không tải được nhân trình duyệt ShardX: {e}") from e
 
 
-def install_engine_background() -> None:
-    """Gọi khi mở app: tải sẵn nhân lần đầu để bấm Đăng nhập không phải chờ ~1 phút."""
+_install_thread: threading.Thread | None = None     # luồng tải nhân lúc mở app (màn hình khởi động chờ luồng này)
+
+
+def install_engine_background() -> threading.Thread:
+    """Gọi khi mở app: tải sẵn nhân lần đầu để bấm Đăng nhập không phải chờ ~1 phút. Đang tải rồi thì trả luồng cũ."""
+    global _install_thread
+    if _install_thread is not None and _install_thread.is_alive():
+        return _install_thread
     def run():
         try:
             install_engine()
@@ -201,7 +207,9 @@ def install_engine_background() -> None:
             browser_mgr.templates()
         except Exception:
             pass
-    threading.Thread(target=run, daemon=True, name="shardx-install").start()
+    _install_thread = threading.Thread(target=run, daemon=True, name="shardx-install")
+    _install_thread.start()
+    return _install_thread
 
 
 # ---------------- hồ sơ ----------------
@@ -522,7 +530,7 @@ def profile_details(only: str | None = None) -> list[dict]:
                     "notes": meta.get("notes") or "", "tags": meta.get("tags") or [],
                     "proxy_id": meta.get("proxy_id") or "", "webrtc": meta.get("webrtc") or "auto",
                     "extensions": meta.get("extensions") or [], "bookmarks": meta.get("bookmarks") or [],
-                    "extra_args": meta.get("extra_args") or "",
+                    "extra_args": meta.get("extra_args") or "", "pinned": bool(meta.get("pinned")),
                     "size_mb": profile_size_mb(p["id"]), "opened_here": s is not None})
     return out
 
@@ -555,6 +563,39 @@ def close_window(pid: str) -> None:
     if ws:
         from shardx.browser import _close_over_cdp
         _close_over_cdp(ws)
+
+
+# trang kiểm tra dấu vân tay / IP mở được từ trang quản lý (chỉ các địa chỉ này — không nhận URL tuỳ ý từ form)
+CHECK_SITES = {
+    "browserscan": ("BrowserScan — độ thật của dấu vân tay", "https://www.browserscan.net/"),
+    "pixelscan": ("Pixelscan — dấu vân tay có nhất quán", "https://pixelscan.net/"),
+    "ip": ("IP / vị trí đang dùng", "https://ipinfo.io/"),
+    "webrtc": ("Rò rỉ WebRTC", "https://browserleaks.com/webrtc"),
+}
+
+
+def open_url(pid: str, url: str) -> None:
+    """Mở hồ sơ (chưa mở thì mở) rồi mở thêm 1 tab tới `url` qua cổng điều khiển của chính phiên đó."""
+    import time as _t
+    import urllib.parse
+    import urllib.request
+    d = _profile_dir(pid)
+    open_window(pid)
+    ws = None
+    for _ in range(40):                          # cửa sổ vừa bật: chờ cổng điều khiển (tối đa ~20 s)
+        ws = _running_cdp(d)
+        if ws:
+            break
+        _t.sleep(0.5)
+    if not ws:
+        raise BrowserError("Hồ sơ chưa mở xong — thử lại sau vài giây")
+    port = urllib.parse.urlparse(ws).port
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/json/new?{urllib.parse.quote(url, safe=':/?=&')}",
+                                 method="PUT")
+    try:
+        urllib.request.urlopen(req, timeout=5).close()
+    except OSError as e:
+        raise BrowserError(f"Không mở được trang trong hồ sơ: {e}") from e
 
 
 def rename_profile(pid: str, name: str) -> None:
@@ -604,6 +645,12 @@ def _running_cdp(udd: Path) -> str | None:
         return None
 
 
+_MUTE_JS = """(() => {
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function () { this.muted = true; return play.apply(this, arguments); };
+})();"""
+
+
 def attach(pw, acc_dir: Path, headless: bool):
     """Mở hồ sơ của tài khoản, gắn Playwright, trả về BrowserContext. ctx.close() đóng luôn hồ sơ (nếu chính
     lần này mở nó)."""
@@ -617,7 +664,11 @@ def attach(pw, acc_dir: Path, headless: bool):
     if not ws:
         try:
             with _quiet():
-                sess = s.launch(s.open_profile(pid), cdp=True, headless=bool(headless), **_launch_kwargs(pid))
+                kw = _launch_kwargs(pid)
+                # phiên tự động (đăng / quét) không phát tiếng: bản xem trước video trên Business Suite / TikTok
+                # Studio tự chạy kèm âm thanh
+                kw["extra_args"] = [*kw.get("extra_args", []), "--mute-audio"]
+                sess = s.launch(s.open_profile(pid), cdp=True, headless=bool(headless), **kw)
         except BrowserError:
             raise
         except Exception as e:
@@ -628,6 +679,12 @@ def attach(pw, acc_dir: Path, headless: bool):
             raise BrowserError("Nhân trình duyệt ShardX không mở cổng điều khiển (CDP) — thử lại, hoặc Cài lại thư viện")
     browser = pw.chromium.connect_over_cdp(ws)       # chỉ dùng giao thức CDP của Playwright, không chạy Chromium riêng
     ctx = browser.contexts[0] if browser.contexts else browser.new_context()
+    if not sess:
+        # hồ sơ người dùng đang mở sẵn (không có --mute-audio): tắt tiếng video trong các trang dytool mở ra
+        try:
+            ctx.add_init_script(_MUTE_JS)
+        except Exception:
+            pass
 
     def close():
         try:

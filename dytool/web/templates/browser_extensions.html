@@ -26,7 +26,7 @@
       <td><b>{{ e.name }}</b> <span class="muted small">{{ e.version }}</span>
         <div class="small muted" translate="no">{{ e.id }}</div></td>
       <td class="small">{% for n in used %}<div class="trunc">{{ n }}</div>{% else %}<span class="muted">—</span>{% endfor %}</td>
-      <td style="text-align:right">
+      <td class="cell-end">
         <form method="post" action="/browsers/extensions/{{ e.id }}/delete"
               hx-confirm="Gỡ tiện ích {{ e.name }}?{% if used %} Tắt luôn ở {{ used|length }} hồ sơ đang bật.{% endif %}">
           <button class="btn sm ghost danger">Gỡ</button></form></td>
@@ -36,6 +36,6 @@
 </table>
 </div>
 {% else %}
-  <p class="empty">Chưa có tiện ích nào.</p>
+  {% from "_macros.html" import empty %}{% call empty("box", "Chưa có tiện ích nào") %}Thêm tiện ích ở trên rồi bật cho từng hồ sơ trong trang cài đặt hồ sơ.{% endcall %}
 {% endif %}
 {% endblock %}

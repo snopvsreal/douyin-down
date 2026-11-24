@@ -43,6 +43,21 @@ def _duration(path: Path) -> float:
     return float(out.strip() or 0)
 
 
+def page_voices(s: dict) -> dict:
+    """Giọng nam / nữ của 1 kênh (cài đặt kênh): chọn sẵn trong thư viện VoiceStudio -> dùng đúng giọng đó; không
+    thì giọng thiết kế theo mô tả + seed — tên gắn với nội dung mô tả nên đổi mô tả / seed là tự tạo giọng mới."""
+    import hashlib
+    seed = int(s.get("voice_seed") or 7)
+    tag = hashlib.md5(f"{s.get('voice_male', '')}|{s.get('voice_female', '')}|{seed}".encode()).hexdigest()[:6]
+    out = {"male": {"name": f"dy-nam-{tag}", "instruct": s.get("voice_male", ""), "seed": seed},
+           "female": {"name": f"dy-nu-{tag}", "instruct": s.get("voice_female", ""), "seed": seed + 4}}
+    for g in ("male", "female"):
+        picked = (s.get(f"voice_{g}_profile") or "").strip()
+        if picked:
+            out[g] = {"name": picked, "fixed": True}
+    return out
+
+
 class VoiceStudio:
     def __init__(self, cfg: dict):
         self.cfg = cfg
@@ -54,7 +69,7 @@ class VoiceStudio:
         try:
             self.http.get(self.api + "/health", timeout=5).raise_for_status()
         except httpx.HTTPError as e:
-            raise DubError(f"Không kết nối được VoiceStudio tại {self.api}. Mở app VoiceStudio trước.") from e
+            raise DubError(f"Không kết nối được VoiceStudio tại {self.api}. Bật VoiceStudio (chip VoiceStudio trên cùng) rồi thử lại.") from e
 
     REF_TEXT = ("Xin chào các bạn, hôm nay mình sẽ kể cho các bạn nghe một câu chuyện rất thú vị. "
                 "Nhớ theo dõi đến cuối video nhé.")
@@ -77,6 +92,8 @@ class VoiceStudio:
         profiles = profiles.get("profiles", profiles) if isinstance(profiles, dict) else profiles
         if any(p.get("name", "").lower() == name.lower() or p.get("id") == name for p in profiles):
             return name
+        if spec.get("fixed"):        # giọng chọn sẵn trong thư viện (Cài đặt kênh) đã bị xoá -> không tự sinh giọng khác
+            raise DubError(f"Giọng '{name}' không còn trong VoiceStudio: chọn giọng khác ở Cài đặt kênh › Edit & lồng tiếng")
         ref_path = spec.get("ref_audio")          # file giọng mẫu của bạn (tuỳ chọn, cần có quyền dùng giọng)
         ref_text = spec.get("ref_text", "")
         if not ref_path:

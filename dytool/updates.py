@@ -235,7 +235,11 @@ def busy_reason(app: str) -> str | None:
 
 
 def _install_voicestudio(exe: Path) -> None:
+    from . import services
     was_open = _kill("VoiceStudio.exe")
+    # backend dytool bật chạy ngầm cũng tắt: bản mới chép code backend vào thư mục runtime ở lần app chạy đầu tiên
+    # -> mở app lại sau khi cài để app cập nhật runtime (worker dùng chung backend app bật)
+    was_open = services.stop_voicestudio() or was_open
     _set("voicestudio", "installing", "Đang cài VoiceStudio…")
     rc = subprocess.run([str(exe), "/S"]).returncode
     if rc not in (0, 3010):

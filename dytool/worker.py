@@ -34,6 +34,7 @@ class Worker:
         self._last_scan: dict[int, float] = {}
         self._dy = None
         self._vs_warned = 0.0
+        self._vs_starting = False       # đã ghi log "đang bật VoiceStudio" cho lần bật này
         self._tdl_retry_at = 0.0
         self._last_cleanup = 0.0
 
@@ -112,14 +113,8 @@ class Worker:
         dub["enabled"] = bool(s["dub_enabled"])
         dub["text_only"] = bool(s["dub_text_only"])
         dub["gender"] = s["gender"]
-        seed = int(s["voice_seed"])
-        # tên profile giọng gắn với nội dung mô tả -> đổi mô tả/seed thì tự tạo giọng mới
-        import hashlib
-        tag = hashlib.md5(f"{s['voice_male']}|{s['voice_female']}|{seed}".encode()).hexdigest()[:6]
-        dub["voices"] = {
-            "male": {"name": f"dy-nam-{tag}", "instruct": s["voice_male"], "seed": seed},
-            "female": {"name": f"dy-nu-{tag}", "instruct": s["voice_female"], "seed": seed + 4},
-        }
+        from .dub import page_voices
+        dub["voices"] = page_voices(s)
         return e
 
     def _douyin(self):
@@ -158,6 +153,13 @@ class Worker:
                 traceback.print_exc()
                 did = False
             progress.end()
+            if not did:
+                from . import services
+                try:
+                    if services.vs_idle_stop(self.cfg):
+                        self.store.log("Rảnh lâu -> tắt VoiceStudio chạy ngầm (tự bật lại khi có video cần lồng tiếng)")
+                except Exception as e:
+                    self.store.log(f"Tắt VoiceStudio lỗi: {e}", "error")
             if not did and time.time() - self._last_cleanup > 6 * 3600:
                 self._last_cleanup = time.time()
                 try:
@@ -452,18 +454,28 @@ class Worker:
             self.store.log(f"[{page['name']}] Lỗi tải {row['id']}: {e}", "error", page["id"])
 
     def _voicestudio_up(self) -> bool:
-        import httpx
-        api = self.cfg["edit"].get("dub", {}).get("api", "http://127.0.0.1:3900").rstrip("/")
-        from .services import LOCAL_TIMEOUT
-        try:
-            ok = httpx.get(api + "/health", timeout=LOCAL_TIMEOUT).status_code < 500
-        except httpx.HTTPError:
-            ok = False
-        if not ok and time.time() - self._vs_warned > 600:     # nhắc 10 phút/lần, không spam log
-            self.store.log("VoiceStudio chưa mở -> tạm dừng edit các Page bật lồng tiếng. Mở app VoiceStudio để chạy tiếp.",
-                           "error")
+        """VoiceStudio sẵn sàng chưa; chưa thì tự bật backend chạy ngầm (không chờ: nạp mất 15 s – 1 phút, trong lúc
+        đó worker làm việc khác, video lồng tiếng chờ vòng sau)."""
+        from . import services
+        r = services.start_voicestudio(self.cfg)
+        if r == "ok":
+            self._vs_starting = False
+            return True
+        if r == "starting":
+            if not self._vs_starting:
+                self.store.log("Đang bật VoiceStudio chạy ngầm để lồng tiếng…")
+            self._vs_starting = True
+            return False
+        self._vs_starting = False
+        if time.time() - self._vs_warned > 600:     # nhắc 10 phút/lần, không spam log
+            msg = ("VoiceStudio chưa cài xong -> tạm dừng edit các Page bật lồng tiếng. Mở app VoiceStudio 1 lần "
+                   "(tải model, chấp nhận license OmniVoice)." if r == "missing" else
+                   "VoiceStudio chạy ngầm bật lên rồi tắt ngay (xem data/voicestudio.log) -> 10 phút sau thử lại. "
+                   "Mở app VoiceStudio để xem lỗi." if r == "crashed" else
+                   f"VoiceStudio ở {services.vs_api(self.cfg)} không trả lời -> tạm dừng edit các Page bật lồng tiếng.")
+            self.store.log(msg, "error")
             self._vs_warned = time.time()
-        return ok
+        return False
 
     def _edit(self, page, row):
         from . import subtitles
@@ -484,6 +496,8 @@ class Worker:
             # — lỗi lúc này là sau khi đã tốn công lồng tiếng xong
             caption = (s["caption_template"].replace("{desc_vi}", desc_vi)
                        .replace("{desc}", row["desc"] or "").strip())
+            from . import services
+            services.vs_touch()     # vừa lồng tiếng xong: tính giờ rảnh từ lúc này (edit dài hơn hạn tắt khi rảnh)
             status = "approved" if s["auto_publish"] else "review"
             # chỉ ghi khi video vẫn "Đã tải": người dùng bấm Bỏ trong lúc edit thì không được kéo nó về chờ đăng
             if self.store.set_video_if(row["id"], page["id"], ("downloaded",), status=status, caption=caption,

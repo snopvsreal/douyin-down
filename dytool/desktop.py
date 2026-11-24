@@ -86,9 +86,9 @@ def _start_server():
     threading.Thread(target=server.run, name="dytool-server", daemon=True).start()
     for _ in range(150):                      # chờ server lên (tối đa ~30s)
         if server.started:
-            from . import updates
-            app.state.worker.start()
-            updates.start_background_checks()
+            # bật hết dịch vụ (backend tải, VoiceStudio, nhân trình duyệt…) song song; màn hình khởi động /startup
+            # hiện tiến độ; xong mới bật worker + hỏi bản cập nhật (web/app.py begin_startup)
+            app.state.begin_startup()
             return app, server
         time.sleep(0.2)
     raise RuntimeError(f"Không mở được server ở cổng {PORT} (cổng đang bị chương trình khác dùng?)")
@@ -135,7 +135,7 @@ def _browser_mode(app, server, pystray, Image) -> None:
     import webbrowser
 
     def open_ui(*_):
-        webbrowser.open(URL)
+        webbrowser.open(URL + "/startup")       # đang khởi động: màn hình tiến trình; xong rồi: tự chuyển vào trang chính
 
     if app:
         app.state.show_window = open_ui          # mở dytool.exe lần 2 -> mở lại tab giao diện
@@ -146,12 +146,11 @@ def _browser_mode(app, server, pystray, Image) -> None:
         "https://developer.microsoft.com/microsoft-edge/webview2/  rồi mở lại dytool.",)).start()
 
     def quit_app(icon, item):
-        w = app.state.worker if app else None
-        if w:
-            w.stop()
+        icon.stop()
+        from . import services
+        services.shutdown(app.state.worker if app else None)   # tắt hết dịch vụ đi kèm (không chạy ngầm sau khi thoát)
         if server:
             server.should_exit = True
-        icon.stop()
 
     with Image.open(ICON) if ICON.exists() else Image.new("RGB", (64, 64), "#172030") as im:
         im.load()
@@ -338,10 +337,8 @@ def main() -> None:
         state["quitting"] = True
         if w:
             w.stop()
-        if server:
-            server.should_exit = True
         tray.stop()
-        window.destroy()
+        window.destroy()            # webview.start() trả về -> cuối main() tắt hết dịch vụ rồi mới tắt server
 
     def on_closing():
         if state["quitting"]:
@@ -363,7 +360,7 @@ def main() -> None:
         app.state.show_window = show
     window.events.closing += on_closing
     window.events.shown += lambda: _style_window(window)
-    window.events.shown += lambda: threading.Thread(target=_frameless, args=(window, URL), daemon=True).start()
+    window.events.shown += lambda: threading.Thread(target=_frameless, args=(window, URL + "/startup"), daemon=True).start()
     window.events.maximized += lambda: api._push()
     window.events.restored += lambda: api._push()
     window.events.shown += lambda: _allow_close_on_shutdown(state)
@@ -391,6 +388,11 @@ def main() -> None:
         tray.stop()
     except Exception:
         pass
+    if app:
+        # tắt hết dịch vụ đi kèm: worker (như nút Dừng), trình duyệt đã mở, VoiceStudio chạy ngầm, backend tải Douyin,
+        # cửa sổ đăng nhập, ffmpeg… — thoát app là không còn gì chạy ngầm
+        from . import services
+        services.shutdown(app.state.worker)
     if server:
         server.should_exit = True
         time.sleep(0.5)

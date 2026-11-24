@@ -16,7 +16,7 @@
           {% if a.job and a.job.state == 'installing' %}<span class="pill info">Đang cài…</span>
           {% elif a.installed %}<span class="pill ok">Đã cài</span>
           {% else %}<span class="pill">Chưa cài</span>{% endif %}
-          {% if a.job and a.job.state == 'error' %}<div class="small" style="color:var(--err); margin-top:4px">{{ a.job.msg }}</div>{% endif %}
+          {% if a.job and a.job.state == 'error' %}<div class="small err-text" style="margin-top:4px">{{ a.job.msg }}</div>{% endif %}
         </li>
         <li class="{{ 'done' if a.logged_in }}">
           {% if a.logged_in %}<span class="pill ok">Đã đăng nhập</span>{% else %}<span class="pill">Chưa đăng nhập</span>{% endif %}

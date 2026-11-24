@@ -4,10 +4,10 @@
     <p class="sub">Mỗi hồ sơ là 1 trình duyệt riêng: dấu vân tay riêng (máy, card đồ hoạ, màn hình…), cookie đăng nhập
       riêng, proxy riêng. Nhân ShardX {{ engine or '' }} chạy ngay trong dytool.</p></div>
 </div>
-<nav class="filters" aria-label="Mục quản lý trình duyệt" style="margin-bottom:16px">
+<nav class="filters" aria-label="Mục quản lý trình duyệt">
   <a href="/browsers" class="pill {{ 'on' if active == 'profiles' }}" {{ 'aria-current=page' if active == 'profiles' }}>Hồ sơ</a>
-  <a href="/browsers/proxies" class="pill {{ 'on' if active == 'proxies' }}" {{ 'aria-current=page' if active == 'proxies' }}>Proxy · {{ proxies|length }}</a>
-  <a href="/browsers/extensions" class="pill {{ 'on' if active == 'extensions' }}" {{ 'aria-current=page' if active == 'extensions' }}>Tiện ích · {{ n_ext }}</a>
-  <a href="/browsers/trash" class="pill {{ 'on' if active == 'trash' }}" {{ 'aria-current=page' if active == 'trash' }}>Thùng rác · {{ n_trash }}</a>
+  <a href="/browsers/proxies" class="pill {{ 'on' if active == 'proxies' }}" {{ 'aria-current=page' if active == 'proxies' }}>Proxy<span class="count">{{ proxies|length }}</span></a>
+  <a href="/browsers/extensions" class="pill {{ 'on' if active == 'extensions' }}" {{ 'aria-current=page' if active == 'extensions' }}>Tiện ích<span class="count">{{ n_ext }}</span></a>
+  <a href="/browsers/trash" class="pill {{ 'on' if active == 'trash' }}" {{ 'aria-current=page' if active == 'trash' }}>Thùng rác<span class="count">{{ n_trash }}</span></a>
   {% if not engine_ready %}<span class="pill warn" style="margin-left:auto">Đang tải nhân trình duyệt…</span>{% endif %}
 </nav>

@@ -1,0 +1,31 @@
+{# 1 dòng lịch sử tạo giọng nói (h = mục /history của VoiceStudio; names = id giọng -> tên) #}
+<div class="vs-hist">
+  <form method="post" action="/voicestudio/history/{{ h.id }}/star" class="vs-star">
+    <input type="hidden" name="on" value="{{ '' if h.starred else '1' }}">
+    <button class="pin-btn{{ ' on' if h.starred }}" aria-pressed="{{ 'true' if h.starred else 'false' }}"
+            title="{{ 'Bỏ đánh dấu' if h.starred else 'Đánh dấu' }}" aria-label="{{ 'Bỏ đánh dấu' if h.starred else 'Đánh dấu' }} bản đọc">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="{{ 'currentColor' if h.starred else 'none' }}" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z"/></svg></button>
+  </form>
+  <div class="vs-hist-main">
+    <p class="vs-hist-text" title="{{ h.text }}">{{ h.text }}</p>
+    <p class="small muted" style="margin:2px 0 0">
+      {{ names.get(h.profile_id) or (h.instruct if h.instruct else ('Giọng từ file' if h.mode == 'clone' else 'Giọng ngẫu nhiên')) }}
+      · {{ va.LANG_NAMES.get(h.language, h.language) }} · {{ '%.1f'|format(h.duration_seconds or 0) }} giây
+      {%- if h.generation_time %} (tạo {{ '%.0f'|format(h.generation_time) }} giây){% endif %}
+      {%- if h.seed is not none %} · seed {{ h.seed }}{% endif %} · {{ va.ago(h.created_at) }}</p>
+  </div>
+  <audio controls preload="none" src="/voicestudio/history/{{ h.id }}/audio" aria-label="Nghe bản đọc"></audio>
+  <div class="vs-hist-acts">
+    <a class="btn sm ghost" href="/voicestudio?tab=speak&amp;reuse={{ h.id }}" title="Mở lại văn bản, giọng, seed của bản này ở Tạo giọng nói">Dùng lại</a>
+    <a class="btn sm ghost" href="/voicestudio/history/{{ h.id }}/audio?dl=1" download>Tải về</a>
+    <details class="vs-rename">
+      <summary class="btn sm ghost">Lưu thành giọng</summary>
+      <form method="post" action="/voicestudio/history/{{ h.id }}/save-voice" class="row" style="gap:6px; margin-top:6px" hx-disabled-elt="find button">
+        <label for="hs-{{ h.id }}" class="sr-only">Tên giọng</label>
+        <input id="hs-{{ h.id }}" type="text" name="name" maxlength="40" required placeholder="Tên giọng" style="flex:1">
+        <button class="btn sm primary">Lưu</button></form>
+    </details>
+    <form method="post" action="/voicestudio/history/{{ h.id }}/delete" hx-disabled-elt="find button">
+      <button class="btn sm ghost danger" aria-label="Xoá bản đọc">Xoá</button></form>
+  </div>
+</div>

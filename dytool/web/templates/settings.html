@@ -26,9 +26,12 @@
     </div>
     <div class="set-row">
       <div class="set-label"><b>VoiceStudio</b>
-        <p class="hint">App đọc lời lồng tiếng Việt. Phải đang mở thì các Page bật lồng tiếng mới edit được.</p></div>
-      <div><button class="btn" hx-post="/services/voicestudio" hx-swap="none" hx-disabled-elt="this">Mở VoiceStudio</button>
-        <p class="hint">Trạng thái xem ở thanh dưới đáy cửa sổ. Lần đầu: Model Catalogue → chấp nhận license OmniVoice.</p></div>
+        <p class="hint">Đọc lời lồng tiếng Việt. Tool tự bật VoiceStudio chạy ngầm (không mở cửa sổ) khi có video cần lồng
+          tiếng, rảnh 20 phút thì tắt để trả RAM / VRAM.</p></div>
+      <div><button class="btn" hx-post="/services/voicestudio" hx-swap="none" hx-disabled-elt="this">Bật ngay</button>
+        <button class="btn" hx-post="/services/voicestudio-app" hx-swap="none" hx-disabled-elt="this">Mở app VoiceStudio</button>
+        <p class="hint">Mở app khi cần: lần đầu (Model Catalogue → chấp nhận license OmniVoice), quản lý giọng. Trạng thái
+          xem ở chip VoiceStudio trên cùng.</p></div>
     </div>
   </div>
 </section>

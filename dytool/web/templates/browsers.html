@@ -7,10 +7,15 @@
 <div class="card" style="margin-bottom:16px">
   <div class="row" style="gap:16px; flex-wrap:wrap">
     <span class="small muted">{{ all_count }} hồ sơ · {{ total_mb }} MB</span>
+    <form method="get" action="/browsers" class="row" style="gap:6px" role="search">
+      {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}
+      <label for="bq" class="sr-only">Tìm hồ sơ</label>
+      <input type="search" id="bq" name="q" value="{{ q }}" placeholder="Tìm tên, ghi chú, tài khoản…" autocomplete="off" style="width:220px; max-width:100%">
+    </form>
     {% if tags %}
-      <div class="row" style="gap:6px; flex-wrap:wrap" aria-label="Lọc theo nhãn">
-        <a href="/browsers" class="pill {{ 'on' if not tag }}">Tất cả</a>
-        {% for t in tags %}<a href="/browsers?tag={{ t|urlencode }}" class="pill {{ 'on' if tag == t }}">{{ t }}</a>{% endfor %}
+      <div class="chips" style="display:flex; gap:6px; flex-wrap:wrap" role="group" aria-label="Lọc theo nhãn">
+        <a href="/browsers{{ '?q=' ~ q|urlencode if q }}" class="fchip {{ 'on' if not tag }}" {{ 'aria-current=page' if not tag }}>Tất cả nhãn</a>
+        {% for t in tags %}<a href="/browsers?tag={{ t|urlencode }}{{ '&q=' ~ q|urlencode if q }}" class="fchip {{ 'on' if tag == t }}" {{ 'aria-current=page' if tag == t }}>{{ t }}</a>{% endfor %}
       </div>
     {% endif %}
     <div class="spacer"></div>
@@ -18,7 +23,7 @@
       <label for="np-name" class="sr-only">Tên hồ sơ mới</label>
       <input type="text" id="np-name" name="name" placeholder="Tên hồ sơ mới" autocomplete="off" maxlength="80" style="width:200px; max-width:100%">
       <label for="np-lang" class="sr-only">Ngôn ngữ giao diện</label>
-      <select id="np-lang" name="lang" style="width:auto">
+      <select id="np-lang" name="lang" class="auto">
         <option value="auto">Ngôn ngữ theo IP</option>
         <option value="en">Tiếng Anh (TikTok)</option>
       </select>
@@ -30,8 +35,37 @@
 </div>
 
 {% if not profiles %}
-  <p class="empty">{% if tag %}Không có hồ sơ nào mang nhãn “{{ tag }}”.{% else %}Chưa có hồ sơ nào. Bấm <b>Đăng nhập</b> ở
-    <a href="/accounts">Tài khoản</a> — dytool tự tạo hồ sơ cho tài khoản đó.{% endif %}</p>
+  {% from "_macros.html" import empty %}
+  {% if tag or q %}{% call empty('search', 'Không có hồ sơ nào khớp ' ~ ('nhãn “' ~ tag ~ '”' if tag else '“' ~ q ~ '”'), act='<a class="btn sm" href="/browsers">Bỏ lọc</a>') %}Đổi từ khoá / nhãn hoặc xem tất cả hồ sơ.{% endcall %}
+  {% else %}{% call empty('browser', 'Chưa có hồ sơ nào', act='<a class="btn sm" href="/accounts">Mở Tài khoản</a>') %}Bấm <b>Đăng nhập</b> ở 1 tài khoản — dytool tự tạo hồ sơ cho tài khoản đó.{% endcall %}{% endif %}
+{% endif %}
+
+{% if profiles %}
+{# thao tác hàng loạt (như ShardBrowser): tick ô ở góc hồ sơ -> chọn việc -> Làm. Ô tick gắn vào form này bằng form="bulk" #}
+<form id="bulk" method="post" action="/browsers/bulk" class="card bulk-bar" hx-disabled-elt="find button"
+      data-confirm-trash="Bỏ các hồ sơ đã chọn vào thùng rác? Khôi phục được trong 30 ngày.">
+  <input type="hidden" name="back" value="/browsers{{ '?tag=' ~ tag|urlencode if tag }}">
+  <label class="check" style="margin:0"><input type="checkbox" id="bulk-all"> Chọn tất cả</label>
+  <span class="small muted" id="bulk-n" aria-live="polite">0 đã chọn</span>
+  <label for="bulk-act" class="sr-only">Việc cần làm</label>
+  <select id="bulk-act" name="act" class="auto">
+    <option value="open">Mở</option>
+    <option value="close">Đóng</option>
+    <option value="proxy">Gắn proxy…</option>
+    <option value="tag">Thêm nhãn…</option>
+    <option value="untag">Bỏ nhãn…</option>
+    <option value="pin">Ghim lên đầu</option>
+    <option value="unpin">Bỏ ghim</option>
+    <option value="trash">Bỏ vào thùng rác</option>
+  </select>
+  <span class="bulk-opt" data-for="proxy" hidden><label for="bulk-proxy" class="sr-only">Proxy</label>
+    <select id="bulk-proxy" name="proxy_id" class="auto"><option value="">Không proxy (mạng máy này)</option>
+      {% for x in proxies %}<option value="{{ x.id }}">{{ x.label or mask(x.url) }}{% if x.check and x.check.ok %} · {{ x.check.cc }}{% endif %}</option>{% endfor %}</select></span>
+  <span class="bulk-opt" data-for="tag untag" hidden><label for="bulk-tag" class="sr-only">Tên nhãn</label>
+    <input type="text" id="bulk-tag" name="tag" list="bulk-tags" placeholder="Tên nhãn" maxlength="30" autocomplete="off" style="width:140px">
+    <datalist id="bulk-tags">{% for t in tags %}<option value="{{ t }}">{% endfor %}</datalist></span>
+  <button class="btn sm primary" id="bulk-go" disabled>Làm</button>
+</form>
 {% endif %}
 
 <div class="grid g2">
@@ -40,7 +74,13 @@
   {% set px = proxy_by_id.get(p.proxy_id) if p.proxy_id else none %}
   <div class="card acc">
     <div class="row">
+      <input type="checkbox" name="ids" value="{{ p.id }}" form="bulk" class="bulk-cb" aria-label="Chọn hồ sơ {{ p.name }}">
       <h3 class="trunc" title="{{ p.name }}"><a href="/browsers/{{ p.id }}">{{ p.name }}</a></h3>
+      <form method="post" action="/browsers/{{ p.id }}/pin" class="pin-form">
+        <input type="hidden" name="back" value="/browsers{{ '?tag=' ~ tag|urlencode if tag }}">
+        <button class="pin-btn{{ ' on' if p.pinned }}" aria-pressed="{{ 'true' if p.pinned else 'false' }}"
+                title="{{ 'Bỏ ghim' if p.pinned else 'Ghim lên đầu' }}" aria-label="{{ 'Bỏ ghim' if p.pinned else 'Ghim' }} hồ sơ {{ p.name }}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="{{ 'currentColor' if p.pinned else 'none' }}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg></button></form>
       {% if p.running %}<span class="pill ok">Đang mở</span>{% endif %}
       <div class="spacer"></div>
       <div class="actions">
@@ -52,6 +92,16 @@
           <form method="post" action="/browsers/{{ p.id }}/open" hx-disabled-elt="find button">
             <button class="btn sm" {{ 'disabled' if not engine_ready }} aria-label="Mở cửa sổ hồ sơ {{ p.name }}">Mở</button></form>
         {% endif %}
+        <details class="check-menu">
+          <summary class="btn sm ghost" title="Mở hồ sơ tới trang kiểm tra dấu vân tay / IP">Kiểm tra</summary>
+          <div class="check-pop">
+            {% for k, site in check_sites.items() %}
+              <form method="post" action="/browsers/{{ p.id }}/check" hx-disabled-elt="find button">
+                <input type="hidden" name="site" value="{{ k }}">
+                <button {{ 'disabled' if not engine_ready }}>{{ site[0] }}</button></form>
+            {% endfor %}
+          </div>
+        </details>
         <a class="btn sm ghost" href="/browsers/{{ p.id }}" aria-label="Cài đặt hồ sơ {{ p.name }}">Cài đặt</a>
       </div>
     </div>
@@ -74,4 +124,29 @@
   </div>
 {% endfor %}
 </div>
+<script>
+  (() => {   // thanh chọn nhiều — chạy lại mỗi lần vẽ trang (hx-boost / tự làm mới): gắn theo phần tử mới, cờ trên form
+    const f = document.getElementById('bulk');
+    if (!f || f.dataset.ready) return;
+    f.dataset.ready = '1';
+    const cbs = () => [...document.querySelectorAll('.bulk-cb')];
+    const act = f.querySelector('#bulk-act'), all = f.querySelector('#bulk-all');
+    const sync = () => {
+      const n = cbs().filter(c => c.checked).length;
+      f.querySelector('#bulk-n').textContent = n + ' đã chọn';
+      f.querySelector('#bulk-go').disabled = !n;
+      all.checked = n > 0 && n === cbs().length;
+      f.querySelectorAll('.bulk-opt').forEach(o => { o.hidden = !o.dataset.for.split(' ').includes(act.value); });
+      if (act.value === 'trash') f.setAttribute('hx-confirm', f.dataset.confirmTrash);
+      else f.removeAttribute('hx-confirm');
+    };
+    cbs().forEach(c => c.addEventListener('change', sync));
+    all.addEventListener('change', () => { cbs().forEach(c => { c.checked = all.checked; }); sync(); });
+    act.addEventListener('change', sync);
+    sync();
+    document.querySelectorAll('details.check-menu').forEach(d => d.addEventListener('toggle', () => {
+      if (d.open) document.querySelectorAll('details.check-menu[open]').forEach(o => { if (o !== d) o.open = false; });
+    }));
+  })();
+</script>
 {% endblock %}

@@ -15,6 +15,9 @@
 {% endif %}
 <span class="chip" title="Backend tải video Douyin (TikTokDownloader) — tool tự bật khi cần"><span class="dot {{ 'ok' if health.tdl else '' }}"></span>Tải Douyin{{ '' if health.tdl else ' tắt' }}
   {% if not health.tdl %}<form method="post" action="/services/tdl"><button class="chip-btn" title="Bật ngay">Bật</button></form>{% endif %}</span>
-<span class="chip" title="App lồng tiếng Việt"><span class="dot {{ 'ok' if health.voicestudio else 'err' }}"></span>VoiceStudio{{ '' if health.voicestudio else (' tắt' if vs_installed else ' chưa cài') }}
-  {% if not health.voicestudio and vs_installed %}
-    <button class="chip-btn" hx-post="/services/voicestudio" hx-swap="none" hx-disabled-elt="this" title="Mở app VoiceStudio (khởi động mất 1–3 phút)">Mở</button>{% endif %}</span>
+{% set vs = health.vs %}
+<span class="chip" title="Lồng tiếng Việt — tool tự bật VoiceStudio chạy ngầm khi cần, rảnh lâu thì tắt cho nhẹ máy"><span class="dot {{ {'ok': 'ok', 'starting': 'warn', 'off': ''}.get(vs, 'err') }}"></span><a href="/voicestudio" class="chip-link" title="Mở trang VoiceStudio: bật / tắt, nghe thử giọng, giao diện đầy đủ">VoiceStudio{{ {'ok': '', 'starting': ' đang bật…', 'off': ' · tự bật khi cần'}.get(vs, ' chưa cài' if not vs_installed else ' cần cài nốt') }}</a>
+  {% if vs == 'off' %}
+    <button class="chip-btn" hx-post="/services/voicestudio" hx-swap="none" hx-disabled-elt="this" title="Bật VoiceStudio chạy ngầm ngay">Bật</button>
+  {% elif vs == 'missing' and vs_installed %}
+    <button class="chip-btn" hx-post="/services/voicestudio-app" hx-swap="none" hx-disabled-elt="this" title="Mở app VoiceStudio 1 lần để tải model, chấp nhận license OmniVoice">Mở app</button>{% endif %}</span>

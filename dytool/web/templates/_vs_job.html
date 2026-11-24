@@ -1,0 +1,29 @@
+{# Kết quả 1 việc đọc chạy nền (tạo giọng nói / đọc thử / nghe thử giọng thiết kế) — đang chạy thì tự hỏi lại 2 s / lần #}
+<div class="vs-job" id="job-{{ key }}" aria-live="polite"
+     {% if t and t.state == 'run' %}hx-get="/partials/vs-job?key={{ key }}" hx-trigger="every 2s [!document.hidden]" hx-swap="outerHTML"{% endif %}>
+  {% if t and t.state == 'run' %}
+    <span class="spin" aria-hidden="true"></span>
+    <span class="hint" style="margin:0">Đang đọc… {{ ((time.time() - t.at)|int) }} giây (lần đầu sau khi bật lâu hơn)</span>
+  {% elif t and t.state == 'ok' %}
+    <audio controls {{ 'autoplay' if fresh }} preload="auto" src="/voicestudio/job.wav?key={{ key }}&amp;t={{ t.at|int }}" aria-label="{{ t.label }}"></audio>
+    <a class="btn sm ghost" href="/voicestudio/job.wav?key={{ key }}&amp;dl=1" download>Tải về</a>
+    {% set m = t.meta or {} %}
+    {% if m.id %}
+      <div class="vs-job-meta">
+        <span class="small muted">{{ '%.1f'|format(m.duration or 0) }} giây · tạo trong {{ '%.1f'|format(m.gen or 0) }} giây{% if m.seed %} · seed {{ m.seed }}{% endif %}</span>
+        {% if m.seed %}<button type="button" class="btn sm ghost" data-keep-seed="{{ m.seed }}" title="Đặt seed này vào ô Seed để đọc tiếp ra đúng giọng này">Giữ seed này</button>{% endif %}
+        <details class="vs-rename">
+          <summary class="btn sm ghost">Lưu thành giọng</summary>
+          {# không dùng <form>: ô kết quả nằm trong form Tạo giọng nói (form lồng nhau không chạy) #}
+          <div class="row" style="gap:6px; margin-top:6px">
+            <label for="sv-{{ key }}" class="sr-only">Tên giọng</label>
+            <input id="sv-{{ key }}" type="text" name="save_name" maxlength="40" placeholder="Tên giọng" style="flex:1">
+            <button type="button" class="btn sm primary" hx-post="/voicestudio/history/{{ m.id }}/save-voice"
+                    hx-include="#sv-{{ key }}" hx-swap="none" hx-disabled-elt="this">Lưu</button></div>
+        </details>
+      </div>
+    {% endif %}
+  {% elif t and t.state == 'err' %}
+    <span class="hint" style="margin:0; color:var(--err-text)">Lỗi: {{ t.msg }}</span>
+  {% endif %}
+</div>

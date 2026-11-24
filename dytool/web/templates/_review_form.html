@@ -1,0 +1,63 @@
+{# Khối duyệt 1 video trong hộp xem trước (_video_view.html) — mở từ mục "Chờ duyệt" ở trang Hôm nay, trang kênh,
+   Video, Lịch đăng. (Trang Hộp duyệt riêng đã bỏ.) Import kèm "with context" (cần vnt).
+   Biến v: video + page_name, platform, page_enabled. Gửi bằng htmx vào <dialog id="vview">, máy chủ trả lại hộp đã
+   cập nhật (ret=view), không rời trang. seq: mở từ danh sách chờ duyệt ("0" = mọi kênh, hoặc id kênh) -> duyệt / bỏ xong
+   máy chủ tự mở video chờ duyệt kế tiếp; nxt = video sau (nút Để sau). #}
+{% macro review_form(v, slot, slot_label, suggest, mirror=none, auto_pub=false, seq='', nxt='') %}
+{% set auto = v.status != 'review' %}
+{% set where = 'TikTok' if v.platform == 'tiktok' else 'Facebook' %}
+{% set verb = 'Đổi giờ' if v.status != 'review' else 'Duyệt' %}
+{# nút chính nói rõ sẽ làm gì (đổi theo lựa chọn "Đăng lúc", base.html: data-go) #}
+{% set go_slot = verb ~ ' · lên lịch ' ~ slot_label if slot else '' %}
+<form class="rv-side rv-in-dialog" method="post" action="/review/act" id="vv-form" hx-disabled-elt="find button"
+      hx-post="/review/act" hx-target="#vview" hx-swap="innerHTML">
+  <input type="hidden" name="pid" value="{{ v.page_id }}">
+  <input type="hidden" name="vid" value="{{ v.id }}">
+  <input type="hidden" name="ret" value="view">
+  <input type="hidden" name="seq" value="{{ seq }}">
+  {% if mirror %}<p class="small muted">Duyệt xong đăng kèm sang <b>{{ mirror.name }}</b>.</p>{% endif %}
+  {% if auto %}
+  <div class="rv-plan" role="status">
+    <b>{{ 'Đã tự duyệt' if auto_pub else 'Đã duyệt' }} — chưa gửi lên {{ where }}.</b>
+    {% if v.status == 'schedule_pending' and v.scheduled_at %}Sẽ gửi lịch đăng <b class="num">{{ vnt(v.scheduled_at, '%H:%M %d/%m') }}</b>.
+    {% elif v.status == 'publish_now' %}Sẽ đăng ngay khi tool rảnh.
+    {% else %}Sẽ đăng khi kênh còn lượt trong ngày{{ ' (kênh đang tắt nên chưa đăng)' if not v.page_enabled }}.{% endif %}
+    {% if auto_pub %}Kênh này bật <a href="/pages/{{ v.page_id }}?tab=lich">Tự đăng, không duyệt</a> nên video edit xong được duyệt luôn.{% endif %}
+    Đổi giờ bên dưới, <b>Giữ lại</b> để duyệt sau, hoặc <b>Bỏ</b>.
+  </div>
+  {% endif %}
+  <div>
+    <label for="vv-cap" style="margin-top:0">Caption</label>
+    <textarea id="vv-cap" name="caption" rows="5" autocomplete="off" data-count="vv-cnt">{{ v.caption or '' }}</textarea>
+    <div class="small muted ta-r"><span id="vv-cnt">{{ (v.caption or '')|length }}</span> ký tự</div>
+  </div>
+  <fieldset class="when">
+    <legend class="cap-label">Đăng lúc</legend>
+    {% if slot %}
+    <label class="opt"><input type="radio" name="mode" value="slot" checked data-go="{{ go_slot }}">
+      <span><b>Khung giờ trống tiếp theo</b><span class="small muted">{{ slot_label }}</span></span></label>
+    {% endif %}
+    <label class="opt"><input type="radio" name="mode" value="approve" {{ 'checked' if not slot }} data-go="{{ verb }} · theo cài đặt kênh">
+      <span><b>Theo cài đặt kênh</b><span class="small muted">Đăng khi kênh còn lượt trong ngày (hoặc tự xếp lịch nếu kênh bật)</span></span></label>
+    <label class="opt"><input type="radio" name="mode" value="now" data-go="{{ verb }} · đăng ngay">
+      <span><b>Đăng ngay</b><span class="small muted">Bỏ qua giới hạn giờ đăng — tool đăng ngay khi đang chạy tự động</span></span></label>
+    <label class="opt"><input type="radio" name="mode" value="at" data-go="{{ verb }} · lên lịch giờ đã chọn">
+      <span><b>Chọn giờ…</b><span class="small muted when-tz">Giờ Việt Nam, sau ít nhất 20 phút nữa</span><input type="datetime-local" name="when" value="{{ suggest }}" aria-label="Giờ đăng" style="margin-top:6px" data-pick-at></span></label>
+  </fieldset>
+  <div class="rv-actions">
+    <button class="btn primary lg" type="submit" name="go" value="1" data-vv-key="a"><span data-go-label>{{ go_slot or (verb ~ ' · theo cài đặt kênh') }}</span> <kbd>A</kbd></button>
+    <div class="row" style="flex-wrap:nowrap">
+      {% if auto %}
+        <button class="btn grow" type="button" hx-post="/review/act" hx-vals='{"act": "hold"}' hx-target="#vview" hx-swap="innerHTML"
+                title="Đưa về Chờ duyệt: tool không đăng cho tới khi bạn bấm Duyệt">Giữ lại</button>
+      {% elif nxt %}
+        <button class="btn grow" type="button" hx-get="/videos/{{ nxt|replace(':', '/') }}/view?seq={{ seq }}" hx-target="#vview"
+                hx-swap="innerHTML" title="Chưa quyết, xem video tiếp theo (S)" data-vv-key="s">Để sau <kbd>S</kbd></button>
+      {% endif %}
+      {# không hỏi lại: bấm nhầm thì Hoàn tác (Z) ngay sau đó, như Gmail #}
+      <button class="btn danger grow" type="button" id="vv-reject" hx-post="/review/act" hx-vals='{"act": "reject"}'
+              hx-target="#vview" hx-swap="innerHTML" data-vv-key="x" title="Bỏ video: không đăng (X) — bấm nhầm thì Hoàn tác">Bỏ <kbd>X</kbd></button>
+    </div>
+  </div>
+</form>
+{% endmacro %}

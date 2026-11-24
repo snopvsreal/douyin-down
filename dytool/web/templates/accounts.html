@@ -9,7 +9,7 @@
 </div>
 {% if logging_in %}<div hx-get="/partials/accounts" hx-trigger="every 3s [!document.hidden]" hx-swap="none"></div>{% endif %}
 
-{% from "_macros.html" import profile_line with context %}
+{% from "_macros.html" import profile_line, empty with context %}
 
 {# vừa chuyển từ app ShardBrowser sang trình duyệt nhúng -> các tài khoản cũ phải đăng nhập lại 1 lần #}
 {% if relogin %}
@@ -63,15 +63,15 @@
         {% if tt %}{% set used = mirrors.get(p.id, []) %}
           <div class="small muted">{% if used %}Đăng kèm cho {{ used|join(', ') }}{% else %}Chưa Page nào đăng kèm vào kênh này{% endif %}</div>
         {% endif %}</td>
-      <td style="text-align:right; white-space:nowrap">
+      <td class="cell-end">
         {% if p.enabled %}<span class="pill ok">{{ 'Kênh riêng đang bật' if tt else 'Đang bật' }}</span>
         {% else %}<span class="pill">{{ 'Kênh riêng tắt' if tt else 'Tắt' }}</span>{% endif %}
-        <a class="btn sm" href="/pages/{{ p.id }}" style="margin-left:6px">Cài đặt</a></td>
+        <a class="btn sm" href="/pages/{{ p.id }}#nguon" style="margin-left:6px">Cài đặt</a></td>
     </tr>
     {% endfor %}
   </table>
   {% elif a.status == 'da_dang_nhap' and not tt %}
-    <p class="empty small" style="margin-top:8px">Không thấy Page nào — bấm Quét lại Page.</p>
+    {% call empty("search", "Không thấy Page nào", sm=true) %}Bấm <b>Quét lại Page</b> để tìm các Page tài khoản này quản lý.{% endcall %}
   {% endif %}
 </div>
 {% endmacro %}
@@ -89,7 +89,7 @@
       <button class="btn primary">{{ plus|safe }}Thêm tài khoản</button>
     </form>
     {% for a in accounts if a.platform != 'tiktok' %}{{ account_card(a, 'facebook') }}
-    {% else %}<p class="empty">Chưa có tài khoản Facebook. Nhập tên gợi nhớ rồi bấm Thêm tài khoản.</p>{% endfor %}
+    {% else %}{% call empty('user', 'Chưa có tài khoản Facebook', sm=true) %}Nhập tên gợi nhớ ở trên rồi bấm Thêm tài khoản.{% endcall %}{% endfor %}
   </section>
 
   <section class="platform" id="tiktok" aria-labelledby="h-tt">
@@ -103,7 +103,7 @@
       <button class="btn primary">{{ plus|safe }}Thêm tài khoản</button>
     </form>
     {% for a in accounts if a.platform == 'tiktok' %}{{ account_card(a, 'tiktok') }}
-    {% else %}<p class="empty">Chưa có tài khoản TikTok.</p>{% endfor %}
+    {% else %}{% call empty('user', 'Chưa có tài khoản TikTok', sm=true) %}Nhập tên gợi nhớ ở trên rồi bấm Thêm tài khoản, sau đó Đăng nhập.{% endcall %}{% endfor %}
   </section>
 </div>
 {% endblock %}

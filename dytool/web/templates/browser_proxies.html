@@ -11,7 +11,7 @@
             placeholder="socks5://user:pass@1.2.3.4:1080&#10;1.2.3.4:8080&#10;1.2.3.4:1080:user:pass&#10;user:pass@1.2.3.4:1080"></textarea>
   <div class="row" style="gap:8px; flex-wrap:wrap; margin-top:8px">
     <label for="px-scheme" class="small">Loại khi dòng không ghi rõ</label>
-    <select id="px-scheme" name="scheme" style="width:auto">
+    <select id="px-scheme" name="scheme" class="auto">
       <option value="socks5">SOCKS5</option><option value="http">HTTP</option><option value="https">HTTPS</option>
     </select>
     <label for="px-label" class="sr-only">Nhãn chung</label>
@@ -47,7 +47,7 @@
           <div class="muted">{{ x.check.isp }} · {{ x.check.ms }} ms · UDP {{ (x.check.udp_ms ~ ' ms') if x.check.udp_ms is not none else 'không có' }} · {{ vnt(x.check.at, '%H:%M %d/%m') }}</div>
         {% else %}<span class="pill err">Lỗi</span> <span class="muted">{{ x.check.error }}</span>{% endif %}</td>
       <td class="small">{% for n in used %}<div class="trunc">{{ n }}</div>{% else %}<span class="muted">—</span>{% endfor %}</td>
-      <td style="white-space:nowrap; text-align:right">
+      <td class="cell-end">
         <form method="post" action="/browsers/proxies/{{ x.id }}/check" style="display:inline" hx-disabled-elt="find button">
           <button class="btn sm">Kiểm tra</button></form>
         <form method="post" action="/browsers/proxies/{{ x.id }}/delete" style="display:inline"
@@ -59,6 +59,6 @@
 </table>
 </div>
 {% else %}
-  <p class="empty">Chưa có proxy. Dán danh sách proxy ở trên rồi bấm Thêm, sau đó gắn vào hồ sơ ở trang cài đặt của hồ sơ (mục Proxy · mạng).</p>
+  {% from "_macros.html" import empty %}{% call empty("link", "Chưa có proxy") %}Dán danh sách proxy ở trên rồi bấm Thêm, sau đó gắn vào hồ sơ ở trang cài đặt của hồ sơ (mục Proxy · mạng).{% endcall %}
 {% endif %}
 {% endblock %}

@@ -68,13 +68,9 @@
 
     <div class="nav-bottom-wrap">
       {# thẻ Chạy tự động: công tắc + việc đang làm (poll 3s) #}
-      <div class="run-card" id="runcard" hx-get="/partials/runcard" hx-trigger="load, every 3s [!document.hidden]" hx-swap="innerHTML">
-        <div class="run-head"><b>Chạy tự động</b></div></div>
-      <div class="theme-seg" role="group" aria-label="Giao diện">
-        <button type="button" data-theme-set="light" title="Sáng"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1"/></svg><span>Sáng</span></button>
-        <button type="button" data-theme-set="dark" title="Tối"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.6 5.6 0 0 1 6.4 2.5a5.6 5.6 0 1 0 7.1 7.1z"/></svg><span>Tối</span></button>
-        <button type="button" data-theme-set="auto" title="Theo máy (Windows)"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="8.5" rx="1.5"/><path d="M6 14h4"/></svg><span>Tự động</span></button>
-      </div>
+      {# vẽ sẵn nội dung (run_task) — không dùng trigger "load": chuyển tab sẽ thấy khung rỗng rồi mới hiện chữ (nháy) #}
+      <div class="run-card" id="runcard" hx-get="/partials/runcard" hx-trigger="every 3s [!document.hidden]" hx-swap="innerHTML">
+        {% with task=run_task %}{% include "_runcard.html" %}{% endwith %}</div>
       <div class="app-ver"><span>dytool {{ app_ver() or '' }}</span><span>Ctrl+1–6 · Ctrl+K</span></div>
     </div>
   </nav>
@@ -83,7 +79,8 @@
     {# thanh trên cùng: đường dẫn trang + trạng thái dịch vụ (Douyin / Tải Douyin / VoiceStudio / cập nhật), poll 5s #}
     <header class="topbar">
       <div class="crumb">{% block crumb %}{{ self.title() }}{% endblock %}</div>
-      <div class="svc-chips" hx-get="/partials/services" hx-swap="innerHTML"
+      {# hx-preserve: chuyển tab (hx-boost thay body) giữ nguyên chip đang hiện, không trống rồi hiện lại (nháy) #}
+      <div class="svc-chips" id="svc-chips" hx-preserve="true" hx-get="/partials/services" hx-swap="innerHTML"
            hx-trigger="load, every 5s [!document.hidden], visibilitychange[!document.hidden] from:document"></div>
       {# app desktop: thanh này là thanh tiêu đề (kéo / nhấp đúp phóng to), 3 nút cửa sổ ở góc (desktop.py WindowApi) #}
       <div class="winctl" role="group" aria-label="Cửa sổ">
@@ -215,7 +212,7 @@
       if (/\bevery\b/.test(trig)) e.preventDefault();        // poll tự làm mới: chờ hộp hỏi đóng
     });
   }
-  // Sáng / tối / theo máy (cuối menu). Lưu localStorage; "theo máy" = bỏ data-theme -> theo Windows.
+  // Sáng / tối / theo máy (Cài đặt › Giao diện). Lưu localStorage; "theo máy" = bỏ data-theme -> theo Windows.
   if (!window.__dyTheme) {
     window.__dyTheme = true;
     const mark = () => {
@@ -224,8 +221,11 @@
     };
     document.addEventListener('click', (e) => {
       const b = e.target.closest('[data-theme-set]'); if (!b) return;
-      const v = b.dataset.themeSet;
-      if (v === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = v;
+      const v = b.dataset.themeSet, root = document.documentElement;
+      // tắt hiệu ứng chuyển màu lúc đổi giao diện: không thì mọi nút / ô chạy hiệu ứng 0,12 s cùng lúc (nháy)
+      root.classList.add('theme-swap');
+      if (v === 'auto') delete root.dataset.theme; else root.dataset.theme = v;
+      setTimeout(() => root.classList.remove('theme-swap'), 60);    // không dùng rAF: cửa sổ ẩn xuống khay thì rAF không chạy
       try { v === 'auto' ? localStorage.removeItem('dy-theme') : localStorage.setItem('dy-theme', v); } catch (err) {}
       mark();
     });

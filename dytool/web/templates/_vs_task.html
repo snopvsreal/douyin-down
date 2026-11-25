@@ -28,7 +28,7 @@
         {% if t.state == 'stopped' %}<span class="muted">đã dừng{% if t.done %} — xong {{ t.done }} / {{ t.total }}{% endif %}</span>
         {% else %}<span class="muted">xong trong {{ ((t.end or t.at) - t.at)|int }} giây{% if t.lang %} · ngôn ngữ nhận ra: {{ t.lang }}{% endif %}</span>{% endif %}</p>
       {% if key == 'dubfile' and 'long-tieng.mp4' in t.files %}
-        <video controls preload="metadata" src="/voicestudio/task/dubfile/file/long-tieng.mp4?t={{ t.at|int }}" style="max-width:100%; max-height:480px; background:#000; border-radius:8px"></video>
+        <video controls preload="metadata" src="/voicestudio/task/dubfile/file/long-tieng.mp4?t={{ t.at|int }}" style="max-width:100%; max-height:480px; background:#000; border-radius:0"></video>
       {% endif %}
       {% if key == 'stt' and t.files %}
         <label for="stt-out" class="sr-only">Lời nghe được</label>

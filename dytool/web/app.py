@@ -131,7 +131,11 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     def render(request: Request, name: str, **ctx):
         # navc: số video theo trạng thái cho huy hiệu trên menu (Chờ duyệt / Lỗi)
         from . import plan
+        from .. import progress
+        # run_task: thẻ Chạy tự động vẽ sẵn nội dung ngay trong trang (trước: khung rỗng rồi mới hỏi /partials/runcard
+        # -> mỗi lần chuyển tab chữ biến mất rồi hiện lại, nháy)
         return tpl.TemplateResponse(request, name, {"worker": worker, "navc": store.counts(),
+                                                    "run_task": progress.snapshot(),
                                                     "nav_pages": plan.nav_pages(store),
                                                     "data_rev": f"{store.rev()}-{int(worker.running)}",
                                                     "setup_failed": _setup_failed(), **ctx})
@@ -1165,6 +1169,10 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         need_key = not ai.ready()
         # "Cần bạn xử lý": gom mọi việc người dùng phải làm vào 1 chỗ
         todo = []
+        if worker.captcha:      # Douyin đòi xác minh: đứng đầu — tìm kiếm của mọi kênh đang ngừng
+            todo.append({"kind": "dy", "n": None, "captcha": True, "title": "Douyin cần bạn xác minh (captcha)",
+                         "sub": f"Từ {vn_fmt(worker.captcha['since'], '%H:%M')} — tìm video của mọi kênh đang tạm ngừng. "
+                                "Giải captcha trong cửa sổ douyin.com, xong thì dytool tự quét tiếp."})
         missing = store.q("SELECT v.id, v.page_id, v.error, p.platform FROM videos v JOIN pages p ON p.id=v.page_id "
                           "WHERE v.status='uploaded' AND v.error LIKE 'Không thấy bài trên %' "
                           "AND v.uploaded_at>? ORDER BY v.uploaded_at DESC", (time.time() - 14 * 86400,))
@@ -1335,6 +1343,33 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         if hasattr(os, "startfile"):
             os.startfile(str(folder))
         return RedirectResponse("/settings#thong-tin", 303)
+
+    # ---- Douyin đòi xác minh (captcha): người dùng tự giải trong cửa sổ douyin.com (dytool không tự giải) ----
+    @app.post("/douyin/captcha/open")
+    def captcha_open():
+        """Mở lại douyin.com (trang tìm kiếm — captcha hiện ở đó) trong hồ sơ trình duyệt Douyin."""
+        err = worker.open_captcha_window()
+        if err:
+            return PlainTextResponse(err, 400)
+        return HTMLResponse('<span class="small muted">Đã mở cửa sổ douyin.com — giải captcha ở đó</span>')
+
+    @app.get("/partials/captcha", response_class=HTMLResponse)
+    def captcha_partial(request: Request):
+        """Câu hỏi captcha đang hiện trong cửa sổ douyin.com + bản dịch tiếng Việt (luồng nền captcha.py đọc 3 s / lần —
+        ở đây chỉ lấy kết quả có sẵn, không chờ trình duyệt)."""
+        from .. import captcha
+        if not worker.captcha:
+            return HTMLResponse("")
+        captcha.ensure_watch(data, lambda: worker.captcha is not None)
+        return render(request, "_captcha_q.html", snap=captcha.snapshot())
+
+    @app.post("/douyin/captcha/check")
+    def captcha_check():
+        """Nút "Đã giải xong": tìm thử 1 lần ngay. Hết chặn -> quét tiếp; còn -> báo giải lại."""
+        if worker.check_captcha(force=True):
+            return HTMLResponse('<span class="small" style="color:var(--ok-text)">Đã hết đòi xác minh — dytool quét tiếp</span>')
+        return PlainTextResponse("Douyin vẫn đòi xác minh — giải captcha trong cửa sổ douyin.com rồi bấm lại "
+                                 "(nếu cửa sổ đã đóng, bấm Mở cửa sổ Douyin)", 400)
 
     @app.post("/services/douyin-login")
     def douyin_login(request: Request):
@@ -2253,43 +2288,97 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         params["vi"] = value[:120]
         return pick[:120], None
 
+    MAX_SOURCE_LINES = 50
+
+    def _source_lines(value: str) -> list[str]:
+        """Ô thêm nguồn: mỗi dòng = 1 nguồn (bỏ dòng trống, dòng trùng; tối đa MAX_SOURCE_LINES)."""
+        out = []
+        for line in (value or "").splitlines():
+            line = " ".join(line.split())
+            if line and line not in out:
+                out.append(line)
+        return out[:MAX_SOURCE_LINES]
+
+    def _zh_map(zh: list[str], zh_src: list[str]) -> dict:
+        """Cụm tiếng Trung người dùng chọn ở phần xem trước, theo dòng (zh_src[i] -> zh[i])."""
+        return {" ".join(s.split()): z for s, z in zip(zh_src, zh)}
+
+    def _source_params(kind: str, max_results: int, sort_type: int) -> dict:
+        """Quét mọi thời gian (không lọc ngày đăng): kênh = mọi video; từ khoá = N video, mặc định nhiều like (hot)."""
+        if kind == "channel":
+            return {}
+        return {"max_results": max(5, min(int(max_results), 500)),
+                "sort_type": sort_type if sort_type in (0, 1, 2) else 1}
+
+    def _warm_translate(kind: str, lines: list[str], picked: dict) -> None:
+        """Dịch song song các dòng chưa có bản xem trước (keywords.translate nhớ kết quả) — 20 dòng không phải chờ nối tiếp."""
+        from .. import keywords
+        todo = [x for x in lines if kind == "keyword" and not keywords.is_chinese(x)
+                and not keywords.is_chinese(picked.get(x, ""))]
+        if len(todo) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            cfg = _sub_cfg()
+            with ThreadPoolExecutor(4) as ex:
+                list(ex.map(lambda x: keywords.translate(x, cfg), todo))
+
     @app.get("/partials/kw-translate", response_class=HTMLResponse)
     def kw_translate(request: Request, value: str = "", kind: str = "keyword", uid: str = "new"):
-        """Xem trước lúc gõ: từ khoá tiếng Việt sẽ được tìm trên Douyin bằng cụm tiếng Trung nào."""
+        """Xem trước lúc gõ: từ khoá tiếng Việt sẽ được tìm trên Douyin bằng cụm tiếng Trung nào (mỗi dòng 1 hộp)."""
         from .. import keywords
         import re
         uid = uid if re.fullmatch(r"[\w-]{1,20}", uid) else "new"
-        q = " ".join(value.split())
-        if kind != "keyword" or not q or keywords.is_chinese(q):
+        lines = [x for x in _source_lines(value) if not keywords.is_chinese(x)]
+        if kind != "keyword" or not lines:
             return HTMLResponse("")
-        r = keywords.translate(q, _sub_cfg())
-        return render(request, "_kw_preview.html", r=r, uid=uid)
+        _warm_translate(kind, lines, {})
+        cfg = _sub_cfg()
+        return render(request, "_kw_preview.html", items=[(x, keywords.translate(x, cfg)) for x in lines], uid=uid)
 
     @app.post("/pages/{pid}/sources")
-    def add_source(pid: int, kind: str = Form(...), value: str = Form(...), max_results: int = Form(20),
-                   publish_time: int = Form(1), sort_type: int = Form(1), max_age_days: float = Form(3),
-                   zh: str = Form("")):
-        params = ({"max_age_days": max_age_days} if kind == "channel"
-                  else {"max_results": max_results, "publish_time": publish_time, "sort_type": sort_type})
-        value, err = _keyword(kind, value, zh, params)
-        if err:
-            return PlainTextResponse(err, 400)
-        store.x("INSERT INTO sources(page_id, kind, value, params) VALUES (?,?,?,?)",
-                (pid, kind, value, json.dumps(params, ensure_ascii=False)))
-        if params.get("vi"):
-            store.log(f"Thêm nguồn '{params['vi']}' → tìm Douyin bằng '{value}'", page_id=pid)
+    def add_source(pid: int, kind: str = Form(...), value: str = Form(...), max_results: int = Form(50),
+                   sort_type: int = Form(1), zh: list[str] = Form([]), zh_src: list[str] = Form([])):
+        """Mỗi dòng của ô nhập = 1 nguồn. Dòng trùng nguồn đã có thì bỏ qua; dòng dịch lỗi ghi nhật ký kênh."""
+        if kind not in ("keyword", "channel"):
+            return PlainTextResponse("Loại nguồn không hợp lệ", 400)
+        lines = _source_lines(value)
+        if not lines:
+            return PlainTextResponse("Nhập ít nhất 1 từ khoá hoặc link kênh", 400)
+        picked = _zh_map(zh, zh_src)
+        _warm_translate(kind, lines, picked)
+        have = {r["value"] for r in store.q("SELECT value FROM sources WHERE page_id=? AND kind=?", (pid, kind))}
+        added, errors = [], []
+        for line in lines:
+            params = _source_params(kind, max_results, sort_type)
+            val, err = _keyword(kind, line, picked.get(line, ""), params)
+            if err:
+                errors.append(err)
+                continue
+            if val in have:
+                continue
+            have.add(val)
+            store.x("INSERT INTO sources(page_id, kind, value, params) VALUES (?,?,?,?)",
+                    (pid, kind, val, json.dumps(params, ensure_ascii=False)))
+            added.append(f"'{params['vi']}' → '{val}'" if params.get("vi") else f"'{val}'")
+        if errors and not added:
+            return PlainTextResponse("\n".join(errors[:5]), 400)
+        if added:
+            store.log(f"Thêm {len(added)} nguồn: " + ", ".join(added)[:900], page_id=pid)
+        for e in errors:
+            store.log(f"Không thêm được nguồn: {e}", "error", page_id=pid)
         return RedirectResponse(f"/pages/{pid}?tab=nguon", 303)
 
     @app.post("/sources/{sid}/update")
-    def update_source(sid: int, kind: str = Form(...), value: str = Form(...), max_results: int = Form(20),
-                      publish_time: int = Form(1), sort_type: int = Form(1), max_age_days: float = Form(3),
-                      enabled: str = Form(None), zh: str = Form("")):
+    def update_source(sid: int, kind: str = Form(...), value: str = Form(...), max_results: int = Form(50),
+                      sort_type: int = Form(1), enabled: str = Form(None),
+                      zh: list[str] = Form([]), zh_src: list[str] = Form([])):
         row = store.one("SELECT page_id FROM sources WHERE id=?", (sid,))
         if not row:
             return RedirectResponse("/accounts", 303)
-        params = ({"max_age_days": max_age_days} if kind == "channel"
-                  else {"max_results": max_results, "publish_time": publish_time, "sort_type": sort_type})
-        value, err = _keyword(kind, value, zh, params)
+        if kind not in ("keyword", "channel"):
+            return PlainTextResponse("Loại nguồn không hợp lệ", 400)
+        params = _source_params(kind, max_results, sort_type)
+        value = " ".join(value.split())
+        value, err = _keyword(kind, value, _zh_map(zh, zh_src).get(value, ""), params)
         if err:
             return PlainTextResponse(err, 400)
         store.x("UPDATE sources SET kind=?, value=?, params=?, enabled=? WHERE id=?",
@@ -2334,8 +2423,16 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
 
     @app.post("/pages/{pid}/scan")
     def scan_now(pid: int):
-        worker.scan_now(pid)
-        store.log(f"Yêu cầu quét ngay Page #{pid}", page_id=pid)
+        """Nút "Quét nguồn ngay": quét cả khi chạy tự động đang tắt (luồng việc bấm tay) / kênh đang tắt."""
+        page = store.one("SELECT name FROM pages WHERE id=?", (pid,))
+        if not page:
+            return PlainTextResponse("Không có kênh này", 404)
+        try:
+            r = worker.scan_now(pid)
+        except RuntimeError as e:
+            return PlainTextResponse(str(e), 400)
+        store.log(f"[{page['name']}] Bấm quét nguồn ngay" + (" — chờ việc đang chạy xong" if r == "queued" else ""),
+                  page_id=pid)
         return RedirectResponse(f"/pages/{pid}", 303)
 
     # ---------------- Duyệt (trên trang Hôm nay, trong hộp xem trước video) ----------------
@@ -2477,6 +2574,92 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             return PlainTextResponse("Không có video gốc", 404)
         return FileResponse(data / "raw" / f"{vid}.mp4", media_type="video/mp4")
 
+    # ---- Xem video gốc trên Douyin trước khi tải (người dùng 2026-11-25): app chuyển tiếp luồng video, KHÔNG lưu file.
+    # Link CDN của Douyin cần Referer douyin.com (trình phát trong trang không tự gửi) và hết hạn sau vài giờ.
+    # Phải là luồng H.264: luồng tốt nhất Douyin trả hay là H.265 -> WebView2 chỉ phát tiếng, không hình.
+    # Thử link H.264 lưu lúc quét (meta.url_h264, byte đầu ~0,3 s); chưa có (video quét trước bản này) / hết hạn
+    # (403 / 404 / 410) thì lấy link H.264 mới qua backend tải (preview_url ~6 s), nhớ 30 phút; hỗ trợ Range để tua.
+    _preview_urls: dict[str, tuple[str, float]] = {}
+    _preview_lock = threading.Lock()
+    _preview_vlocks: dict[str, threading.Lock] = {}    # 1 khoá / video: trình phát gửi vài yêu cầu cùng lúc -> chỉ lấy link 1 lần
+
+    def _preview_url(vid: str, stored: str, force: bool = False) -> str:
+        from ..douyin import DouyinError
+        from .. import services
+        t_ask = time.time()
+        with _preview_lock:
+            hit = _preview_urls.get(vid)
+            if hit and not force and time.time() - hit[1] < 1800:
+                return hit[0]
+            vlock = _preview_vlocks.setdefault(vid, threading.Lock())
+        if stored and not force:
+            return stored
+        with vlock:
+            with _preview_lock:         # yêu cầu song song vừa lấy xong link mới trong lúc chờ khoá -> dùng luôn
+                hit = _preview_urls.get(vid)
+                if hit and hit[1] >= t_ask:
+                    return hit[0]
+            try:
+                url = worker._douyin().preview_url(vid)
+            except DouyinError as e:
+                if "Không kết nối được" not in str(e) or not services.ensure_tdl(cfg, wait=60):
+                    raise
+                url = worker._douyin().preview_url(vid)       # backend tải vừa bật
+        with _preview_lock:
+            _preview_urls[vid] = (url, time.time())
+            if len(_preview_urls) > 200:
+                for k in sorted(_preview_urls, key=lambda k: _preview_urls[k][1])[:100]:
+                    _preview_urls.pop(k, None)
+        return url
+
+    @app.get("/media/preview/{pid}/{vid}")
+    async def media_preview(request: Request, pid: int, vid: str):
+        """Phát video gốc trên Douyin của video chưa tải về (hộp xem video) — chuyển tiếp từng đoạn, không ghi ra đĩa."""
+        import re
+        from starlette.concurrency import run_in_threadpool
+        from fastapi.responses import StreamingResponse
+        from ..douyin import UA, DouyinError
+        if not re.fullmatch(r"\d{6,30}", vid):
+            return PlainTextResponse("Mã video không hợp lệ", 400)
+        row = store.one("SELECT meta FROM videos WHERE page_id=? AND id=?", (pid, vid))
+        if not row:
+            return PlainTextResponse("Không tìm thấy video", 404)
+        try:            # link H.264 lưu lúc quét; video quét trước bản này không có -> lấy link mới
+            stored = (json.loads(row["meta"] or "{}") or {}).get("url_h264") or ""
+        except ValueError:
+            stored = ""
+        headers = {"User-Agent": UA, "Referer": "https://www.douyin.com/"}
+        if request.headers.get("range"):
+            headers["Range"] = request.headers["range"]
+        client = httpx.AsyncClient(timeout=httpx.Timeout(30, read=60), follow_redirects=True)
+        up = None
+        try:
+            for force in (False, True):        # link nhớ đã hết hạn (403 / 404 / 410) -> lấy link mới 1 lần
+                url = await run_in_threadpool(_preview_url, vid, stored, force)
+                up = await client.send(client.build_request("GET", url, headers=headers), stream=True)
+                if up.status_code in (200, 206):
+                    break
+                await up.aclose()
+                up = None
+            if up is None:
+                await client.aclose()
+                return PlainTextResponse("Douyin không cho phát video này (có thể đã bị xoá / để riêng tư)", 502)
+        except (DouyinError, httpx.HTTPError) as e:
+            await client.aclose()
+            return PlainTextResponse(f"Không lấy được video gốc từ Douyin: {e}", 502)
+        out = {k: up.headers[k] for k in ("content-length", "content-range", "accept-ranges") if k in up.headers}
+        out["content-type"] = "video/mp4"
+        out["cache-control"] = "no-store"
+
+        async def body():
+            try:
+                async for chunk in up.aiter_bytes(1 << 16):
+                    yield chunk
+            finally:
+                await up.aclose()
+                await client.aclose()
+        return StreamingResponse(body(), status_code=up.status_code, headers=out)
+
     @app.get("/videos/{pid}/{vid}/view", response_class=HTMLResponse)
     def video_view(request: Request, pid: int, vid: str, seq: str = ""):
         """Hộp xem lại 1 video ở mọi trạng thái (trước chỉ Hộp duyệt mới xem được — video tự lên lịch thì không thấy
@@ -2608,15 +2791,16 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     # khai báo TRƯỚC /videos/{pid}/{vid}/{action} (route chung đó cũng khớp ".../edit")
     @app.post("/videos/{pid}/{vid}/edit", response_class=HTMLResponse)
     def video_edit(request: Request, pid: int, vid: str):
-        """Nút "Edit ngay": edit 1 video Đã tải ngay, kể cả khi chạy tự động đang tắt / kênh đang tắt."""
+        """Nút "Edit ngay": edit 1 video Đã tải ngay (video Tìm thấy: tải về trước rồi edit), kể cả khi chạy tự
+        động đang tắt / kênh đang tắt."""
         row = store.one("SELECT v.status, p.name FROM videos v JOIN pages p ON p.id=v.page_id "
                         "WHERE v.id=? AND v.page_id=?", (vid, pid))
         if not row:
             return PlainTextResponse("Không tìm thấy video", 404)
-        if row["status"] != "downloaded":
-            return PlainTextResponse(f'Chỉ edit được video "Đã tải" — video này đang ở '
+        if row["status"] not in ("new", "downloaded"):
+            return PlainTextResponse(f'Chỉ edit được video "Tìm thấy" / "Đã tải" — video này đang ở '
                                      f'"{STATUS_VI.get(row["status"], row["status"])}". Tải lại trang để xem mới.', 400)
-        if not (data / "raw" / f"{vid}.mp4").exists():
+        if row["status"] == "downloaded" and not (data / "raw" / f"{vid}.mp4").exists():
             return PlainTextResponse("Không thấy file video gốc trên máy (có thể đã bị dọn) — bấm Bỏ rồi để tool "
                                      "tìm lại, hoặc chờ chạy tự động tải lại", 400)
         try:

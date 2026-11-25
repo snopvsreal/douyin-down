@@ -97,12 +97,24 @@
         <span class="todo-ic {{ tone[it.kind] }}"><svg viewBox="0 0 24 24" aria-hidden="true">{{ icons[it.kind]|safe }}</svg></span>
         <div class="alert-txt"><b>{{ it.title }}{% if it.n is not none %} <span class="count">{{ it.n }}</span>{% endif %}</b>
           <span class="small muted">{{ it.sub }}</span></div>
-        {% if it.action %}
+        {% if it.captcha %}
+          <span class="row" style="gap:6px; flex-wrap:nowrap">
+            <button class="btn sm" hx-post="/douyin/captcha/open" hx-target="#captcha-msg" hx-disabled-elt="this">Mở cửa sổ Douyin</button>
+            <button class="btn sm primary" hx-post="/douyin/captcha/check" hx-target="#captcha-msg" hx-disabled-elt="this">Đã giải xong</button>
+          </span>
+        {% elif it.action %}
           <button class="btn sm" hx-post="{{ it.action }}" hx-swap="none" hx-disabled-elt="this">{{ it.btn }}</button>
         {% else %}
           <a class="btn sm {{ 'primary' if it.primary }}" href="{{ it.href }}">{{ it.btn }}</a>
         {% endif %}
       </div>
+      {% if it.captcha %}
+      <div id="captcha-msg" role="status" style="margin:-2px 0 6px 44px"></div>
+      {# câu hỏi captcha đang hiện + bản dịch tiếng Việt (tự cập nhật khi Douyin đổi câu) #}
+      <div hx-get="/partials/captcha" hx-trigger="load, every 3s [!document.hidden]" hx-swap="innerHTML"
+           aria-live="polite" style="margin:0 0 8px 44px"></div>
+      {% include "_captcha_help.html" %}
+      {% endif %}
       {% endfor %}
     </section>
     {% endif %}

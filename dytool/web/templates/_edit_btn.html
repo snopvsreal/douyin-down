@@ -1,8 +1,8 @@
-{# Nút "Edit ngay" cho video Đã tải — cần pid, vid. Máy chủ trả lại chính khối này sau khi bấm (hx-swap outerHTML). #}
+{# Nút "Edit ngay" cho video Tìm thấy (tải trước) / Đã tải — cần pid, vid. Máy chủ trả lại chính khối này sau khi bấm (hx-swap outerHTML). #}
 {% set est = edit_state(pid, vid) %}
 <span class="edit-now">
 {% if est == 'running' %}
-  <span class="pill info" title="Xem tiến trình ở thẻ Chạy tự động / trang Hôm nay — bấm Dừng ở đó để huỷ">Đang edit…</span>
+  <span class="pill info" title="Xem tiến trình ở thẻ Chạy tự động / trang Hôm nay — bấm Dừng ở đó để huỷ">Đang tải / edit…</span>
 {% elif est == 'queued' %}
   <span class="pill info" title="Sẽ edit ngay khi việc đang chạy xong (trước video tool tự chọn)">Chờ edit</span>
   <button type="button" class="btn sm ghost" hx-post="/videos/{{ pid }}/{{ vid }}/edit-cancel" hx-target="closest .edit-now"
@@ -10,6 +10,6 @@
 {% else %}
   <button type="button" class="btn sm" hx-post="/videos/{{ pid }}/{{ vid }}/edit" hx-target="closest .edit-now"
           hx-swap="outerHTML" hx-disabled-elt="this"
-          title="Edit + lồng tiếng video này ngay theo cài đặt kênh — không cần bật chạy tự động">Edit ngay</button>
+          title="{{ 'Tải video về rồi edit' if v is defined and v.status == 'new' else 'Edit' }} + lồng tiếng ngay theo cài đặt kênh — không cần bật chạy tự động">Edit ngay</button>
 {% endif %}
 </span>

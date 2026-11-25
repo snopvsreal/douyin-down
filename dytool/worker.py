@@ -61,6 +61,10 @@ class Worker:
         self.current = "Đang dừng"
         self._thread: threading.Thread | None = None
         self._last_scan: dict[int, float] = {}
+        self._src_scanned: dict[int, float] = {}    # nguồn id -> lần quét được gần nhất (quét nguồn lâu chưa quét trước)
+        # Douyin đòi xác minh (captcha): {"since", "checked"} — tìm kiếm tạm ngừng tới khi người dùng giải xong
+        self.captcha: dict | None = None
+        self._canary_ok_at = 0.0                    # lần tìm thử "猫咪" ra video gần nhất (tin 10 phút)
         self._dy = None
         self._vs_warned = 0.0
         self._vs_starting = False       # đã ghi log "đang bật VoiceStudio" cho lần bật này
@@ -70,6 +74,7 @@ class Worker:
         # chỉ 1 việc nặng / lần trên cả máy (VoiceStudio 1 GPU): vòng chạy tự động và việc bấm tay cùng giữ khoá này
         self._busy = threading.Lock()
         self._manual: list[tuple[int, str]] = []      # (page_id, video_id) người dùng bấm "Edit ngay"
+        self._scans: list[int] = []                   # page_id người dùng bấm "Quét nguồn ngay" lúc chạy tự động tắt
         self._manual_lock = threading.Lock()
         self._manual_thread: threading.Thread | None = None
         # bài hẹn giờ qua giờ -> Đã đăng + lấy link bài (start_sync)
@@ -167,29 +172,35 @@ class Worker:
         with self._manual_lock:
             return list(self._manual)
 
+    def _ensure_manual_thread(self) -> None:
+        """Gọi khi đang giữ _manual_lock: chạy tự động tắt -> mở luồng làm việc bấm tay (nếu chưa có)."""
+        if self._loop_alive() or (self._manual_thread and self._manual_thread.is_alive()):
+            return
+        if not self._claim_machine_lock():
+            raise RuntimeError("Đang có 1 dytool khác chạy trên máy này — làm ở bản đó, hoặc đóng bản kia")
+        self._manual_thread = threading.Thread(target=self._manual_loop, daemon=True)
+        self._manual_thread.start()
+
     def request_edit(self, page_id: int, video_id: str) -> str:
-        """Người dùng bấm Edit 1 video "Đã tải": đưa vào hàng chờ edit thủ công (làm trước video tự chọn, cả khi
-        kênh đang tắt). Chạy tự động đang bật -> vòng lặp nhặt ở lượt kế; đang tắt -> mở luồng riêng làm cho xong
-        hàng chờ rồi thôi. Trả 'queued' (đã có trong hàng chờ / chờ việc đang chạy) hoặc 'started'."""
+        """Người dùng bấm Edit 1 video "Đã tải" / "Tìm thấy" (tải về trước rồi edit): đưa vào hàng chờ edit thủ
+        công (làm trước video tự chọn, cả khi kênh đang tắt). Chạy tự động đang bật -> vòng lặp nhặt ở lượt kế;
+        đang tắt -> mở luồng riêng làm cho xong hàng chờ rồi thôi. Trả 'queued' hoặc 'started'."""
         with self._manual_lock:
             if (page_id, video_id) not in self._manual:
                 self._manual.append((page_id, video_id))
-            busy = len(self._manual) > 1 or self._busy.locked()
-            if self._loop_alive():
-                return "queued" if busy else "started"
-            if not (self._manual_thread and self._manual_thread.is_alive()):
-                if not self._claim_machine_lock():
-                    self._manual.remove((page_id, video_id))
-                    raise RuntimeError("Đang có 1 dytool khác chạy trên máy này — edit ở bản đó, hoặc đóng bản kia")
-                self._manual_thread = threading.Thread(target=self._manual_loop, daemon=True)
-                self._manual_thread.start()
+            busy = len(self._manual) + len(self._scans) > 1 or self._busy.locked()
+            try:
+                self._ensure_manual_thread()
+            except RuntimeError:
+                self._manual.remove((page_id, video_id))
+                raise
         return "queued" if busy else "started"
 
     def edit_state(self, page_id: int, video_id: str) -> str:
-        """'running' (đang edit video này) / 'queued' (trong hàng chờ Edit ngay) / ''."""
+        """'running' (đang tải / edit video này) / 'queued' (trong hàng chờ Edit ngay) / ''."""
         from . import progress
         t = progress.snapshot()
-        if t and t.get("kind") == "edit" and t.get("video") == video_id and not t.get("stopping"):
+        if t and t.get("kind") in ("edit", "download") and t.get("video") == video_id and not t.get("stopping"):
             return "running"
         with self._manual_lock:
             return "queued" if (page_id, video_id) in self._manual else ""
@@ -197,6 +208,7 @@ class Worker:
     def clear_manual(self) -> None:
         with self._manual_lock:
             self._manual.clear()
+            self._scans.clear()
 
     def cancel_manual(self, page_id: int, video_id: str) -> bool:
         with self._manual_lock:
@@ -206,7 +218,8 @@ class Worker:
         return False
 
     def _take_manual(self):
-        """Lấy việc edit thủ công kế tiếp còn hợp lệ (video vẫn "Đã tải", còn file gốc) -> (page, row) hoặc None."""
+        """Lấy việc edit thủ công kế tiếp còn hợp lệ (video vẫn "Đã tải" còn file gốc, hoặc "Tìm thấy" = tải trước)
+        -> (page, row) hoặc None."""
         while True:
             with self._manual_lock:
                 if not self._manual:
@@ -215,8 +228,21 @@ class Worker:
             page = self.store.one("SELECT p.*, a.id acc FROM pages p JOIN accounts a ON a.id=p.account_id "
                                   "WHERE p.id=?", (pid,))
             row = self.store.one("SELECT * FROM videos WHERE id=? AND page_id=?", (vid, pid))
-            if page and row and row["status"] == "downloaded" and (self.data / "raw" / f"{vid}.mp4").exists():
+            if page and row and (row["status"] == "new" or (
+                    row["status"] == "downloaded" and (self.data / "raw" / f"{vid}.mp4").exists())):
                 return page, row
+
+    def _take_scan(self):
+        """Kênh người dùng bấm "Quét nguồn ngay" lúc chạy tự động tắt -> page hoặc None."""
+        while True:
+            with self._manual_lock:
+                if not self._scans:
+                    return None
+                pid = self._scans.pop(0)
+            page = self.store.one("SELECT p.*, a.id acc FROM pages p JOIN accounts a ON a.id=p.account_id "
+                                  "WHERE p.id=?", (pid,))
+            if page:
+                return page
 
     def _manual_loop(self):
         """Luồng edit thủ công khi chạy tự động đang tắt. Chạy tự động bật lên giữa chừng -> để vòng lặp làm tiếp."""
@@ -226,21 +252,29 @@ class Worker:
             while not self._loop_alive():
                 with self._busy:
                     job = self._take_manual()
-                    if not job:
+                    scan = None if job else self._take_scan()
+                    if not job and not scan:
                         break
                     try:
-                        self._run_manual(*job)
+                        if job:
+                            self._run_manual(*job)
+                        else:
+                            self.store.log(f"[{scan['name']}] Quét nguồn thủ công", page_id=scan["id"])
+                            self._tdl_retry_at = 0      # người dùng bấm: thử bật backend tải lại ngay
+                            self._scan(scan)
                     except progress.Cancelled:
                         pass
                     except Exception as e:
-                        self.store.log(f"Lỗi edit thủ công: {e}", "error")
+                        what = "edit" if job else "quét nguồn"
+                        self.store.log(f"Lỗi {what} thủ công: {e}", "error")
                         traceback.print_exc()
                     finally:
                         stopped = progress.cancelled()
                         progress.end()
-                    if stopped:             # bấm Dừng -> bỏ luôn các video còn trong hàng chờ edit thủ công
+                    if stopped:             # bấm Dừng -> bỏ luôn các việc còn trong hàng chờ bấm tay
                         with self._manual_lock:
                             self._manual.clear()
+                            self._scans.clear()
                         break
         finally:
             self._keep_awake(False)
@@ -252,6 +286,18 @@ class Worker:
         """Edit 1 video người dùng bấm. Kênh bật lồng tiếng: VoiceStudio chưa chạy thì bật và CHỜ (tối đa 5 phút) —
         khác vòng tự động (không chờ, làm việc khác trước) vì đây là việc người dùng đang đợi."""
         from . import progress, services
+        if row["status"] == "new":          # video "Tìm thấy": tải về trước rồi edit luôn
+            self.store.log(f"[{page['name']}] Edit ngay {row['id']}: tải video trước", page_id=page["id"])
+            self._tdl_retry_at = 0              # người dùng bấm: thử bật backend tải lại ngay
+            self._download(page, row)
+            if progress.cancelled():
+                return
+            row = self.store.one("SELECT * FROM videos WHERE id=? AND page_id=?", (row["id"], page["id"]))
+            if not row or row["status"] != "downloaded":
+                if row and row["status"] == "new":     # backend tải Douyin chưa bật được
+                    self.store.log(f"[{page['name']}] Không tải được {row['id']}: backend tải Douyin chưa chạy "
+                                   f"(xem data/tdl_server.log) — video vẫn ở Tìm thấy", "error", page["id"])
+                return
         if self.store.page_settings(page)["dub_enabled"]:
             progress.begin("edit", "Edit + lồng tiếng", page["name"], row["id"], row["desc"] or "")
             self.current = f"Đang bật giọng nói để edit {row['id']}"
@@ -311,8 +357,22 @@ class Worker:
                 if not self.running:
                     self.current = "Đang dừng"
 
-    def scan_now(self, page_id: int):
+    def scan_now(self, page_id: int) -> str:
+        """Nút "Quét nguồn ngay": chạy tự động bật -> vòng lặp quét ở lượt kế; tắt -> luồng việc bấm tay quét kênh
+        này (cả kênh đang tắt). Trả 'queued' (chờ việc đang chạy) hoặc 'started'."""
         self._last_scan[page_id] = 0
+        with self._manual_lock:
+            if self._loop_alive():
+                return "queued" if self._busy.locked() else "started"
+            if page_id not in self._scans:
+                self._scans.append(page_id)
+            busy = len(self._manual) + len(self._scans) > 1 or self._busy.locked()
+            try:
+                self._ensure_manual_thread()
+            except RuntimeError:
+                self._scans.remove(page_id)
+                raise
+        return "queued" if busy else "started"
 
     # ---------- cấu hình theo Page ----------
     def page_edit_cfg(self, page) -> dict:
@@ -493,6 +553,10 @@ class Worker:
         if job:
             self._run_manual(*job)
             return True
+        scan = self._take_scan()        # bấm "Quét nguồn ngay" lúc chạy tự động còn tắt, rồi bật lên
+        if scan:
+            self._scan(scan)
+            return True
         # 2) edit (Page bật lồng tiếng mà VoiceStudio đang tắt -> để video chờ, không tính là lỗi).
         #    Lọc Page ngay trong SQL: trước lấy 20 video nhiều like nhất rồi mới lọc -> 20 video của Page đã tắt /
         #    đang chờ VoiceStudio chắn mất, video của Page đang bật không bao giờ tới lượt
@@ -510,7 +574,10 @@ class Worker:
             if row:
                 self._download(by_id[row["page_id"]], row)
                 return True
-        # 4) quét nguồn đến hạn
+        # 4) quét nguồn đến hạn. Douyin đang đòi xác minh -> thử lại 5 phút / lần (check_captcha tự giãn cách):
+        #    người dùng giải xong mà không bấm "Đã giải xong" thì vẫn tự quét tiếp
+        if self.captcha:
+            self.check_captcha()
         for page in pages:
             s = self.store.page_settings(page)
             if time.time() - self._last_scan.get(page["id"], 0) >= float(s["poll_minutes"]) * 60:
@@ -626,35 +693,162 @@ class Worker:
         s = self.store.page_settings(page)
         self.current = f"Quét nguồn cho {page['name']}"
         from . import progress
+
+        def pause(sec: float):          # chờ giữa các lần tìm, bấm Dừng vẫn dừng ngay
+            end = time.time() + sec
+            while time.time() < end:
+                progress.check()
+                time.sleep(min(1.0, max(0.0, end - time.time())))
+
+        def fetch(src, params):
+            if src["kind"] == "channel":
+                return self._douyin().channel_videos(src["value"])      # mọi thời gian
+            # mọi thời gian; nguồn cũ còn publish_time / max_age_days trong params thì bỏ qua
+            return self._douyin().search_videos(src["value"], int(params.get("max_results", 50)),
+                                                int(params.get("sort_type", 1)))
+
+        # Douyin đòi xác minh (captcha) khi tìm dồn dập (đo 2026-11-25: sau ~8–10 lần tìm liền nhau mọi từ khoá trả
+        # "搜索结果为空"). Từ khoá rỗng -> tìm thử 1 lần từ chắc có video (`_search_blocked`): cũng rỗng = captcha ->
+        # mở cửa sổ douyin.com cho người dùng giải, dừng lượt; có video = từ khoá đó không có video -> quét tiếp.
+        # Quét nguồn lâu chưa quét TRƯỚC (nguồn cuối danh sách không bị bỏ đói), giãn cách 8–15 s.
+        if self.captcha and not self.check_captcha():
+            return                  # vẫn đang đòi xác minh: không tìm (tìm thêm chỉ làm bị chặn lâu hơn)
+        srcs = sorted(self.store.q("SELECT * FROM sources WHERE page_id=? AND enabled=1", (page["id"],)),
+                      key=lambda r: (self._src_scanned.get(r["id"], 0), r["id"]))
         progress.begin("scan", f"Quét nguồn Douyin", page["name"])
-        progress.step("Quét các kênh / từ khóa")
-        total = 0
-        for src in self.store.q("SELECT * FROM sources WHERE page_id=? AND enabled=1", (page["id"],)):
-            params = json.loads(src["params"] or "{}")
-            try:
-                if src["kind"] == "channel":
-                    items = self._douyin().channel_videos(src["value"], float(params.get("max_age_days", 3)))
-                else:
-                    items = self._douyin().search_videos(src["value"], int(params.get("max_results", 20)),
-                                                         int(params.get("publish_time", 1)),
-                                                         int(params.get("sort_type", 1)))
-            except DouyinError as e:
-                self.store.log(f"[{page['name']}] Nguồn '{src['value']}': {e}", "error", page["id"])
-                if "Không kết nối được" in str(e):     # backend vừa tắt -> thử lại sau ~1 phút
-                    self._last_scan[page["id"]] = time.time() - float(s["poll_minutes"]) * 60 + 60
-                continue
-            for v in items:
-                if not self.store.add_video(page["id"], v, f"{src['kind']}:{src['value']}"):
+        total, done, empty, stopped_at = 0, 0, [], None
+        try:
+            for i, src in enumerate(srcs):
+                params = json.loads(src["params"] or "{}")
+                name = params.get("vi") or src["value"]
+                progress.step(f"Quét nguồn {i + 1}/{len(srcs)}: {name}")
+                items, err = None, None
+                try:
+                    items = fetch(src, params)
+                except DouyinError as e:
+                    err = str(e)
+                    if "Không kết nối được" in err:     # backend vừa tắt -> thử lại sau ~1 phút
+                        self._last_scan[page["id"]] = time.time() - float(s["poll_minutes"]) * 60 + 60
+                        self.store.log(f"[{page['name']}] Nguồn '{name}': {err}", "error", page["id"])
+                        stopped_at = i
+                        break
+                if not items:
+                    progress.detail("Douyin trả về rỗng — tìm thử 1 từ chắc có video xem có bị đòi xác minh không")
+                    pause(random.uniform(4, 8))
+                    if self._search_blocked():
+                        self._need_captcha()
+                        stopped_at = i
+                        break
+                    empty.append(name)              # Douyin không có video nào cho từ khoá này
+                    self._src_scanned[src["id"]] = time.time()
+                    pause(random.uniform(8, 15))
                     continue
-                ok = (v["likes"] >= int(s["min_likes"])
-                      and float(s["min_duration"]) <= v["duration"] <= float(s["max_duration"]))
-                if ok:
-                    total += 1
-                else:
-                    self.store.set_video(v["id"], page["id"], status="skipped", error="không qua bộ lọc")
-            time.sleep(random.uniform(3, 8))
-        self.store.log(f"[{page['name']}] Quét xong: {total} video mới", page_id=page["id"])
-        progress.end()
+                done += 1
+                self._src_scanned[src["id"]] = time.time()
+                for v in items:
+                    if not self.store.add_video(page["id"], v, f"{src['kind']}:{src['value']}"):
+                        continue
+                    why = self._filter_reason(v, s)
+                    if why:
+                        self.store.set_video(v["id"], page["id"], status="skipped", error=f"bị lọc: {why}")
+                    else:
+                        total += 1
+                if i + 1 < len(srcs):
+                    pause(random.uniform(8, 15))
+        finally:
+            progress.end()
+        msg = f"[{page['name']}] Quét xong {done}/{len(srcs)} nguồn: {total} video mới"
+        if empty:
+            msg += f" — không có video nào trên Douyin cho: {', '.join(empty)[:300]} (thử từ khoá ngắn hơn)"
+        if stopped_at is not None and self.captcha:
+            msg += (f" — Douyin đòi xác minh (captcha), dừng; {len(srcs) - stopped_at} nguồn còn lại quét đầu tiên "
+                    f"khi giải xong")
+        self.store.log(msg, "error" if stopped_at is not None else ("warn" if empty else "info"), page["id"])
+
+    # ---------- Douyin đòi xác minh (captcha) ----------
+    CANARY = "猫咪"                  # từ khoá lúc nào cũng có hàng nghìn video: rỗng = bị chặn, không phải từ khoá dở
+    CAPTCHA_URL = "https://www.douyin.com/search/%E7%8C%AB%E5%92%AA?type=video"   # trang tìm "猫咪": captcha hiện ở đây
+
+    def _search_blocked(self) -> bool:
+        """Tìm thử 1 lần từ chắc có video. True = Douyin đang đòi xác minh (tin kết quả "không chặn" 10 phút)."""
+        from .douyin import DouyinError
+        if time.time() - self._canary_ok_at < 600:
+            return False
+        try:
+            ok = bool(self._douyin().search_videos(self.CANARY, 10, 1))
+        except DouyinError as e:
+            if "Không kết nối được" in str(e):
+                return False                    # backend tắt, không phải captcha
+            ok = False
+        if ok:
+            self._canary_ok_at = time.time()
+        return not ok
+
+    def _need_captcha(self) -> None:
+        if self.captcha:
+            return
+        now = time.time()
+        self.captcha = {"since": now, "checked": now}
+        self.store.log("Douyin đòi xác minh (captcha) — đã mở cửa sổ douyin.com, bạn giải xong thì dytool tự quét tiếp "
+                       "(hướng dẫn tiếng Việt ở trang Hôm nay)", "error")
+        self.open_captcha_window()
+        from . import captcha       # đọc + dịch câu hỏi captcha đang hiện (chỉ chữ) cho trang Hôm nay
+        captcha.ensure_watch(self.data, lambda: self.captcha is not None)
+
+    def open_captcha_window(self) -> str | None:
+        """Mở douyin.com (trang tìm kiếm — captcha hiện ở đây) trong hồ sơ trình duyệt Douyin để người dùng giải.
+        Trả lời lỗi (None = đã mở)."""
+        from . import browsers
+        import urllib.parse
+        import urllib.request
+        choice = browsers.get_choice(self.data)
+        if not choice:
+            return "Chưa có hồ sơ trình duyệt Douyin — vào Cài đặt › Douyin, bấm Đăng nhập Douyin"
+        # cửa sổ đang mở sẵn tab douyin.com -> đưa tab đó lên trước, không mở thêm tab (mỗi tab 1 captcha riêng, rối)
+        ws = browsers._running_cdp(browsers.PROFILES_DIR / choice["profile_id"])
+        if ws:
+            try:
+                port = urllib.parse.urlparse(ws).port
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=3) as r:
+                    tabs = [t for t in json.loads(r.read()) if t.get("type") == "page" and "douyin.com" in t.get("url", "")]
+                if tabs:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/json/activate/{tabs[-1]['id']}", timeout=3).close()
+                    return None
+            except (OSError, ValueError, KeyError):
+                pass                # không đọc được danh sách tab -> mở tab mới như thường
+        try:
+            browsers.open_url(choice["profile_id"], self.CAPTCHA_URL)
+        except Exception as e:
+            self.store.log(f"Không mở được cửa sổ Douyin để xác minh: {e}", "error")
+            return f"Không mở được cửa sổ Douyin: {e}"
+        return None
+
+    def check_captcha(self, force: bool = False) -> bool:
+        """Đang đòi xác minh -> tìm thử lại (tối đa 1 lần / 5 phút, bấm "Đã giải xong" thì ngay). True = đã hết."""
+        if not self.captcha:
+            return True
+        if not force and time.time() - self.captcha["checked"] < 300:
+            return False
+        self.captcha["checked"] = time.time()
+        self._canary_ok_at = 0.0
+        if self._search_blocked():
+            return False
+        self.captcha = None
+        self._last_scan.clear()                 # quét tiếp ngay (nguồn chưa quét được đứng đầu)
+        self.store.log("Douyin đã hết đòi xác minh — quét nguồn tiếp")
+        return True
+
+    @staticmethod
+    def _filter_reason(v: dict, s: dict) -> str:
+        """Lý do video không qua bộ lọc của kênh ('' = qua) — ghi vào video để biết vì sao bị lọc."""
+        why = []
+        if v["likes"] < int(s["min_likes"]):
+            why.append(f"ít like ({v['likes']:,} < {int(s['min_likes']):,})".replace(",", "."))
+        if v["duration"] < float(s["min_duration"]):
+            why.append(f"quá ngắn ({v['duration']:.0f} s < {float(s['min_duration']):.0f} s)")
+        if v["duration"] > float(s["max_duration"]):
+            why.append(f"quá dài ({v['duration']:.0f} s > {float(s['max_duration']):.0f} s)")
+        return ", ".join(why)
 
     def _download(self, page, row):
         self.current = f"Tải video {row['id']} ({page['name']})"

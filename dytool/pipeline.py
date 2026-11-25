@@ -45,7 +45,7 @@ class Pipeline:
         total = 0
         for ch in dcfg.get("channels") or []:
             try:
-                n = self._collect(self.dy.channel_videos(ch["url"], ch.get("max_age_days", 3)),
+                n = self._collect(self.dy.channel_videos(ch["url"]),
                                   f"channel:{ch.get('name', ch['url'])}")
                 con.print(f"[cyan]Kênh {ch.get('name')}[/]: {n} video mới")
                 total += n
@@ -54,8 +54,7 @@ class Pipeline:
             time.sleep(random.uniform(3, 8))   # giãn cách để tránh bị chặn
         for kw in dcfg.get("keywords") or []:
             try:
-                items = self.dy.search_videos(kw["keyword"], kw.get("max_results", 20),
-                                              kw.get("publish_time", 0), kw.get("sort_type", 0))
+                items = self.dy.search_videos(kw["keyword"], kw.get("max_results", 50), kw.get("sort_type", 1))
                 n = self._collect(items, f"keyword:{kw['keyword']}")
                 con.print(f"[cyan]Từ khóa {kw['keyword']}[/]: {n} video mới")
                 total += n

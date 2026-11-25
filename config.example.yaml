@@ -10,14 +10,12 @@ douyin:
   # Theo dõi kênh: dán link trang cá nhân https://www.douyin.com/user/<sec_uid>
   channels:
     - url: https://www.douyin.com/user/MS4wLjABAAAA_xxxxxxxx
-      name: kenh-a
-      max_age_days: 3         # chỉ lấy video đăng trong N ngày gần nhất
+      name: kenh-a            # lấy mọi video của kênh (mọi thời gian), lọc hot bằng filters.min_likes
 
-  # Tìm theo từ khóa
+  # Tìm theo từ khóa (mọi thời gian)
   keywords:
     - keyword: 猫咪
-      max_results: 20
-      publish_time: 1         # 0 = mọi lúc, 1 = 1 ngày, 7 = 1 tuần, 180 = 6 tháng
+      max_results: 50
       sort_type: 1            # 0 = tổng hợp, 1 = nhiều like nhất, 2 = mới nhất
 
   filters:

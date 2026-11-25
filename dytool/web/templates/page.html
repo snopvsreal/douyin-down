@@ -67,7 +67,7 @@
           {% if v.source %}<span title="{{ v.source }}"> · {{ v.source.split(':', 1)[-1][:24] }}</span>{% endif %}</div></td>
       <td><span class="pill {{ cls }}">{{ status_vi(v.status, page.platform) }}</span>
         {% if v.error %}<div class="small err-text" style="margin-top:3px">{{ v.error[:140] }}</div>{% endif %}
-        {% if v.status == 'downloaded' %}<div style="margin-top:6px">{% with pid=page.id, vid=v.id %}{% include "_edit_btn.html" %}{% endwith %}</div>{% endif %}</td>
+        {% if v.status in ('new', 'downloaded') %}<div style="margin-top:6px">{% with pid=page.id, vid=v.id %}{% include "_edit_btn.html" %}{% endwith %}</div>{% endif %}</td>
       <td class="small num nowrap">
         {% if v.status == 'uploaded' %}đăng {{ vnt(v.uploaded_at or v.scheduled_at, '%H:%M %d/%m') }}
         {% elif v.scheduled_at and v.status in ('scheduled', 'schedule_pending', 'uploading') %}hẹn {{ vnt(v.scheduled_at, '%H:%M %d/%m') }}
@@ -172,7 +172,7 @@
   <section class="card tabpanel" data-panel="nguon" role="tabpanel" hidden>
     <div class="row" style="align-items:baseline"><h2 style="margin:0">Nguồn Douyin</h2>
       <span class="small muted">quét lại mỗi {{ s.poll_minutes|int }} phút</span></div>
-    {% macro source_fields(kind='keyword', value='', prm={}, uid='new') %}
+    {% macro source_fields(kind='keyword', value='', prm={}, uid='new', multi=false) %}
       <div class="row" style="flex-wrap:nowrap; margin-top:8px">
         <select name="kind" style="max-width:120px" aria-label="Loại nguồn"
                 hx-get="/partials/kw-translate" hx-trigger="change" hx-include="closest form" hx-vals='{"uid": "{{ uid }}"}'
@@ -180,27 +180,34 @@
           <option value="keyword" {{ 'selected' if kind == 'keyword' }}>Từ khoá</option>
           <option value="channel" {{ 'selected' if kind == 'channel' }}>Kênh</option></select>
         {# gõ tiếng Việt -> xem trước cụm tiếng Trung sẽ dùng để tìm (keywords.translate); lưu thì lưu cụm tiếng Trung #}
+        {% if multi %}
+        {# thêm nhiều nguồn 1 lần: mỗi dòng = 1 từ khoá / 1 link kênh #}
+        <textarea name="value" required rows="4" aria-label="Từ khoá hoặc link kênh, mỗi dòng 1 nguồn"
+               placeholder="Mỗi dòng 1 từ khoá (tiếng Việt hoặc tiếng Trung) hoặc 1 link douyin.com/user/…&#10;mèo hài hước&#10;chó con dễ thương"
+               hx-get="/partials/kw-translate" hx-trigger="input changed delay:800ms" hx-include="closest form"
+               hx-vals='{"uid": "{{ uid }}"}' hx-target="#kwp-{{ uid }}" hx-swap="innerHTML" hx-sync="this:replace"
+               hx-indicator="#kwi-{{ uid }}">{{ value }}</textarea>
+        {% else %}
         <input type="text" autocomplete="off" name="value" required value="{{ value }}" aria-label="Từ khoá hoặc link kênh"
                placeholder="Từ khoá tiếng Việt hoặc tiếng Trung (vd: mèo hài hước), hoặc link douyin.com/user/…"
                hx-get="/partials/kw-translate" hx-trigger="input changed delay:800ms" hx-include="closest form"
                hx-vals='{"uid": "{{ uid }}"}' hx-target="#kwp-{{ uid }}" hx-swap="innerHTML" hx-sync="this:replace"
                hx-indicator="#kwi-{{ uid }}">
+        {% endif %}
       </div>
+      {% if multi %}<p class="hint" style="margin:4px 0 0">Mỗi dòng thành 1 nguồn riêng. Dòng trùng nguồn đã có thì bỏ qua.</p>{% endif %}
       {# trong lúc chờ AI / dịch máy (vài giây): báo đang dịch, ẩn bản xem trước cũ #}
       <div id="kwi-{{ uid }}" class="kw-busy busy-ind" role="status"><span class="spin" aria-hidden="true"></span>Đang dịch sang tiếng Trung…</div>
       <div id="kwp-{{ uid }}" class="kw-slot" aria-live="polite"></div>
-      {% set mr = prm.get('max_results', 20) %}{% set pt = prm.get('publish_time', 1) %}
-      {% set so = prm.get('sort_type', 1) %}{% set ad = prm.get('max_age_days', 3) %}
-      <div class="grid g4" style="gap:0 12px">
-        <div><label for="f-max_results-{{ uid }}">Số video mỗi lần</label><input id="f-max_results-{{ uid }}" type="number" name="max_results" value="{{ mr }}" min="5"></div>
-        <div><label for="f-publish_time-{{ uid }}">Đăng trong</label><select id="f-publish_time-{{ uid }}" name="publish_time">
-          {% for v, l in [(1,'1 ngày'),(7,'1 tuần'),(180,'6 tháng'),(0,'mọi lúc')] %}
-            <option value="{{ v }}" {{ 'selected' if pt == v }}>{{ l }}</option>{% endfor %}</select></div>
+      {% set mr = prm.get('max_results', 50) %}{% set so = prm.get('sort_type', 1) %}
+      {# quét mọi thời gian (không lọc ngày đăng); video hot = xếp theo nhiều like + ngưỡng like ở tab Lọc video #}
+      <div class="grid g2" style="gap:0 12px">
+        <div><label for="f-max_results-{{ uid }}">Từ khoá: số video mỗi lần</label><input id="f-max_results-{{ uid }}" type="number" name="max_results" value="{{ mr }}" min="5" max="500"></div>
         <div><label for="f-sort_type-{{ uid }}">Sắp xếp</label><select id="f-sort_type-{{ uid }}" name="sort_type">
-          {% for v, l in [(1,'nhiều like'),(2,'mới nhất'),(0,'tổng hợp')] %}
+          {% for v, l in [(1,'nhiều like (hot)'),(2,'mới nhất'),(0,'tổng hợp')] %}
             <option value="{{ v }}" {{ 'selected' if so == v }}>{{ l }}</option>{% endfor %}</select></div>
-        <div><label for="f-max_age_days-{{ uid }}">Kênh: video trong (ngày)</label><input id="f-max_age_days-{{ uid }}" type="number" name="max_age_days" value="{{ ad }}" step="0.5"></div>
       </div>
+      <p class="hint" style="margin:4px 0 0">Quét mọi thời gian. Kênh: lấy mọi video của kênh. Video ít like bị loại theo ngưỡng ở tab Lọc video.</p>
     {% endmacro %}
 
     {% for src in sources %}{% set prm = json.loads(src.params) %}
@@ -208,7 +215,7 @@
       <span class="pill {{ 'info' if src.kind == 'keyword' }}">{{ 'Từ khoá' if src.kind == 'keyword' else 'Kênh' }}</span>
       <div style="min-width:0">
         <b class="trunc" style="max-width:100%; display:block"><span lang="zh">{{ src.value }}</span>{% if prm.vi %} <span class="muted" style="font-weight:400">· {{ prm.vi }}</span>{% endif %}</b>
-        <div class="small muted">{% if src.kind == 'keyword' %}{{ prm.max_results }} video mỗi lần, đăng trong {{ {0:'mọi lúc',1:'1 ngày',7:'1 tuần',180:'6 tháng'}[prm.publish_time] }}, xếp theo {{ {0:'tổng hợp',1:'nhiều like',2:'mới nhất'}[prm.sort_type] }}{% else %}video trong {{ prm.max_age_days }} ngày{% endif %}{% if not src.enabled %} · đang tắt{% endif %}</div>
+        <div class="small muted">{% if src.kind == 'keyword' %}{{ prm.get('max_results', 50) }} video mỗi lần, mọi thời gian, xếp theo {{ {0:'tổng hợp',1:'nhiều like',2:'mới nhất'}.get(prm.get('sort_type', 1), 'nhiều like') }}{% else %}mọi video của kênh{% endif %}{% if not src.enabled %} · đang tắt{% endif %}</div>
         <details class="fold" style="margin-top:6px">
           <summary class="small" style="font-weight:500">Sửa</summary>
           <form method="post" action="/sources/{{ src.id }}/update" hx-disabled-elt="find button.busy-btn">
@@ -229,7 +236,7 @@
     <details class="fold add-src" {{ 'open' if not sources }}>
       <summary>Thêm nguồn</summary>
       <form method="post" action="/pages/{{ page.id }}/sources" hx-disabled-elt="find button.busy-btn">
-        {{ source_fields() }}
+        {{ source_fields(multi=true) }}
         <button class="btn primary busy-btn" style="margin-top:12px"><span class="lbl">Thêm nguồn</span><span class="busy"><span class="spin" aria-hidden="true"></span>Đang dịch &amp; thêm nguồn…</span></button>
       </form>
     </details>

@@ -4,6 +4,8 @@
 {% endif %}
 {% if dy_logging_in %}
   <span class="chip"><span class="dot warn"></span>Douyin: đang đăng nhập…</span>
+{% elif worker.captcha %}
+  <a class="chip" href="/#can-xu-ly" title="Douyin đòi xác minh — tìm video đang tạm ngừng. Bấm để xem hướng dẫn"><span class="dot err"></span>Douyin · cần xác minh</a>
 {% elif douyin.logged_in %}
   {% set soon = douyin.days_left is not none and douyin.days_left < 7 %}
   <span class="chip" title="{% if douyin.expires %}Đăng nhập Douyin hết hạn {{ vnt(douyin.expires, '%d/%m/%Y') }}{% endif %}">

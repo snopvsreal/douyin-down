@@ -48,6 +48,13 @@ def normalize(raw: dict) -> dict | None:
     urls = best.get("url_list") or []
     if not urls or duration <= 0:
         return None
+    # luồng H.264 tốt nhất cho XEM TRƯỚC trong app: luồng bitrate cao nhất hay là H.265 (bytevc1), trình phát WebView2
+    # không giải mã được -> chỉ có tiếng, không hình. Edit vẫn dùng `url` (FFmpeg đọc được H.265).
+    h264 = [b for b in streams if not b.get("is_h265") and not b.get("is_bytevc1")]
+    if h264:
+        url_h264 = max(h264, key=lambda b: b.get("bit_rate", 0))["play_addr"]["url_list"][0]
+    else:
+        url_h264 = ((v.get("play_addr_h264") or {}).get("url_list") or [""])[0]
     stats = a.get("statistics") or {}
     return {
         "id": str(a["aweme_id"]),
@@ -58,7 +65,7 @@ def normalize(raw: dict) -> dict | None:
         "url": urls[0],
         "meta": {"nickname": (a.get("author") or {}).get("nickname"),
                  "share_url": f"https://www.douyin.com/video/{a['aweme_id']}",
-                 "width": best.get("width"), "height": best.get("height")},
+                 "width": best.get("width"), "height": best.get("height"), "url_h264": url_h264},
     }
 
 
@@ -82,23 +89,23 @@ class DouyinClient:
             raise DouyinError(f"{path}: {js.get('message')} (cookie hết hạn hoặc bị chặn?)")
         return data if isinstance(data, list) else [data]
 
-    def channel_videos(self, url: str, max_age_days: float = 3) -> list[dict]:
+    def channel_videos(self, url: str) -> list[dict]:
+        """Mọi video của kênh, mọi thời gian (không gửi `earliest` -> backend lật hết các trang, từ 2016)."""
         data = self._post("/douyin/account", {
             "sec_user_id": sec_uid_from_url(url),
             "tab": "post",
-            "earliest": max_age_days,   # số ngày tính ngược từ hôm nay
             "count": 18,
         })
         return [v for v in map(normalize, data) if v]
 
-    def search_videos(self, keyword: str, max_results: int = 20,
-                      publish_time: int = 0, sort_type: int = 0) -> list[dict]:
+    def search_videos(self, keyword: str, max_results: int = 50, sort_type: int = 1) -> list[dict]:
+        """Tìm mọi thời gian (publish_time = 0); mặc định xếp theo nhiều like = video hot."""
         pages = max(1, -(-max_results // 10))
-        body = {"keyword": keyword, "pages": pages, "count": 10, "publish_time": publish_time, "sort_type": sort_type}
+        body = {"keyword": keyword, "pages": pages, "count": 10, "publish_time": 0, "sort_type": sort_type}
         try:
             data = self._post("/douyin/search/video", body)
         except DouyinError:
-            # Douyin hay trả rỗng ở kiểu "tìm video" (nhất là lọc 1 ngày) -> thử "tìm tổng hợp" rồi lọc lấy video
+            # Douyin hay trả rỗng ở kiểu "tìm video" -> thử "tìm tổng hợp" rồi lọc lấy video
             data = self._post("/douyin/search/general", body)
         return [v for v in map(normalize, data) if v][:max_results]
 
@@ -109,6 +116,14 @@ class DouyinClient:
         if not v:
             raise DouyinError(f"Không lấy lại được link video {video_id}")
         return v["url"]
+
+    def preview_url(self, video_id: str) -> str:
+        """Link mới để XEM TRƯỚC trong app: luồng H.264 (trình phát WebView2 không có hình với H.265)."""
+        data = self._post("/douyin/detail", {"detail_id": video_id})
+        v = normalize(data[0]) if data else None
+        if not v:
+            raise DouyinError(f"Không lấy lại được link video {video_id}")
+        return v["meta"].get("url_h264") or v["url"]
 
     def download(self, url: str, dest: Path) -> Path:
         tmp = dest.with_suffix(".part")

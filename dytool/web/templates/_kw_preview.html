@@ -1,10 +1,14 @@
-{# Xem trước: từ khoá tiếng Việt sẽ được tìm trên Douyin bằng cụm tiếng Trung nào (bấm gợi ý khác để đổi) #}
+{# Xem trước: từ khoá tiếng Việt sẽ được tìm trên Douyin bằng cụm tiếng Trung nào (bấm gợi ý khác để đổi).
+   items = [(dòng, kết quả keywords.translate)] — mỗi dòng 1 hộp; zh_src gửi kèm để máy chủ biết cụm nào của dòng nào #}
+{% set many = items|length > 1 %}
+{% for line, r in items %}
 {% if r.zh %}
 <div class="kw-prev" role="status">
-  <span class="muted">Tìm trên Douyin bằng</span>
+  {% if many %}<span class="muted">{{ line }} →</span>{% else %}<span class="muted">Tìm trên Douyin bằng</span>{% endif %}
   <b class="kw-zh" lang="zh">{{ r.zh }}</b>
-  <span class="small muted">{{ {'ai': '· AI viết', 'google': '· dịch máy (Google) — cài AI ở Cài đặt thì AI viết cụm tự nhiên hơn', 'mymemory': '· dịch máy (MyMemory) — cài AI ở Cài đặt thì AI viết cụm tự nhiên hơn'}.get(r.by, '') }}</span>
+  {% if not many or loop.first %}<span class="small muted">{{ {'ai': '· AI viết', 'google': '· dịch máy (Google) — cài AI ở Cài đặt thì AI viết cụm tự nhiên hơn', 'mymemory': '· dịch máy (MyMemory) — cài AI ở Cài đặt thì AI viết cụm tự nhiên hơn'}.get(r.by, '') }}</span>{% endif %}
   <input type="hidden" name="zh" value="{{ r.zh }}">
+  <input type="hidden" name="zh_src" value="{{ line }}">
   {% if r.alt %}
   <span class="kw-alts">
     <span class="small muted">Cụm khác:</span>
@@ -13,5 +17,6 @@
   {% endif %}
 </div>
 {% else %}
-<div class="kw-prev warn" role="alert">Chưa dịch được sang tiếng Trung — nhập thẳng từ khoá tiếng Trung, hoặc kiểm tra mạng.</div>
+<div class="kw-prev warn" role="alert">{% if many %}<b>{{ line }}</b>: {% endif %}Chưa dịch được sang tiếng Trung — nhập thẳng từ khoá tiếng Trung, hoặc kiểm tra mạng.</div>
 {% endif %}
+{% endfor %}

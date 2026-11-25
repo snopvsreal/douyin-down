@@ -13,8 +13,11 @@
       <video class="vv-video" src="/media/raw/{{ v.id }}" controls preload="metadata" playsinline></video>
       <p class="small muted" style="margin:6px 0 0">Chưa edit xong — đây là video gốc.</p>
     {% else %}
-      <div class="vv-none small muted">Video chưa tải về, hoặc đã được dọn khỏi máy (tool tự xoá file cũ sau khi đăng).</div>
-    {% endif %}
+      {# chưa tải về (hoặc đã dọn sau khi đăng): phát thẳng bản gốc trên Douyin qua /media/preview — không lưu file #}
+      <video class="vv-video" src="/media/preview/{{ v.page_id }}/{{ v.id }}" controls preload="metadata" playsinline
+             onerror="this.hidden=true; this.nextElementSibling.hidden=false"></video>
+      <div class="vv-none small muted" hidden>Không phát được video gốc từ Douyin — video có thể đã bị xoá / để riêng tư,
+        hoặc backend tải Douyin chưa chạy. Thử <a href="https://www.douyin.com/video/{{ v.id }}" target="_blank" rel="noopener">mở trên douyin.com</a>.</div>    {% endif %}
   </div>
   <div class="vv-info">
     {% if pos %}
@@ -84,7 +87,7 @@
     {% endif %}
 
     <div class="row" style="gap:6px; margin-top:14px; flex-wrap:wrap">
-      {% if v.status == 'downloaded' %}
+      {% if v.status in ('new', 'downloaded') %}
         {% with pid=v.page_id, vid=v.id %}{% include "_edit_btn.html" %}{% endwith %}
       {% elif v.status == 'scheduled' %}
         {% if tt %}

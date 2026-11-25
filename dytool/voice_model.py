@@ -211,16 +211,26 @@ def ensure_background() -> None:
 
 
 def main() -> None:
-    """`python -m dytool.voice_model` — bước tải model của trình cài (in tiến độ từng 5%)."""
-    step = [-1]
+    """`python -m dytool.voice_model [--machine]` — bước tải model của trình cài. Thường: in tiến độ từng 5%.
+    --machine (cửa sổ cài dytool-Setup.exe): in "@@p|đã tải|tổng|tên" tối đa ~2 lần / giây."""
+    import sys
+    machine = "--machine" in sys.argv[1:]
+    step, last = [-1], [0.0]
+    if _vs_snapshot() and not ready():
+        print("Dùng lại model của app VoiceStudio có sẵn trên máy (không tải lại)", flush=True)
 
     def show(d, t):
+        if machine:
+            if time.time() - last[0] >= 0.5 or d >= t:
+                last[0] = time.time()
+                print(f"@@p|{d}|{t}|OmniVoice (huggingface.co/{REPO})", flush=True)
+            return
         p = int(d * 100 / t) // 5 * 5
         if p != step[0]:
             step[0] = p
             print(f"  model giong noi: {p}%", flush=True)
     ensure(show)
-    print("  model giong noi: xong", flush=True)
+    print("Model giọng nói đã kiểm tra mã băm" if machine else "  model giong noi: xong", flush=True)
 
 
 if __name__ == "__main__":

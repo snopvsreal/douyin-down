@@ -1,5 +1,8 @@
-﻿; File cài dytool cho Windows (Inno Setup 7). Build: powershell -File installer\build.ps1
-; Chỉ chép mã nguồn + dytool.exe (~1 MB); thư viện (~4 GB) tải ở bước scripts\setup_app.ps1 lúc cài.
+﻿; Trình cài LÕI của dytool (Inno Setup 7). Build: powershell -File installer\build.ps1
+; Người dùng KHÔNG chạy file này: nó được nhúng trong dytool-Setup-<ver>.exe (cửa sổ cài installer\setup_ui.cs), cửa sổ
+; đó chạy nó ngầm (/VERYSILENT /NOLIB) để chép mã nguồn + dytool.exe, tạo lối tắt, đăng ký gỡ cài đặt; rồi tự chạy
+; scripts\setup_app.ps1 -Machine để tải thư viện và hiện tiến độ từng thứ. Chạy thẳng file này (không /NOLIB) vẫn cài
+; đủ như trước (tải thư viện trong trang tiến độ của Inno).
 
 #ifndef AppVer
   #define AppVer "0.3.4"
@@ -13,8 +16,8 @@ AppVerName=dytool {#AppVer}
 AppPublisher=dytool
 AppComments=Douyin → edit → lồng tiếng Việt → Facebook / TikTok
 SourceDir=..
-OutputDir=dist
-OutputBaseFilename=dytool-Setup-{#AppVer}
+OutputDir=build
+OutputBaseFilename=dytool-core-{#AppVer}
 SetupIconFile=installer\dytool.ico
 UninstallDisplayIcon={app}\dytool.exe
 UninstallDisplayName=dytool
@@ -73,6 +76,8 @@ Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "{cm:Sho
 
 [Files]
 Source: "build\dytool.exe"; DestDir: "{app}"; Flags: ignoreversion
+; cửa sổ "Cài đặt lại thư viện" (cùng mã với dytool-Setup.exe, không nhúng trình cài lõi)
+Source: "build\dytool-setup.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dytool\*"; DestDir: "{app}\dytool"; Excludes: "__pycache__,*.pyc"; Flags: recursesubdirs ignoreversion
 Source: "scripts\*"; DestDir: "{app}\scripts"; Excludes: "__pycache__,*.pyc"; Flags: recursesubdirs ignoreversion
 Source: "installer\dytool.ico"; DestDir: "{app}\installer"; Flags: ignoreversion
@@ -86,8 +91,7 @@ Name: "{app}\data"
 
 [Icons]
 Name: "{autoprograms}\dytool"; Filename: "{app}\dytool.exe"; WorkingDir: "{app}"
-Name: "{autoprograms}\{cm:Reinstall}"; Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\setup_app.ps1"""; \
+Name: "{autoprograms}\{cm:Reinstall}"; Filename: "{app}\dytool-setup.exe"; Parameters: "/repair"; \
   WorkingDir: "{app}"; IconFilename: "{app}\installer\dytool.ico"
 Name: "{autodesktop}\dytool"; Filename: "{app}\dytool.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
@@ -213,6 +217,12 @@ begin
   Result := True;
 end;
 
+// /NOLIB: chạy dưới cửa sổ cài dytool-Setup.exe — cửa sổ đó tự cài WebView2 + thư viện, Inno chỉ chép file
+function IsNoLib: Boolean;
+begin
+  Result := Pos('/NOLIB', UpperCase(GetCmdTail)) > 0;
+end;
+
 // WebView2 Runtime (cửa sổ dytool dùng nó để hiện giao diện). Windows 11 / Win 10 có Edge mới thì có sẵn;
 // Windows 10 LTSC thường không. Thiếu -> báo kèm link tải chính thức, vẫn cho cài tiếp.
 function HasWebView2: Boolean;
@@ -231,7 +241,7 @@ var
 function InitializeSetup: Boolean;
 begin
   Result := True;
-  WantWebView2 := (not HasWebView2) and (not WizardSilent) and
+  WantWebView2 := (not HasWebView2) and (not WizardSilent) and (not IsNoLib) and
                   (MsgBox(CustomMessage('NoWebView2'), mbInformation, MB_YESNO) = IDYES);
 end;
 
@@ -264,7 +274,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   RC: Integer;
 begin
-  if CurStep = ssPostInstall then begin
+  if (CurStep = ssPostInstall) and not IsNoLib then begin
     if WantWebView2 then InstallWebView2;
     RunLibSetup;
   end;

@@ -9,7 +9,8 @@ param(
     [switch]$NoPrompt,   # không hỏi gì
     [switch]$Wizard,     # chạy ẩn trong trình cài: tiến độ đọc từ các dòng "▸ N/7", không hỏi gì
     [switch]$WithShardBrowser,   # bỏ (trình duyệt đã nhúng sẵn) — giữ để trình cài cũ truyền vào không lỗi
-    [switch]$WithVoiceStudio     # bỏ (lồng tiếng đã nhúng OmniVoice) — giữ để trình cài cũ truyền vào không lỗi
+    [switch]$WithVoiceStudio,    # bỏ (lồng tiếng đã nhúng OmniVoice) — giữ để trình cài cũ truyền vào không lỗi
+    [switch]$Machine     # chạy dưới cửa sổ cài dytool-Setup.exe: in thêm dòng "@@p|đã tải|tổng|tên" để vẽ tiến độ tải
 )
 if ($Wizard) { $NoPrompt = $true }
 $ErrorActionPreference = "Continue"
@@ -55,6 +56,33 @@ try { $Host.UI.RawUI.WindowTitle = "dytool – cài đặt thư viện" } catch 
 function Say($m) { Write-Host ""; Write-Host "▸ $m" -ForegroundColor Cyan }
 function Ok($m) { Write-Host "   √ $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "   ! $m" -ForegroundColor Yellow }
+# Tiến độ cho cửa sổ cài (chỉ khi -Machine): "@@p|<byte đã tải>|<tổng byte, 0 = chưa biết>|<đang tải gì>"
+function Prog($done, $total, $what) { if ($Machine) { Write-Host "@@p|$done|$total|$what" } }
+
+# Tải 1 file, báo tiến độ mỗi ~0,4 giây. Thay Invoke-WebRequest (không báo được đã tải bao nhiêu, lại chậm ở PS 5.1)
+function Get-Download($url, $out, $what) {
+    $req = [Net.HttpWebRequest]::Create($url)
+    $req.UserAgent = "dytool-setup"
+    $req.Timeout = 60000
+    $req.ReadWriteTimeout = 120000
+    $resp = $req.GetResponse()
+    $total = [int64]$resp.ContentLength
+    $in = $resp.GetResponseStream()
+    $fs = [IO.File]::Create($out)
+    try {
+        $buf = New-Object byte[] 262144
+        $done = [int64]0
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $last = -1000
+        while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+            $fs.Write($buf, 0, $n)
+            $done += $n
+            if ($sw.ElapsedMilliseconds - $last -ge 400) { $last = $sw.ElapsedMilliseconds; Prog $done $total $what }
+        }
+        Prog $done $total $what
+    } finally { $fs.Close(); $in.Close(); $resp.Close() }
+    if ($total -gt 0 -and $done -ne $total) { throw "Tải $what chưa đủ ($done / $total byte) — kiểm tra mạng rồi thử lại" }
+}
 function Done-Or-Fail($what) { if ($LASTEXITCODE -ne 0) { throw "$what thất bại (mã lỗi $LASTEXITCODE)" } }
 
 $env:UV_PYTHON_INSTALL_DIR = "$Root\.python"
@@ -82,7 +110,7 @@ function Get-GitHubAsset($apiUrl, $pattern, $outDir) {
     if (-not $asset) { throw "Không thấy file '$pattern' trong bản phát hành $($rel.tag_name)" }
     $out = Join-Path $outDir $asset.name
     Write-Host "   Đang tải $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB, bản $($rel.tag_name))…"
-    Invoke-WebRequest $asset.browser_download_url -OutFile $out -UseBasicParsing
+    Get-Download $asset.browser_download_url $out $asset.name
     if ($asset.digest -match '^sha256:([0-9a-f]{64})$') {
         if ((Get-FileHash $out -Algorithm SHA256).Hash -ne $Matches[1].ToUpper()) {
             Remove-Item $out -Force -ErrorAction SilentlyContinue
@@ -184,7 +212,8 @@ try {
     if (-not (Test-Path "$vendor\main.py")) {
         New-Item -ItemType Directory -Force -Path "$Root\vendor" | Out-Null
         $zip = "$env:TEMP\dytool-tdl.zip"
-        Invoke-WebRequest "https://codeload.github.com/JoeanAmier/TikTokDownloader/zip/refs/heads/master" -OutFile $zip -UseBasicParsing
+        Write-Host "   Đang tải mã nguồn TikTokDownloader (github.com/JoeanAmier/TikTokDownloader)…"
+        Get-Download "https://codeload.github.com/JoeanAmier/TikTokDownloader/zip/refs/heads/master" $zip "TikTokDownloader.zip"
         Expand-Archive $zip -DestinationPath "$Root\vendor" -Force -ErrorAction Stop
         Remove-Item $zip -ErrorAction SilentlyContinue
         if (Test-Path $vendor) { Remove-Item -Recurse -Force $vendor -ErrorAction Stop }
@@ -212,7 +241,9 @@ try {
     Say "7/7  Model giọng nói (OmniVoice ~3.3 GB)"
     # Ghim bản + kiểm tra mã băm từng file (dytool\voice_model.py). Máy đã có app VoiceStudio tải sẵn đúng bản này -> tạo
     # liên kết cứng, không tải lại. Lỗi (mạng…) chỉ cảnh báo: dytool tự tải tiếp ở nền khi mở app
-    & uv run --no-sync python -m dytool.voice_model 2>&1 | ForEach-Object { "   $_" } | Out-Host
+    $vmArgs = @("run", "--no-sync", "python", "-m", "dytool.voice_model")
+    if ($Machine) { $vmArgs += "--machine" }
+    & uv @vmArgs 2>&1 | ForEach-Object { "   $_" } | Out-Host
     if ($LASTEXITCODE -eq 0) { Ok "Model giọng nói sẵn sàng (data\models\omnivoice)" }
     else { Warn "Chưa tải xong model giọng nói — dytool sẽ tự tải tiếp khi mở app" }
 

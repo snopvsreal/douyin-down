@@ -25,7 +25,12 @@ static class Launcher
             DialogResult r = MessageBox.Show(
                 "dytool chưa cài xong (thiếu thư viện Python).\n\nChạy bước cài đặt bây giờ? (cần mạng, lần đầu mất 15–30 phút)",
                 "dytool", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-            if (r == DialogResult.Yes && File.Exists(setup))
+            string ui = Path.Combine(root, "dytool-setup.exe");   // cua so cai dat (installer\setup_ui.cs)
+            if (r == DialogResult.Yes && File.Exists(ui))
+            {
+                Process.Start(new ProcessStartInfo(ui, "/repair /RELAUNCH") { WorkingDirectory = root, UseShellExecute = false });
+            }
+            else if (r == DialogResult.Yes && File.Exists(setup))
             {
                 Process.Start(new ProcessStartInfo("powershell.exe",
                     "-NoProfile -ExecutionPolicy Bypass -File \"" + setup + "\" -Launch")

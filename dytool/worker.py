@@ -254,20 +254,20 @@ class Worker:
         from . import progress, services
         if self.store.page_settings(page)["dub_enabled"]:
             progress.begin("edit", "Edit + lồng tiếng", page["name"], row["id"], row["desc"] or "")
-            self.current = f"Đang bật VoiceStudio để edit {row['id']}"
+            self.current = f"Đang bật giọng nói để edit {row['id']}"
             deadline = time.time() + 300
             while True:
                 r = services.start_voicestudio(self.cfg)
                 if r == "ok":
                     break
                 if r != "starting" or time.time() > deadline:
-                    why = {"missing": "VoiceStudio chưa cài xong (mở app VoiceStudio 1 lần)",
-                           "crashed": "VoiceStudio bật lên rồi tắt ngay (xem data/voicestudio.log)",
-                           "starting": "VoiceStudio bật quá 5 phút chưa xong"}.get(r, "VoiceStudio không trả lời")
+                    why = {"missing": "chưa có model giọng nói (đang tải ở nền — xem trang Giọng nói)",
+                           "crashed": "máy chủ giọng nói bật lên rồi tắt ngay (xem Nhật ký ở trang Giọng nói)",
+                           "starting": "máy chủ giọng nói bật quá 5 phút chưa xong"}.get(r, "máy chủ giọng nói không trả lời")
                     self.store.log(f"[{page['name']}] Không edit được {row['id']}: {why} — video vẫn ở Đã tải",
                                    "error", page["id"])
                     return
-                progress.step("Đang bật VoiceStudio (nạp model)…")
+                progress.step("Đang bật giọng nói (nạp model)…")
                 for _ in range(5):
                     progress.check()
                     time.sleep(1)
@@ -342,9 +342,9 @@ class Worker:
                 from . import services
                 try:
                     if services.vs_idle_stop(self.cfg):
-                        self.store.log("Rảnh lâu -> tắt VoiceStudio chạy ngầm (tự bật lại khi có video cần lồng tiếng)")
+                        self.store.log("Rảnh lâu -> tắt máy chủ giọng nói (tự bật lại khi có video cần lồng tiếng)")
                 except Exception as e:
-                    self.store.log(f"Tắt VoiceStudio lỗi: {e}", "error")
+                    self.store.log(f"Tắt máy chủ giọng nói lỗi: {e}", "error")
             if not did and time.time() - self._last_cleanup > 6 * 3600:
                 self._last_cleanup = time.time()
                 try:
@@ -659,16 +659,16 @@ class Worker:
             return True
         if r == "starting":
             if not self._vs_starting:
-                self.store.log("Đang bật VoiceStudio chạy ngầm để lồng tiếng…")
+                self.store.log("Đang bật máy chủ giọng nói để lồng tiếng…")
             self._vs_starting = True
             return False
         self._vs_starting = False
         if time.time() - self._vs_warned > 600:     # nhắc 10 phút/lần, không spam log
-            msg = ("VoiceStudio chưa cài xong -> tạm dừng edit các Page bật lồng tiếng. Mở app VoiceStudio 1 lần "
-                   "(tải model, chấp nhận license OmniVoice)." if r == "missing" else
-                   "VoiceStudio chạy ngầm bật lên rồi tắt ngay (xem data/voicestudio.log) -> 10 phút sau thử lại. "
-                   "Mở app VoiceStudio để xem lỗi." if r == "crashed" else
-                   f"VoiceStudio ở {services.vs_api(self.cfg)} không trả lời -> tạm dừng edit các Page bật lồng tiếng.")
+            msg = ("Chưa có model giọng nói -> tạm dừng edit các kênh bật lồng tiếng. Đang tải ở nền (3,3 GB) — xem tiến độ "
+                   "ở trang Giọng nói." if r == "missing" else
+                   "Máy chủ giọng nói bật lên rồi tắt ngay -> 10 phút sau thử lại. Xem Nhật ký ở trang Giọng nói."
+                   if r == "crashed" else
+                   f"Máy chủ giọng nói ở {services.vs_api(self.cfg)} không trả lời -> tạm dừng edit các kênh bật lồng tiếng.")
             self.store.log(msg, "error")
             self._vs_warned = time.time()
         return False
@@ -715,7 +715,7 @@ class Worker:
             # tắt VoiceStudio giữa lúc đang đọc thường ra ReadError / RemoteProtocolError, không phải ConnectError
             if isinstance(e, (httpx.HTTPError, DubError)) and not self._voicestudio_up():
                 # VoiceStudio bị tắt giữa chừng -> để video chờ (vẫn "Đã tải"), edit lại khi app mở lại
-                self.store.log(f"[{page['name']}] VoiceStudio bị tắt khi đang lồng tiếng {row['id']} -> sẽ làm lại",
+                self.store.log(f"[{page['name']}] máy chủ giọng nói bị tắt khi đang lồng tiếng {row['id']} -> sẽ làm lại",
                                "error", page["id"])
                 return
             if not self.store.set_video_if(row["id"], page["id"], ("downloaded",), status="failed", error=f"edit: {e}"):

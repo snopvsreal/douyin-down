@@ -6,10 +6,10 @@
 # FFmpeg (tools\ffmpeg), backend tải Douyin (vendor). Không dùng AppData vì có máy Windows chặn chạy exe ở đó.
 param(
     [switch]$Launch,     # cài xong thì mở dytool
-    [switch]$NoPrompt,   # không hỏi gì (thiếu VoiceStudio thì chỉ nhắc, trừ khi có cờ -WithVoiceStudio)
+    [switch]$NoPrompt,   # không hỏi gì
     [switch]$Wizard,     # chạy ẩn trong trình cài: tiến độ đọc từ các dòng "▸ N/7", không hỏi gì
     [switch]$WithShardBrowser,   # bỏ (trình duyệt đã nhúng sẵn) — giữ để trình cài cũ truyền vào không lỗi
-    [switch]$WithVoiceStudio
+    [switch]$WithVoiceStudio     # bỏ (lồng tiếng đã nhúng OmniVoice) — giữ để trình cài cũ truyền vào không lỗi
 )
 if ($Wizard) { $NoPrompt = $true }
 $ErrorActionPreference = "Continue"
@@ -208,27 +208,13 @@ try {
     & uv run --no-sync python "$Root\scripts\warm_models.py" 2>&1 | ForEach-Object { "   $_" } | Out-Host     # in vào setup.log (Start-Transcript không bắt được chữ của lệnh ngoài)
     if ($LASTEXITCODE -ne 0) { Warn "Một số model chưa tải xong — tool tự tải khi dùng lần đầu" } else { Ok "Model AI xong" }
 
-    # ---------- 7. VoiceStudio (lồng tiếng) ----------
-    Say "7/7  VoiceStudio (app lồng tiếng Việt)"
-    $vs = @("$env:LOCALAPPDATA\Programs\VoiceStudio\VoiceStudio.exe", "$env:ProgramFiles\VoiceStudio\VoiceStudio.exe") | Where-Object { Test-Path $_ }
-    if ($vs) { Ok "VoiceStudio đã cài" }
-    elseif ($NoPrompt -and -not $WithVoiceStudio) { Warn "Chưa có VoiceStudio — cài sau tại https://github.com/debpalash/VoiceStudio/releases" }
-    else {
-        $a = if ($WithVoiceStudio) { "C" } else { Read-Host "   Cài VoiceStudio bằng trình cài chính thức (voicestudio.sh)? (C/K)" }
-        if ($a -match '^[CcYy]') {
-            Write-Host "   Đang tải và cài VoiceStudio…"
-            # trình cài chính thức, cờ -Silent = cài không hỏi. Chạy ở tiến trình PowerShell RIÊNG: script đó gọi `exit`
-            # hay báo lỗi cũng không cắt ngang script này; lỗi chỉ cảnh báo (phần đi kèm, phần lõi đã cài xong)
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `
-                "& ([scriptblock]::Create((Invoke-RestMethod https://voicestudio.sh/install.ps1))) -Silent"
-            if ($LASTEXITCODE -ne 0) {
-                Warn "Chưa cài được VoiceStudio (mã $LASTEXITCODE) — cài sau tại https://github.com/debpalash/VoiceStudio/releases"
-            } else {
-                Warn "Mở VoiceStudio > Model Catalogue > chấp nhận license OmniVoice và higgs-audio-v2-tokenizer"
-                Warn "Nếu VoiceStudio báo lỗi tải Python: bấm 'Thay đổi…' và chọn thư mục runtime ở ổ C:, vd C:\VoiceStudio\runtime"
-            }
-        } else { Warn "Bỏ qua — lồng tiếng cần VoiceStudio, cài sau tại https://github.com/debpalash/VoiceStudio/releases" }
-    }
+    # ---------- 7. Model giọng nói (OmniVoice, lồng tiếng — chạy ngay trong dytool, không cần app VoiceStudio) ----------
+    Say "7/7  Model giọng nói (OmniVoice ~3.3 GB)"
+    # Ghim bản + kiểm tra mã băm từng file (dytool\voice_model.py). Máy đã có app VoiceStudio tải sẵn đúng bản này -> tạo
+    # liên kết cứng, không tải lại. Lỗi (mạng…) chỉ cảnh báo: dytool tự tải tiếp ở nền khi mở app
+    & uv run --no-sync python -m dytool.voice_model 2>&1 | ForEach-Object { "   $_" } | Out-Host
+    if ($LASTEXITCODE -eq 0) { Ok "Model giọng nói sẵn sàng (data\models\omnivoice)" }
+    else { Warn "Chưa tải xong model giọng nói — dytool sẽ tự tải tiếp khi mở app" }
 
     Write-Host ""
     Write-Host "  √ CÀI ĐẶT XONG" -ForegroundColor Green

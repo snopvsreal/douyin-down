@@ -26,6 +26,10 @@ dependencies = [
     "pywebview>=5",
     "pystray>=0.19",
     "shardx==2.1.7",            # GHIM: browsers._use_mirror thay hàm nội bộ của SDK — nâng thì thử lại
+    # Lồng tiếng: model OmniVoice (github.com/k2-fsa/OmniVoice, Apache-2.0) chạy ngay trong dytool (voice_server.py)
+    # — không cần cài app VoiceStudio. GHIM: voice_server gọi generate() / create_voice_clone_prompt().
+    "omnivoice==0.2.1",
+    "accelerate>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -49,6 +53,14 @@ environments = [
     "sys_platform == 'win32' and platform_machine == 'AMD64'",
 ]
 conflicts = [[{ extra = "cpu" }, { extra = "gpu" }]]
+# omnivoice khai báo cả phụ thuộc của giao diện demo / huấn luyện (gradio, tensorboardX, webdataset) và librosa (chỉ để
+# đọc mp3 — voice_server đổi mọi file sang wav bằng ffmpeg trước). Phần đọc giọng không dùng -> không cài.
+override-dependencies = [
+    "gradio ; sys_platform == 'never'",
+    "tensorboardx ; sys_platform == 'never'",
+    "webdataset ; sys_platform == 'never'",
+    "librosa ; sys_platform == 'never'",
+]
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu126", extra = "gpu", marker = "sys_platform == 'win32'" }]

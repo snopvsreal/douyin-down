@@ -78,25 +78,26 @@ class VSError(Exception):
 
 
 def api(cfg: dict) -> str:
-    return (cfg.get("edit", {}).get("dub", {}).get("api") or "http://127.0.0.1:3900").rstrip("/")
+    from .services import vs_api
+    return vs_api(cfg)
 
 
 def _call(cfg: dict, method: str, path: str, timeout: float = 8.0, **kw) -> httpx.Response:
     try:
         r = httpx.request(method, api(cfg) + path, timeout=httpx.Timeout(timeout, connect=1.0), **kw)
     except httpx.ConnectError as e:
-        raise VSError("VoiceStudio đang tắt — bấm Bật ở trang VoiceStudio rồi thử lại") from e
+        raise VSError("Máy chủ giọng nói đang tắt — bấm Bật ở trang Giọng nói rồi thử lại") from e
     except httpx.TimeoutException as e:
-        raise VSError("VoiceStudio trả lời quá lâu — có thể đang bận đọc / nạp model, thử lại sau ít phút") from e
+        raise VSError("Máy chủ giọng nói trả lời quá lâu — có thể đang bận đọc / nạp model, thử lại sau ít phút") from e
     except httpx.HTTPError as e:
-        raise VSError(f"Không gọi được VoiceStudio: {e}") from e
+        raise VSError(f"Không gọi được máy chủ giọng nói: {e}") from e
     if r.status_code >= 400:
         try:
             d = r.json().get("detail")
             msg = d if isinstance(d, str) else json.dumps(d, ensure_ascii=False)
         except ValueError:
             msg = r.text
-        raise VSError(f"VoiceStudio báo lỗi {r.status_code}: {(msg or '').strip()[:300]}")
+        raise VSError(f"Máy chủ giọng nói báo lỗi {r.status_code}: {(msg or '').strip()[:300]}")
     return r
 
 

@@ -50,18 +50,23 @@ def ensure_tdl(cfg: dict, config_path: str = "config.yaml", wait: float = 90) ->
     return False
 
 
-# ---------------- VoiceStudio chạy ngầm ----------------
-# App VoiceStudio = vỏ Electron + backend Python (uvicorn, cổng 3900) trong thư mục runtime (máy người dùng:
-# C:\VoiceStudio\runtime\VoiceStudio). dytool chỉ gọi API của backend -> tự bật backend đó, không mở cửa sổ Electron.
-# Lệnh + biến môi trường chép đúng như app Electron bật (resolveSpawnPlan / childEnv trong resources/app.asar).
-# App VoiceStudio mở sau đó thấy cổng 3900 đã có backend thì dùng chung (không bật cái thứ 2).
+# ---------------- Máy chủ giọng nói (OmniVoice) chạy ngầm ----------------
+# dytool tự chạy model OmniVoice trong tiến trình riêng (voice_server.py, cổng 3910) — KHÔNG cần cài app VoiceStudio.
+# Giữ API giống backend VoiceStudio nên vs_api.py / dub.py gọi như cũ. Cổng khác 3900 để không đụng app VoiceStudio
+# nếu máy vẫn cài. config.yaml `edit.dub.api` trỏ máy khác / cổng khác thì dùng địa chỉ đó (không tự bật).
+VOICE_PORT = 3910
+_OLD_DEFAULT = "http://127.0.0.1:3900"
+
 
 def vs_api(cfg: dict) -> str:
-    return cfg.get("edit", {}).get("dub", {}).get("api", "http://127.0.0.1:3900").rstrip("/")
+    """Địa chỉ máy chủ giọng nói: cấu hình riêng (khác mặc định cũ của VoiceStudio) hoặc máy chủ của dytool."""
+    dub = cfg.get("edit", {}).get("dub", cfg if "api" in cfg and "edit" not in cfg else {})
+    api = str(dub.get("api") or "").strip().rstrip("/")
+    return api if api and api != _OLD_DEFAULT else f"http://127.0.0.1:{VOICE_PORT}"
 
 
 def vs_state(cfg: dict) -> str:
-    """'ok' (sẵn sàng đọc) · 'starting' (đã mở cổng, đang nạp — /health trả 503) · 'off'."""
+    """'ok' (máy chủ đã mở cổng — model có thể còn đang nạp, xem /model/status) · 'starting' · 'off'."""
     try:
         code = httpx.get(vs_api(cfg) + "/health", timeout=LOCAL_TIMEOUT).status_code
     except httpx.HTTPError:
@@ -69,44 +74,15 @@ def vs_state(cfg: dict) -> str:
     return "ok" if code < 500 else "starting"
 
 
-def vs_app_exe() -> Path | None:
-    """App desktop VoiceStudio (Electron) — cần cho lần đầu (tải model, chấp nhận license) và cập nhật runtime."""
-    import os
-    for base in (os.environ.get("LOCALAPPDATA", ""), os.environ.get("ProgramFiles", "")):
-        p = Path(base) / ("Programs" if "Local" in base else "") / "VoiceStudio" / "VoiceStudio.exe"
-        if base and p.exists():
-            return p
-    return None
+def vs_model_ready() -> bool:
+    from . import voice_model
+    return voice_model.ready()
 
 
-def vs_runtime() -> Path | None:
-    """Thư mục runtime VoiceStudio đã cài xong (có project/.venv + dấu .runtime-ready), hoặc None.
-    Vị trí do app ghi ở %APPDATA%\\VoiceStudio\\runtime-location.json (người dùng chọn lúc cài lần đầu)."""
-    import json
-    import os
-    if sys.platform != "win32":
-        return None
-    roots = []
-    try:
-        loc = json.loads((Path(os.environ.get("APPDATA", "")) / "VoiceStudio" / "runtime-location.json")
-                         .read_text("utf-8-sig"))
-        if isinstance(loc.get("root"), str) and loc["root"].strip():
-            roots.append(Path(loc["root"].strip()))
-    except (OSError, ValueError, AttributeError):
-        pass
-    roots += [Path(r"C:\VoiceStudio\runtime\VoiceStudio"),
-              Path(os.environ.get("LOCALAPPDATA", "")) / "VoiceStudio" / "runtime"]
-    for root in roots:
-        project = root / "project"
-        if (project / ".venv" / "Scripts" / "python.exe").exists() and (project / ".runtime-ready").exists():
-            return root
-    return None
-
-
-_vs_proc: subprocess.Popen | None = None     # backend VoiceStudio do dytool bật
-_vs_used = 0.0                               # lần cuối worker cần VoiceStudio (để tự tắt khi rảnh lâu)
+_vs_proc: subprocess.Popen | None = None     # máy chủ giọng nói do dytool bật
+_vs_used = 0.0                               # lần cuối cần giọng nói (để tự tắt khi rảnh lâu)
 _vs_started = 0.0                            # lúc bật gần nhất
-_vs_retry_at = 0.0                           # backend chết ngay sau khi bật -> chờ tới lúc này mới bật lại
+_vs_retry_at = 0.0                           # vừa bật đã chết -> chờ tới lúc này mới bật lại
 
 
 def vs_ours_running() -> bool:
@@ -114,9 +90,9 @@ def vs_ours_running() -> bool:
 
 
 def start_voicestudio(cfg: dict) -> str:
-    """Bật backend VoiceStudio chạy ngầm, KHÔNG chờ (mở cổng ~12 s, nạp model lần đọc đầu ~1 phút). Trả 'ok' / 'starting' / 'missing'
-    (chưa cài / chưa cài xong runtime — phải mở app VoiceStudio 1 lần) / 'remote' (api không phải máy này) /
-    'crashed' (vừa bật đã chết — xem data/voicestudio.log; 10 phút sau mới thử lại, không bật lại liên tục)."""
+    """Bật máy chủ giọng nói chạy ngầm, KHÔNG chờ (mở cổng vài giây, nạp model ~15–30 s). Trả 'ok' / 'starting' /
+    'missing' (chưa có model — đã bắt đầu tải ở nền) / 'remote' (api đặt ở máy khác) / 'crashed' (vừa bật đã chết —
+    xem data/voicestudio.log; 10 phút sau mới thử lại)."""
     global _vs_proc, _vs_started, _vs_retry_at
     import os
     from urllib.parse import urlparse
@@ -127,43 +103,30 @@ def start_voicestudio(cfg: dict) -> str:
     u = urlparse(vs_api(cfg))
     if u.hostname not in ("127.0.0.1", "localhost"):
         return "remote"
-    root = vs_runtime()
-    if root is None:
+    if not vs_model_ready():
+        from . import voice_model
+        voice_model.ensure_background()       # 3,3 GB — tải xong lần sau bật được
         return "missing"
     if _vs_proc is not None and _vs_proc.poll() is not None and time.time() - _vs_started < 300:
         _vs_retry_at = time.time() + 600
         _vs_proc = None
     if time.time() < _vs_retry_at:
         return "crashed"
-    project = root / "project"
-    port = str(u.port or 3900)
-    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV")}
-    for k, v in {"OMNIVOICE_DATA_DIR": root / "data", "OMNIVOICE_CACHE_DIR": root / "models",
-                 "TEMP": root / "tmp", "TMP": root / "tmp", "TMPDIR": root / "tmp"}.items():
-        if not env.get(k, "").strip():
-            env[k] = str(v)
-    (root / "tmp").mkdir(exist_ok=True)
-    env.update(PYTHONUNBUFFERED="1", PYTHONUTF8="1", OMNIVOICE_DESKTOP_CONTAINED="1", OMNIVOICE_PORT=port,
-               TORCHDYNAMO_DISABLE="1", HF_HUB_DISABLE_SYMLINKS="1", HF_HUB_DISABLE_SYMLINKS_WARNING="1")
-    env.setdefault("FOR_DISABLE_CONSOLE_CTRL_HANDLER", "1")
-    exe = vs_app_exe()
-    if exe:                                   # giao diện web + uv đi kèm app (backend phục vụ giao diện ở cổng 3900)
-        res = exe.parent / "resources"
-        if (res / "frontend" / "dist").is_dir():
-            env.setdefault("OMNIVOICE_FRONTEND_DIST", str(res / "frontend" / "dist"))
-        if (res / "tools" / "uv.exe").exists():
-            env.setdefault("OMNIVOICE_BUNDLED_UV", str(res / "tools" / "uv.exe"))
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONHOME", "PYTHONPATH")}
+    env.update(PYTHONUNBUFFERED="1", PYTHONUTF8="1", TORCHDYNAMO_DISABLE="1", HF_HUB_OFFLINE="1",
+               HF_HUB_DISABLE_TELEMETRY="1")
     log_path = ROOT / "data" / "voicestudio.log"
     log_path.parent.mkdir(exist_ok=True)
     with open(log_path, "a", encoding="utf-8") as log:   # tiến trình con giữ handle riêng
-        log.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} dytool bật VoiceStudio chạy ngầm ({project}) =====\n")
+        log.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} dytool bật máy chủ giọng nói (OmniVoice) =====\n")
         log.flush()
-        _vs_proc = subprocess.Popen(
-            [str(project / ".venv" / "Scripts" / "python.exe"), "-m", "uvicorn", "main:app", "--app-dir", "backend",
-             "--host", "127.0.0.1", "--port", port],
-            # OMNIVOICE_DESKTOP_CONTAINED=1: backend coi stdin là dây sống — ống stdin đóng (dytool thoát, kể cả bị tắt
-            # ngang) thì backend tự thoát. stdin=DEVNULL -> EOF ngay -> backend thoát mã 0 không ghi gì
-            cwd=str(project), env=env, stdout=log, stderr=log, stdin=subprocess.PIPE)
+        # python (không phải pythonw) vẫn không hiện cửa sổ: __init__ đặt CREATE_NO_WINDOW cho mọi Popen.
+        # stdin=PIPE là dây sống: dytool thoát (kể cả bị tắt ngang) -> ống đóng -> máy chủ tự thoát, trả VRAM
+        exe = Path(sys.executable)
+        if exe.name.lower() == "pythonw.exe" and (exe.parent / "python.exe").exists():
+            exe = exe.parent / "python.exe"
+        _vs_proc = subprocess.Popen([str(exe), "-m", "dytool.voice_server", "--port", str(u.port or VOICE_PORT)],
+                                    cwd=str(ROOT), env=env, stdout=log, stderr=log, stdin=subprocess.PIPE)
     _vs_started = time.time()
     return "starting"
 
@@ -174,13 +137,13 @@ def vs_touch() -> None:
 
 
 def stop_voicestudio() -> bool:
-    """Tắt backend VoiceStudio do dytool bật (cả cây). Backend do app VoiceStudio bật thì không đụng."""
+    """Tắt máy chủ giọng nói do dytool bật (đóng dây sống stdin; không thoát thì tắt cả cây)."""
     global _vs_proc
     p = _vs_proc
     if p is None or p.poll() is not None:
         return False
     try:
-        p.stdin.close()                       # đóng dây sống -> backend tự thoát (tắt cả tiến trình engine con)
+        p.stdin.close()
         p.wait(20)
     except Exception:
         try:
@@ -191,23 +154,10 @@ def stop_voicestudio() -> bool:
     return True
 
 
-def _vs_app_open() -> bool:
-    try:
-        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq VoiceStudio.exe", "/NH"], capture_output=True,
-                             text=True, timeout=10).stdout
-    except Exception:
-        return True
-    return "VoiceStudio.exe" in out
-
-
 def vs_idle_stop(cfg: dict) -> bool:
-    """Rảnh lâu (mặc định 20 phút, edit.dub.idle_stop_minutes; 0 = không tắt) -> tắt backend do dytool bật để trả
-    VRAM / RAM. App VoiceStudio đang mở (người dùng đang dùng giao diện, dùng chung backend) thì để nguyên."""
+    """Rảnh lâu (mặc định 20 phút, đặt ở trang Giọng nói; 0 = không tắt) -> tắt máy chủ giọng nói để trả VRAM / RAM."""
     minutes = vs_idle_minutes(cfg)
     if minutes <= 0 or not vs_ours_running() or time.time() - _vs_used < minutes * 60:
-        return False
-    if _vs_app_open():
-        vs_touch()
         return False
     return stop_voicestudio()
 
@@ -273,11 +223,12 @@ def vs_info(cfg: dict) -> dict:
 
 def _vs_probe(cfg: dict) -> dict:
     api = vs_api(cfg)
-    out = {"state": vs_state(cfg), "api": api, "ours": vs_ours_running(), "runtime": str(vs_runtime() or ""),
-           "app": str(vs_app_exe() or ""), "idle": vs_idle_minutes(cfg),
-           "idle_left": None}
-    if out["state"] == "off" and not out["runtime"]:
-        out["state"] = "missing"
+    from . import voice_model
+    dl = voice_model.state()
+    out = {"state": vs_state(cfg), "api": api, "ours": vs_ours_running(), "idle": vs_idle_minutes(cfg),
+           "idle_left": None, "download": dl}
+    if out["state"] == "off" and dl.get("phase") != "ready":
+        out["state"] = "missing"              # chưa có model: đang tải / chưa tải / tải lỗi (xem download)
     if out["ours"] and out["idle"]:
         out["idle_left"] = max(0, int(out["idle"] * 60 - (time.time() - _vs_used)))
     t = httpx.Timeout(4.0, connect=0.3)

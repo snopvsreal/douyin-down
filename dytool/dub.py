@@ -61,7 +61,8 @@ def page_voices(s: dict) -> dict:
 class VoiceStudio:
     def __init__(self, cfg: dict):
         self.cfg = cfg
-        self.api = cfg.get("api", "http://127.0.0.1:3900").rstrip("/")
+        from .services import vs_api
+        self.api = vs_api(cfg)
         self.http = httpx.Client(timeout=300)
         self.voice = cfg.get("voice", "dytool-vi")
 
@@ -69,7 +70,7 @@ class VoiceStudio:
         try:
             self.http.get(self.api + "/health", timeout=5).raise_for_status()
         except httpx.HTTPError as e:
-            raise DubError(f"Không kết nối được VoiceStudio tại {self.api}. Bật VoiceStudio (chip VoiceStudio trên cùng) rồi thử lại.") from e
+            raise DubError(f"Không kết nối được máy chủ giọng nói tại {self.api}. Bật ở chip Giọng nói trên cùng rồi thử lại.") from e
 
     REF_TEXT = ("Xin chào các bạn, hôm nay mình sẽ kể cho các bạn nghe một câu chuyện rất thú vị. "
                 "Nhớ theo dõi đến cuối video nhé.")
@@ -93,7 +94,7 @@ class VoiceStudio:
         if any(p.get("name", "").lower() == name.lower() or p.get("id") == name for p in profiles):
             return name
         if spec.get("fixed"):        # giọng chọn sẵn trong thư viện (Cài đặt kênh) đã bị xoá -> không tự sinh giọng khác
-            raise DubError(f"Giọng '{name}' không còn trong VoiceStudio: chọn giọng khác ở Cài đặt kênh › Edit & lồng tiếng")
+            raise DubError(f"Giọng '{name}' không còn trong Giọng đã lưu: chọn giọng khác ở Cài đặt kênh › Edit & lồng tiếng")
         ref_path = spec.get("ref_audio")          # file giọng mẫu của bạn (tuỳ chọn, cần có quyền dùng giọng)
         ref_text = spec.get("ref_text", "")
         if not ref_path:
@@ -131,7 +132,7 @@ class VoiceStudio:
             body["num_step"] = int(self.cfg["num_step"])
         r = self.http.post(self.api + "/v1/audio/speech", json=body)
         if r.status_code != 200:
-            raise DubError(f"VoiceStudio lỗi {r.status_code}: {r.text[:300]}")
+            raise DubError(f"Máy chủ giọng nói lỗi {r.status_code}: {r.text[:300]}")
         raw = dest.with_suffix(".raw.wav")
         raw.write_bytes(r.content)
         # chỉ cắt lặng ĐẦU; đuôi chỉ bỏ phần im lặng hẳn (-60dB) dài hơn 0.15s để giữ âm cuối tắt dần
@@ -258,7 +259,7 @@ def dub_audio(video: Path, segments: list[dict], work: Path, cfg: dict,
     windows = [((utts[i + 1]["start"] if i + 1 < len(utts) else total) - u["start"]) for i, u in enumerate(utts)]
     progress.step("Dịch sang tiếng Việt (Claude)", f"{len(utts)} lượt nói")
     texts = translate_utterances([u["text"] for u in utts], windows, sub_cfg, asr=[u["asr"] for u in utts])
-    progress.step("Lồng tiếng (VoiceStudio)")
+    progress.step("Lồng tiếng (OmniVoice)")
 
     clip_dir = work / f"{video.stem}_tts"
     clip_dir.mkdir(exist_ok=True)

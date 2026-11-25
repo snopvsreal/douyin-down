@@ -1,10 +1,9 @@
-"""Tự cập nhật ngay trong app: dytool, VoiceStudio.
+"""Tự cập nhật ngay trong app: dytool. (Lồng tiếng giờ chạy model OmniVoice ngay trong dytool — không còn app
+VoiceStudio để cập nhật; model ghim bản ở voice_model.py.)
 
-Kiểm tra: GitHub releases/latest của từng app (lúc mở app + mỗi 6 giờ) so với bản đang cài
-(dytool: metadata gói; VoiceStudio: DisplayVersion trong danh sách phần mềm của Windows).
+Kiểm tra: GitHub releases/latest (lúc mở app + mỗi 6 giờ) so với bản đang cài (metadata gói).
 Cập nhật: tải file cài chính thức trong bản phát hành -> so SHA256 với mã GitHub công bố (asset.digest) -> không khớp
 hoặc không có mã thì KHÔNG cài -> cài im lặng:
-- VoiceStudio: đóng app (không khi đang edit/lồng tiếng) -> /S -> mở lại nếu trước đó đang mở
 (Trình duyệt ShardX nhúng qua SDK shardx: nhân tự cập nhật khi mở app — browsers.install_engine_background.)
 - dytool: chạy trình cài /SILENT /RELAUNCH: trình cài tự đóng dytool, hiện tiến độ, cài xong tự mở lại dytool
 """
@@ -24,8 +23,6 @@ CHECK_EVERY = 6 * 3600
 
 APPS = {
     "dytool": {"name": "dytool", "repo": "snopvsreal/douyin-down", "asset": r"^dytool-Setup-[\d.]+\.exe$"},
-    "voicestudio": {"name": "VoiceStudio", "repo": "debpalash/VoiceStudio", "asset": r"^VoiceStudio-[\d.]+-win-x64\.exe$",
-                    "reg": r"^VoiceStudio( \d|$)"},
 }
 
 _lock = threading.Lock()
@@ -227,30 +224,9 @@ def busy_reason(app: str) -> str | None:
     """Lý do chưa nên cập nhật ngay lúc này (None = được)."""
     from . import progress
     task = progress.STATE.get("task")
-    if app == "voicestudio" and task and task.get("kind") == "edit":
-        return "đang edit / lồng tiếng 1 video — đợi xong rồi cập nhật"
     if app == "dytool" and task and task.get("kind") == "upload":
         return "đang đăng 1 video — cập nhật lúc này (đóng app) có thể làm bài bị đăng dở / đăng trùng, đợi xong"
     return None
-
-
-def _install_voicestudio(exe: Path) -> None:
-    from . import services
-    was_open = _kill("VoiceStudio.exe")
-    # backend dytool bật chạy ngầm cũng tắt: bản mới chép code backend vào thư mục runtime ở lần app chạy đầu tiên
-    # -> mở app lại sau khi cài để app cập nhật runtime (worker dùng chung backend app bật)
-    was_open = services.stop_voicestudio() or was_open
-    _set("voicestudio", "installing", "Đang cài VoiceStudio…")
-    rc = subprocess.run([str(exe), "/S"]).returncode
-    if rc not in (0, 3010):
-        raise RuntimeError(f"trình cài VoiceStudio báo lỗi (mã {rc})")
-    if was_open:
-        import os
-        for base in (Path(os.environ.get("LOCALAPPDATA", "")) / "Programs", Path(os.environ.get("ProgramFiles", ""))):
-            vs = base / "VoiceStudio" / "VoiceStudio.exe"
-            if vs.exists():
-                subprocess.Popen([str(vs)], cwd=str(vs.parent))
-                break
 
 
 def _install_dytool(exe: Path) -> None:
@@ -292,7 +268,7 @@ def start(app: str) -> str | None:
     def run():
         try:
             exe = _download(app, info)
-            {"voicestudio": _install_voicestudio, "dytool": _install_dytool}[app](exe)
+            {"dytool": _install_dytool}[app](exe)
             if app != "dytool":
                 _inst_cache.pop(app, None)       # đọc lại bản đang cài ngay (không đợi hết 60 giây)
                 _set(app, "done", f"Đã cập nhật lên {info['version']}")

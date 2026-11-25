@@ -52,11 +52,11 @@ edit:
     font: Be Vietnam Pro ExtraBold   # đóng gói ở dytool/assets/fonts
     font_size_pct: 0.046      # cỡ chữ = 4.6% chiều cao video (tự ngắt ≤ 2 dòng, không cắt đôi từ ghép)
     margin_v_pct: 0.18        # khoảng cách sub tới đáy (% chiều cao)
-  # Lồng tiếng Việt bằng VoiceStudio (https://github.com/debpalash/VoiceStudio) — mở app trước khi chạy
+  # Lồng tiếng Việt: model OmniVoice (github.com/k2-fsa/OmniVoice) chạy ngay trong dytool — không cần cài app nào
   dub:
     enabled: true
-    api: http://127.0.0.1:3900
-    model: omnivoice            # engine TTS trong VoiceStudio
+    # api: http://127.0.0.1:3910   # bỏ trống = dytool tự chạy máy chủ giọng nói; điền địa chỉ khác nếu chạy ở máy khác
+    model: omnivoice
     gender: auto                # auto = tự nhận giọng nam/nữ từng câu theo giọng gốc | male | female
     # Giọng cho từng giới tính. Tool tự tạo profile (thiết kế bằng OmniVoice theo instruct + seed) nếu chưa có.
     # Muốn dùng giọng thật: điền ref_audio (file 5-15s, giọng bạn có quyền sử dụng) + ref_text.
@@ -75,7 +75,7 @@ edit:
     # Nhịp đọc (học từ giọng đọc tiếng Việt thật — xem dytool/phrasing.py)
     merge_gap: 0.35             # các câu gốc cách nhau < 0.35s được gom thành 1 lượt đọc liền
     max_utterance: 10           # 1 lượt đọc tối đa 10s
-    max_rate_boost: 1.2         # cho phép đọc nhanh hơn tốc độ tự nhiên tối đa 1.2x (qua duration của VoiceStudio)
+    max_rate_boost: 1.2         # cho phép đọc nhanh hơn tốc độ tự nhiên tối đa 1.2x (qua tham số duration của OmniVoice)
     max_shorten: 2              # vẫn dài -> Claude rút gọn rồi đọc lại, tối đa 2 lần
     max_drift: 0.6              # giọng được trễ tối đa 0.6s so với hình
     num_step: 32                # chất lượng giọng OmniVoice (16 = nhanh, 32 = đẹp hơn)

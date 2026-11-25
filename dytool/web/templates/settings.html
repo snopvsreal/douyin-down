@@ -25,13 +25,12 @@
       <div hx-get="/partials/ai" hx-trigger="load" hx-swap="outerHTML"><p class="hint">Đang kiểm tra…</p></div>
     </div>
     <div class="set-row">
-      <div class="set-label"><b>VoiceStudio</b>
-        <p class="hint">Đọc lời lồng tiếng Việt. Tool tự bật VoiceStudio chạy ngầm (không mở cửa sổ) khi có video cần lồng
-          tiếng, rảnh 20 phút thì tắt để trả RAM / VRAM.</p></div>
+      <div class="set-label"><b>Giọng nói</b>
+        <p class="hint">Đọc lời lồng tiếng Việt bằng model OmniVoice chạy ngay trong dytool (không cần cài VoiceStudio).
+          Tự bật khi có video cần lồng tiếng, rảnh 20 phút thì tắt để trả RAM / VRAM.</p></div>
       <div><button class="btn" hx-post="/services/voicestudio" hx-swap="none" hx-disabled-elt="this">Bật ngay</button>
-        <button class="btn" hx-post="/services/voicestudio-app" hx-swap="none" hx-disabled-elt="this">Mở app VoiceStudio</button>
-        <p class="hint">Mở app khi cần: lần đầu (Model Catalogue → chấp nhận license OmniVoice), quản lý giọng. Trạng thái
-          xem ở chip VoiceStudio trên cùng.</p></div>
+        <a class="btn" href="/voicestudio">Mở trang Giọng nói</a>
+        <p class="hint">Trạng thái, tải model lần đầu (3,3 GB), giọng đã lưu: trang Giọng nói / chip Giọng nói trên cùng.</p></div>
     </div>
   </div>
 </section>

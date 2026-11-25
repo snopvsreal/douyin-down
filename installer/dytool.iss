@@ -48,13 +48,10 @@ Name: "vi"; MessagesFile: "installer\Vietnamese.isl"
 [CustomMessages]
 vi.DesktopIcon=Tạo biểu tượng dytool trên Desktop
 vi.Shortcuts=Biểu tượng:
-vi.Extras=Thành phần đi kèm (tải từ trang chính thức):
-vi.TaskVoice=VoiceStudio — app lồng tiếng Việt (cần có để lồng tiếng)
 vi.OpenApp=Mở dytool
-vi.OpenVoice=Mở VoiceStudio (lần đầu: Model Catalogue → chấp nhận license OmniVoice)
 vi.Reinstall=dytool - Cài đặt lại thư viện
 vi.LibTitle=Đang cài thư viện
-vi.LibDesc=Tải Python, AI, FFmpeg… (~4 GB). Lần đầu mất 15–30 phút và cần mạng — đừng tắt máy.
+vi.LibDesc=Tải Python, AI, FFmpeg, model giọng nói… (~7 GB). Lần đầu mất 15–30 phút và cần mạng — đừng tắt máy.
 vi.LibStart=Đang chuẩn bị…
 vi.LibStep=Bước %1/7 · %2
 vi.Step1=Công cụ quản lý Python (uv)
@@ -63,7 +60,7 @@ vi.Step3=FFmpeg (xử lý video)
 vi.Step4=Trình duyệt chống phát hiện (~200 MB)
 vi.Step5=Bộ tải video Douyin
 vi.Step6=Cấu hình và model AI (~1.5 GB)
-vi.Step7=VoiceStudio (lồng tiếng Việt)
+vi.Step7=Model giọng nói lồng tiếng (~3.3 GB)
 vi.Closing=Đang đóng dytool đang chạy…
 vi.NoWebView2=Máy này chưa có Microsoft Edge WebView2 Runtime — thành phần cửa sổ dytool dùng để hiện giao diện.%n%nCài luôn trong lúc cài dytool? (trình cài tải bản chính thức của Microsoft, miễn phí, khoảng 150 MB)%n%nChọn Không: dytool vẫn chạy, giao diện mở trong trình duyệt.
 vi.WebView2Installing=Đang cài Microsoft Edge WebView2 Runtime…
@@ -73,7 +70,6 @@ vi.LibFail=Cài thư viện chưa xong (mã lỗi %1).%n%nKiểm tra mạng rồ
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "{cm:Shortcuts}"
-Name: "voicestudio"; Description: "{cm:TaskVoice}"; GroupDescription: "{cm:Extras}"; Check: VoiceMissing
 
 [Files]
 Source: "build\dytool.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -98,9 +94,6 @@ Name: "{autodesktop}\dytool"; Filename: "{app}\dytool.exe"; WorkingDir: "{app}";
 [Run]
 ; Bước cài thư viện chạy ẩn trong CurStepChanged (dưới), tiến độ hiện ngay trên thanh của trình cài
 Filename: "{app}\dytool.exe"; Description: "{cm:OpenApp}"; Flags: postinstall nowait skipifsilent
-; vừa cài VoiceStudio ở lần cài này (đã tick ở trang Thành phần) -> mở luôn lần đầu
-Filename: "{code:VoiceExe}"; Description: "{cm:OpenVoice}"; Tasks: voicestudio; Check: VoiceInstalled; \
-  Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
 ; Xoá phần tải về lúc cài (vài GB). GIỮ data\ và config.yaml (tài khoản, cookie, video) — xoá tay nếu muốn.
@@ -119,24 +112,6 @@ const
 
 var
   LibStep: Integer;
-
-function VoiceExe(Param: String): String;
-begin
-  Result := ExpandConstant('{localappdata}\Programs\VoiceStudio\VoiceStudio.exe');
-  if not FileExists(Result) then Result := ExpandConstant('{commonpf64}\VoiceStudio\VoiceStudio.exe');
-end;
-
-// trang Hoàn tất: chỉ hiện ô "Mở …" khi phần mềm đã cài xong thật (tải lỗi thì không hiện)
-function VoiceInstalled: Boolean;
-begin
-  Result := FileExists(VoiceExe(''));
-end;
-
-function VoiceMissing: Boolean;
-begin
-  Result := not (FileExists(ExpandConstant('{localappdata}\Programs\VoiceStudio\VoiceStudio.exe')) or
-                 FileExists(ExpandConstant('{commonpf64}\VoiceStudio\VoiceStudio.exe')));
-end;
 
 // Mỗi dòng setup_app.ps1 in ra: "▸ N/7  Tên bước" -> nhảy thanh tiến độ + tiêu đề; dòng khác -> dòng chi tiết
 procedure LibOnLog(const S: String; const Error, FirstLine: Boolean);
@@ -183,8 +158,6 @@ begin
   WizardForm.ProgressGauge.Max := STEPS * PER_STEP;
   WizardForm.ProgressGauge.Position := 0;
   Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\setup_app.ps1') + '" -Wizard';
-  // cài im lặng (/VERYSILENT): không tự cài phần mềm bên thứ ba
-  if (not WizardSilent) and WizardIsTaskSelected('voicestudio') then Params := Params + ' -WithVoiceStudio';
   try
     Ok := ExecAndLogOutput(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
                            ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, RC, @LibOnLog);

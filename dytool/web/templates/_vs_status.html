@@ -1,4 +1,4 @@
-{# Trạng thái VoiceStudio (trang /voicestudio) — tự hỏi lại 3 s / lần; services.vs_info trả kết quả cũ ngay, hỏi lại ở nền #}
+{# Trạng thái máy chủ giọng nói (trang /voicestudio) — tự hỏi lại 3 s / lần; services.vs_info trả kết quả cũ ngay, hỏi lại ở nền #}
 {% set st = info.state %}
 {% set h = info.health or {} %}
 {% set m = info.model or {} %}
@@ -9,13 +9,15 @@
       {% if st == 'ok' and m.get('loaded') %}<span class="pill ok">Sẵn sàng lồng tiếng</span>
       {% elif st == 'ok' %}<span class="pill warn">Đang nạp model giọng{{ ' · ' ~ m.progress ~ '%' if m.get('progress') }}</span>
       {% elif st == 'starting' %}<span class="pill warn">Đang bật…</span>
-      {% elif st == 'missing' %}<span class="pill err">{{ 'Chưa cài' if not info.app else 'Cần cài nốt' }}</span>
+      {% elif st == 'missing' %}{% set dl = info.download or {} %}<span class="pill {{ 'warn' if dl.phase in ('downloading', 'verifying') else 'err' }}">{{ {'downloading': 'Đang tải model', 'verifying': 'Đang kiểm tra model', 'error': 'Tải model lỗi'}.get(dl.phase, 'Chưa có model') }}</span>
       {% else %}<span class="pill">Đang tắt</span>{% endif %}
       <p class="hint" style="margin-top:8px">
-        {% if st == 'ok' and m.get('loaded') %}Video của kênh bật lồng tiếng sẽ được đọc bằng VoiceStudio này.
+        {% if st == 'ok' and m.get('loaded') %}Video của kênh bật lồng tiếng sẽ được đọc bằng giọng ở đây.
         {% elif st == 'ok' %}{{ m.get('detail') or 'Đang nạp model vào card đồ hoạ…' }}
         {% elif st == 'starting' %}{{ (info.boot or {}).get('label') or 'Đang khởi động backend (15 giây – 1 phút)…' }}
-        {% elif st == 'missing' %}{{ 'Cài VoiceStudio rồi mở app 1 lần.' if not info.app else 'Mở app VoiceStudio 1 lần: tải model, chấp nhận license OmniVoice.' }}
+        {% elif st == 'missing' %}{% set dl = info.download or {} %}{% if dl.phase in ('downloading', 'verifying') %}{{ '%.1f'|format((dl.done or 0) / 1e9) }} / {{ '%.1f'|format((dl.total or 0) / 1e9) }} GB — tải 1 lần, xong thì tự dùng được.
+          <progress max="{{ dl.total or 1 }}" value="{{ dl.done or 0 }}" style="display:block; width:100%; margin-top:6px"></progress>
+          {% elif dl.phase == 'error' %}{{ dl.error }}{% else %}Lồng tiếng cần model OmniVoice (3,3 GB, tải 1 lần từ Hugging Face, kiểm tra mã băm; máy có VoiceStudio thì dùng lại model của nó).{% endif %}
         {% else %}Tool tự bật khi có video cần lồng tiếng. Bấm Bật nếu muốn dùng ngay.{% endif %}</p>
     </div>
     <div class="vs-actions">
@@ -23,10 +25,10 @@
         <button class="btn primary" hx-post="/voicestudio/start" hx-swap="none" hx-disabled-elt="this">Bật</button>
       {% elif st in ('ok', 'starting') %}
         <button class="btn" hx-post="/voicestudio/restart" hx-swap="none" hx-disabled-elt="this"
-                hx-confirm="Khởi động lại VoiceStudio? Mất khoảng 1 phút để nạp lại model.">Khởi động lại</button>
+                hx-confirm="Khởi động lại máy chủ giọng nói? Mất khoảng 30 giây để nạp lại model.">Khởi động lại</button>
         <button class="btn" hx-post="/voicestudio/stop" hx-swap="none" hx-disabled-elt="this">Tắt</button>
-      {% elif st == 'missing' and info.app %}
-        <button class="btn primary" hx-post="/services/voicestudio-app" hx-swap="none" hx-disabled-elt="this">Mở app VoiceStudio</button>
+      {% elif st == 'missing' and (info.download or {}).phase not in ('downloading', 'verifying') %}
+        <button class="btn primary" hx-post="/services/voice-model" hx-swap="none" hx-disabled-elt="this">{{ 'Tải lại' if (info.download or {}).phase == 'error' else 'Tải model' }}</button>
       {% endif %}
     </div>
   </div>
@@ -35,7 +37,7 @@
     <dt>Thiết bị</dt><dd>{{ h.get('device') or '—' }}</dd>
     <dt>Phiên bản</dt><dd>{{ h.get('version') or '—' }}</dd>
     <dt>Model</dt><dd>{{ m.get('checkpoint') or '—' }}</dd>
-    <dt>Bật bởi</dt><dd>{{ 'dytool (chạy ngầm, không cửa sổ)' if info.ours else 'app VoiceStudio' }}</dd>
+    <dt>Bật bởi</dt><dd>{{ 'dytool (chạy ngầm, không cửa sổ)' if info.ours else 'ngoài dytool (' ~ info.api ~ ')' }}</dd>
     {% if info.ours %}<dt>Tự tắt</dt><dd>{% if not info.idle %}không tự tắt{% elif info.idle_left is not none %}sau {{ (info.idle_left // 60) + 1 }} phút nữa nếu không dùng{% endif %}</dd>{% endif %}
   </dl>
   {% endif %}

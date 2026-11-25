@@ -176,28 +176,23 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                 return httpx.get(url, timeout=LOCAL_TIMEOUT).status_code < 500
             except httpx.HTTPError:
                 return False
-        urls = {"tdl": cfg["douyin"]["api"].rstrip("/") + "/docs",
-                "voicestudio": cfg["edit"].get("dub", {}).get("api", "http://127.0.0.1:3900") + "/health"}
+        from .. import services
+        urls = {"tdl": cfg["douyin"]["api"].rstrip("/") + "/docs", "voicestudio": services.vs_api(cfg) + "/health"}
         with ThreadPoolExecutor(2) as ex:
             v = dict(zip(urls, ex.map(ok, urls.values())))
-        from .. import services
-        # 'ok' / 'starting' (backend dytool bật đang nạp) / 'off'; 'missing' = chưa cài xong runtime (mở app 1 lần)
+        # 'ok' / 'starting' (máy chủ giọng nói đang bật) / 'off'; 'missing' = chưa có model (đang / chưa tải)
         v["vs"] = ("ok" if v["voicestudio"] else "starting" if services.vs_ours_running()
-                   else "off" if services.vs_runtime() else "missing")
+                   else "off" if services.vs_model_ready() else "missing")
         health_cache.update(at=time.time(), v=v)
         return v
 
     def _sub_cfg() -> dict:
         return cfg["edit"].setdefault("subtitles", {})
 
-    def voicestudio_exe() -> Path | None:
-        from ..services import vs_app_exe
-        return vs_app_exe()
-
     # ---------------- Màn hình khởi động (app desktop) ----------------
     # Mở app: bật hết dịch vụ (song song) rồi mới vào màn hình chính -> lúc màn hình chính hiện là mọi thứ đã sẵn sàng.
     # Không tự bật chạy tự động: người dùng tự bấm "Chạy tự động" (lúc đó mới bật backend tải / VoiceStudio).
-    STARTUP_STEPS = [("ui", "Giao diện"), ("vs", "VoiceStudio (lồng tiếng)"),
+    STARTUP_STEPS = [("ui", "Giao diện"), ("vs", "Giọng nói (lồng tiếng)"),
                      ("browser", "Trình duyệt (nhân ShardX)"), ("douyin", "Đăng nhập Douyin"), ("ai", "AI dịch / viết lời")]
     startup: dict = {"begun": False, "done": False, "at": 0.0,
                      "steps": {k: {"name": n, "state": "wait", "detail": ""} for k, n in STARTUP_STEPS}}
@@ -218,11 +213,12 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         _st("vs", "run", "đang kiểm tra…")
         if urlparse_host(services.vs_api(cfg)) not in LOCAL_HOSTS:
             _st("vs", "ok", f"đặt ở máy khác ({services.vs_api(cfg)})")
-        elif services.vs_runtime():
-            _st("vs", "ok", "đã cài — tự bật khi chạy tự động có video cần lồng tiếng")
+        elif services.vs_model_ready():
+            _st("vs", "ok", "sẵn sàng — tự bật khi có video cần lồng tiếng")
         else:
-            _st("vs", "warn", "chưa cài xong — mở app VoiceStudio 1 lần (tải model, chấp nhận license)" if voicestudio_exe()
-                else "chưa cài — cần cho lồng tiếng (Cài đặt › VoiceStudio)")
+            from .. import voice_model
+            voice_model.ensure_background()      # lấy từ VoiceStudio cũ (nếu có) hoặc tải 3,3 GB ở nền, không chờ
+            _st("vs", "warn", "đang tải model giọng nói ở nền (3,3 GB) — xem tiến độ ở trang Giọng nói")
 
     def _step_browser():
         from .. import browsers
@@ -320,7 +316,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     def vs_page(request: Request, tab: str = "", v: str = "", star: int = 0, reuse: str = ""):
         from .. import services, vs_api
         tab = tab if tab in VS_TABS else ""
-        ctx: dict = {"info": services.vs_info(cfg), "tab": tab, "vs_installed": bool(voicestudio_exe()),
+        ctx: dict = {"info": services.vs_info(cfg), "tab": tab,
                      "jobs": _vs_jobs, "va": vs_api, "err": "", "v": v}
         if tab in ("speak", "voices", "history") and ctx["info"]["state"] == "ok":
             try:
@@ -392,11 +388,11 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     def vs_stop():
         from .. import services
         if _editing():
-            return PlainTextResponse("Đang edit / lồng tiếng 1 video — đợi xong (hoặc bấm Dừng) rồi tắt VoiceStudio.", 400)
+            return PlainTextResponse("Đang edit / lồng tiếng 1 video — đợi xong (hoặc bấm Dừng) rồi tắt giọng nói.", 400)
         if services.stop_voicestudio():
-            return _vs_done("Đã tắt VoiceStudio chạy ngầm")
+            return _vs_done("Đã tắt máy chủ giọng nói")
         if services.vs_state(cfg) != "off":
-            return PlainTextResponse("VoiceStudio này do app VoiceStudio bật — tắt bằng cách đóng app VoiceStudio.", 400)
+            return PlainTextResponse("Máy chủ giọng nói này không do dytool bật (đặt ở máy khác) — tắt trên máy đó.", 400)
         return _vs_done()
 
     @app.post("/voicestudio/restart")
@@ -405,9 +401,9 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         if _editing():
             return PlainTextResponse("Đang edit / lồng tiếng 1 video — đợi xong rồi khởi động lại.", 400)
         if not services.stop_voicestudio() and services.vs_state(cfg) != "off":
-            return PlainTextResponse("VoiceStudio này do app VoiceStudio bật — khởi động lại trong app VoiceStudio.", 400)
+            return PlainTextResponse("Máy chủ giọng nói này không do dytool bật (đặt ở máy khác) — khởi động lại trên máy đó.", 400)
         services.start_voicestudio(cfg)
-        return _vs_done("Đang khởi động lại VoiceStudio chạy ngầm")
+        return _vs_done("Đang khởi động lại máy chủ giọng nói")
 
     @app.post("/voicestudio/idle")
     def vs_idle(minutes: int = Form(...)):
@@ -438,7 +434,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             vs_api.flush_memory(cfg)
         except vs_api.VSError as e:
             return PlainTextResponse(str(e), 400)
-        return _vs_done("Đã giải phóng bộ nhớ card đồ hoạ của VoiceStudio (model nạp lại khi cần đọc)")
+        return _vs_done("Đã giải phóng bộ nhớ card đồ hoạ (model giọng nói nạp lại khi cần đọc)")
 
     # ----- việc chạy nền (đọc thử / tạo giọng nói / nghe thử giọng thiết kế): ô kết quả tự hỏi lại -----
     _vs_jobs: dict = {}         # khoá -> {"state": "run"|"ok"|"err", "msg", "at", "label", "file"}
@@ -487,7 +483,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     def _vs_ready() -> PlainTextResponse | None:
         from .. import services
         if services.vs_state(cfg) != "ok":
-            return PlainTextResponse("VoiceStudio chưa sẵn sàng — bấm Bật ở trang VoiceStudio rồi đợi chấm xanh.", 400)
+            return PlainTextResponse("Giọng nói chưa sẵn sàng — bấm Bật ở trang Giọng nói rồi đợi chấm xanh.", 400)
         return None
 
     @app.post("/voicestudio/test", response_class=HTMLResponse)
@@ -591,7 +587,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             vs_api.save_take(cfg, hid, name)
         except vs_api.VSError as e:
             return PlainTextResponse(str(e), 400)
-        store.log(f"VoiceStudio: đã lưu bản đọc thành giọng '{name.strip()}'")
+        store.log(f"Giọng nói: đã lưu bản đọc thành giọng '{name.strip()}'")
         if request.headers.get("HX-Request") == "true":
             return HTMLResponse("", headers={"HX-Redirect": "/voicestudio?tab=voices"})
         return RedirectResponse("/voicestudio?tab=voices", 303)
@@ -661,7 +657,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                                     str(form.get("ref_text", "")), lang if lang in dict(vs_api.LANGS) else "vi")
         except vs_api.VSError as e:
             return PlainTextResponse(str(e), 400)
-        return _vs_back(f"VoiceStudio: đã nhân bản giọng '{form.get('name')}'")
+        return _vs_back(f"Giọng nói: đã nhân bản giọng '{form.get('name')}'")
 
     @app.post("/voicestudio/voices/design-preview", response_class=HTMLResponse)
     async def vs_design_preview(request: Request):
@@ -688,7 +684,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                                     vs_api.instruct_of(extra=str(form.get("vd_extra", "")), **_vd(form)), seed)
         except vs_api.VSError as e:
             return PlainTextResponse(str(e), 400)
-        return _vs_back(f"VoiceStudio: đã lưu giọng thiết kế '{name.strip()}'")
+        return _vs_back(f"Giọng nói: đã lưu giọng thiết kế '{name.strip()}'")
 
     @app.post("/voicestudio/voices/{vid}/rename")
     def vs_voice_rename(vid: str, name: str = Form("")):
@@ -716,7 +712,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             vs_api.delete_profile(cfg, vid)
         except vs_api.VSError as e:
             return PlainTextResponse(str(e), 400)
-        return _vs_back(f"VoiceStudio: đã xoá giọng '{prof.get('name')}'")
+        return _vs_back(f"Giọng nói: đã xoá giọng '{prof.get('name')}'")
 
     def _safe_profiles() -> list[dict]:
         from .. import vs_api
@@ -775,7 +771,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             vs_api.clear_history(cfg)
         except vs_api.VSError as e:
             return PlainTextResponse(str(e), 400)
-        return _vs_back("VoiceStudio: đã xoá lịch sử tạo giọng nói", "history")
+        return _vs_back("Giọng nói: đã xoá lịch sử tạo giọng nói", "history")
 
     # ---------------- App desktop ----------------
     @app.post("/app/show")
@@ -788,28 +784,27 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
 
     @app.post("/services/voicestudio")
     def start_voicestudio():
-        """Bật VoiceStudio chạy ngầm (chỉ backend, không cửa sổ). Chưa cài xong runtime -> mở app để cài nốt."""
+        """Bật máy chủ giọng nói chạy ngầm (không cửa sổ). Chưa có model -> bắt đầu tải ở nền."""
         from .. import services
         r = services.start_voicestudio(cfg)
         health_cache["at"] = 0
         if r == "starting":
-            store.log("Đang bật VoiceStudio chạy ngầm — sẵn sàng sau khoảng 15 giây – 1 phút")
+            store.log("Đang bật máy chủ giọng nói — sẵn sàng sau khoảng 15–30 giây")
         elif r == "missing":
-            return open_voicestudio_app()
+            store.log("Chưa có model giọng nói — đang tải ở nền (3,3 GB), xong thì bấm Bật lại")
         elif r == "remote":
-            store.log(f"VoiceStudio đặt ở máy khác ({services.vs_api(cfg)}) — bật trên máy đó", "error")
+            store.log(f"Máy chủ giọng nói đặt ở máy khác ({services.vs_api(cfg)}) — bật trên máy đó", "error")
+        elif r == "crashed":
+            store.log("Máy chủ giọng nói vừa bật đã tắt — xem Nhật ký ở trang Giọng nói (thử lại sau 10 phút)", "error")
         return HTMLResponse("", headers={"HX-Trigger": "services-changed"})
 
-    @app.post("/services/voicestudio-app")
-    def open_voicestudio_app():
-        """Mở app VoiceStudio (cửa sổ): lần đầu tải model / chấp nhận license, quản lý giọng. Backend dytool đang bật
-        thì app dùng chung backend đó."""
-        exe = voicestudio_exe()
-        if exe:
-            subprocess.Popen([str(exe)], cwd=str(exe.parent))
-            store.log("Đang mở app VoiceStudio — chờ khoảng 1–3 phút để app khởi động xong")
-        else:
-            store.log("Không tìm thấy VoiceStudio — cài từ https://github.com/debpalash/VoiceStudio/releases", "error")
+    @app.post("/services/voice-model")
+    def download_voice_model():
+        """Tải model giọng nói (OmniVoice, 3,3 GB) ở nền — dùng lại bản của app VoiceStudio nếu máy có."""
+        from .. import voice_model
+        voice_model.ensure_background()
+        health_cache["at"] = 0
+        store.log("Đang tải model giọng nói ở nền (3,3 GB)")
         return HTMLResponse("", headers={"HX-Trigger": "services-changed"})
 
     # ---------------- AI qua CLI (Claude / Codex / Gemini) — không dùng API key ----------------
@@ -884,12 +879,17 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                              "AND p.enabled=1 AND p.settings LIKE '%\"dub_enabled\": true%'")["n"]
         vs = health().get("vs")
         if dub_wait and vs == "missing":
-            todo.append({"kind": "vs", "n": dub_wait, "title": "Chờ VoiceStudio",
-                         "sub": "Video cần lồng tiếng — mở app VoiceStudio 1 lần để cài nốt (tải model)",
-                         "action": "/services/voicestudio-app", "btn": "Mở VoiceStudio"})
+            from .. import voice_model
+            dl = voice_model.state()
+            busy = dl.get("phase") in ("downloading", "verifying")
+            todo.append({"kind": "vs", "n": dub_wait, "title": "Chờ model giọng nói",
+                         "sub": (f"Đang tải model lồng tiếng: {dl.get('done', 0) / 1e9:.1f} / {dl.get('total', 0) / 1e9:.1f} GB"
+                                 if busy else f"Tải lỗi: {dl.get('error')}" if dl.get("phase") == "error"
+                                 else "Video cần lồng tiếng — tải model giọng nói (3,3 GB, 1 lần)"),
+                         **({} if busy else {"action": "/services/voice-model", "btn": "Tải model"})})
         elif dub_wait and vs == "off" and not (app.state.worker and app.state.worker.running):
-            todo.append({"kind": "vs", "n": dub_wait, "title": "Chờ VoiceStudio", "sub": "Video cần lồng tiếng — VoiceStudio đang tắt",
-                         "action": "/services/voicestudio", "btn": "Bật VoiceStudio"})
+            todo.append({"kind": "vs", "n": dub_wait, "title": "Chờ lồng tiếng", "sub": "Video cần lồng tiếng — máy chủ giọng nói đang tắt",
+                         "action": "/services/voicestudio", "btn": "Bật giọng nói"})
         if need_key:
             todo.append({"kind": "key", "n": None, "title": "Chưa cài AI", "sub": "Cài và đăng nhập Claude / Codex / Gemini CLI để dịch, lồng tiếng",
                          "href": "/settings#ai", "btn": "Cài AI"})
@@ -963,7 +963,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     def services_partial(request: Request):
         from .. import progress, updates
         from ..cookies import cookie_status
-        return render(request, "_services.html", health=health(), vs_installed=bool(voicestudio_exe()),
+        return render(request, "_services.html", health=health(), 
                       task=progress.snapshot(), n_updates=updates.pending(),
                       douyin=cookie_status(cfg["douyin"].get("cookie", "")), dy_logging_in=_alive("douyin"))
 

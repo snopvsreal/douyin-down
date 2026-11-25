@@ -1,16 +1,16 @@
 {% extends "base.html" %}
-{% block title %}VoiceStudio{% endblock %}
-{% block crumb %}Hệ thống › <b>VoiceStudio</b>{% endblock %}
+{% block title %}Giọng nói{% endblock %}
+{% block crumb %}Hệ thống › <b>Giọng nói</b>{% endblock %}
 {% block body %}
 {% set st = info.state %}
 {% set names = {} %}{% for pr in profiles %}{% set _ = names.update({pr.id: pr.name}) %}{% endfor %}
 <div class="head">
-  <div><h1>VoiceStudio</h1>
-    <p class="sub">Đọc văn bản, nhân bản / thiết kế giọng, quản lý giọng và lịch sử — ngay trong dytool. dytool tự bật
-      VoiceStudio chạy ngầm khi cần (không mở cửa sổ).</p></div>
+  <div><h1>Giọng nói</h1>
+    <p class="sub">Đọc văn bản, nhân bản / thiết kế giọng, quản lý giọng và lịch sử — ngay trong dytool — model OmniVoice
+      chạy trên máy này, không cần cài app nào khác. Tự bật khi cần (không mở cửa sổ).</p></div>
 </div>
 
-<nav class="filters" aria-label="Mục VoiceStudio">
+<nav class="filters" aria-label="Mục Giọng nói">
   {% for k, label in (('', 'Tổng quan'), ('speak', 'Tạo giọng nói'), ('voices', 'Giọng đã lưu'), ('history', 'Lịch sử'), ('pron', 'Phát âm'), ('log', 'Nhật ký')) %}
     <a href="/voicestudio{{ '?tab=' ~ k if k }}" class="pill {{ 'on' if tab == k }}" {{ 'aria-current=page' if tab == k }}>{{ label }}</a>
   {% endfor %}
@@ -19,11 +19,11 @@
 {% if tab in ('speak', 'voices', 'history', 'pron') and st != 'ok' %}
   {% include "_vs_status.html" %}
   <div hx-get="/partials/vs-ready" hx-trigger="every 3s [!document.hidden]" hx-swap="none"></div>
-  <p class="hint">Mục này cần VoiceStudio đang chạy — bấm <b>Bật</b> rồi đợi chấm xanh (khoảng 1 phút), trang tự hiện.</p>
+  <p class="hint">Mục này cần máy chủ giọng nói đang chạy — bấm <b>Bật</b> rồi đợi chấm xanh (khoảng 30 giây), trang tự hiện.</p>
 
 {% elif tab in ('speak', 'voices', 'history', 'pron') and err %}
   {% from "_macros.html" import empty %}
-  {% call empty('box', 'Không lấy được dữ liệu từ VoiceStudio', act='<a class="btn sm" href="/voicestudio?tab=' ~ tab ~ '">Thử lại</a>') %}{{ err }}{% endcall %}
+  {% call empty('box', 'Không lấy được dữ liệu giọng nói', act='<a class="btn sm" href="/voicestudio?tab=' ~ tab ~ '">Thử lại</a>') %}{{ err }}{% endcall %}
 
 {# ======================= Tạo giọng nói ======================= #}
 {% elif tab == 'speak' %}
@@ -240,7 +240,7 @@
     <p class="hint">Chưa đánh dấu bản đọc nào — bấm ngôi sao ở bản đọc để giữ lại dễ tìm.</p>
   {% else %}
     {% from "_macros.html" import empty %}
-    {% call empty('clock', 'Chưa có bản đọc nào', act='<a class="btn sm primary" href="/voicestudio?tab=speak">Tạo giọng nói</a>') %}Văn bản bạn cho VoiceStudio đọc sẽ lưu ở đây để nghe lại / tải về.{% endcall %}
+    {% call empty('clock', 'Chưa có bản đọc nào', act='<a class="btn sm primary" href="/voicestudio?tab=speak">Tạo giọng nói</a>') %}Văn bản bạn cho đọc sẽ lưu ở đây để nghe lại / tải về.{% endcall %}
   {% endif %}
 
 {# ======================= Từ điển phát âm ======================= #}
@@ -248,7 +248,7 @@
   <div class="grid g2" style="align-items:start">
     <form class="card" method="post" action="/voicestudio/pron/add" hx-disabled-elt="find button">
       <h3 style="margin:0 0 4px">Thêm từ</h3>
-      <p class="hint" style="margin-top:0">VoiceStudio thay từ bằng cách đọc trước khi đọc — áp dụng cho mọi giọng, cả lồng
+      <p class="hint" style="margin-top:0">Thay từ bằng cách đọc trước khi đọc — áp dụng cho mọi giọng, cả lồng
         tiếng video. Hợp với tên riêng, từ viết tắt, tiếng Anh (vd. <code>TikTok</code> → <code>tích tốc</code>).</p>
       <div class="grid g2" style="gap:0 10px">
         <div><label for="pr-term">Từ / cụm từ</label><input id="pr-term" type="text" name="term" maxlength="100" required autocomplete="off"></div>
@@ -295,7 +295,7 @@
     <div hx-get="/partials/vs-log" hx-trigger="load, every 4s [!document.hidden]" hx-swap="innerHTML" class="vs-log-wrap">
       <pre class="vs-log">Đang tải…</pre></div>
   </div>
-  <p class="hint">Nhật ký backend VoiceStudio do dytool bật (<code>data/voicestudio.log</code>), 120 dòng cuối, tự cập nhật.</p>
+  <p class="hint">Nhật ký máy chủ giọng nói (OmniVoice) do dytool bật (<code>data/voicestudio.log</code>), 120 dòng cuối, tự cập nhật.</p>
 
 {# ======================= Tổng quan ======================= #}
 {% else %}
@@ -335,7 +335,7 @@
       <div class="set-row">
         <div class="set-label"><b>Tự tắt khi rảnh</b>
           <p class="hint">Không có video cần lồng tiếng trong khoảng này thì tắt để trả RAM / VRAM. Cần lại thì tool tự bật
-            (mất khoảng 1 phút).</p></div>
+            (mất khoảng 30 giây).</p></div>
         <form hx-post="/voicestudio/idle" hx-trigger="change" hx-swap="none">
           <label for="vs-idle" class="sr-only">Tự tắt sau</label>
           <select id="vs-idle" name="minutes" class="auto">
@@ -364,18 +364,12 @@
       </div>
       {% endif %}
       <div class="set-row">
-        <div class="set-label"><b>App VoiceStudio</b>
-          <p class="hint">Chỉ cần lần đầu (cài runtime, tải model, chấp nhận license). Mọi việc khác làm ngay ở trang này.</p></div>
-        <div>{% if vs_installed %}<button class="btn" hx-post="/services/voicestudio-app" hx-swap="none" hx-disabled-elt="this">Mở app VoiceStudio</button>
-          {% else %}<a class="btn" href="https://github.com/debpalash/VoiceStudio/releases/latest" target="_blank" rel="noopener">Tải VoiceStudio</a>{% endif %}</div>
-      </div>
-      {% if info.runtime %}
-      <div class="set-row">
-        <div class="set-label"><b>Thư mục</b></div>
-        <dl class="kv" style="margin:0"><dt>Runtime</dt><dd><code>{{ info.runtime }}</code></dd>
+        <div class="set-label"><b>Model</b>
+          <p class="hint">OmniVoice (k2-fsa, giấy phép Apache-2.0). Giọng mẫu, lịch sử, từ điển phát âm lưu trong
+            <code>data/voice</code>.</p></div>
+        <dl class="kv" style="margin:0"><dt>Thư mục</dt><dd><code>data/models/omnivoice</code></dd>
           <dt>Địa chỉ</dt><dd><code>{{ info.api }}</code></dd></dl>
       </div>
-      {% endif %}
     </div>
   </section>
 {% endif %}

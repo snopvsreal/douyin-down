@@ -317,7 +317,7 @@
       </div>
       <label class="check"><input type="checkbox" name="hflip" {{ 'checked' if s.hflip }}> Lật ngang</label>
       <label class="check"><input type="checkbox" name="subs_enabled" {{ 'checked' if s.subs_enabled }}> Phụ đề tiếng Việt</label>
-      <label class="check"><input type="checkbox" name="dub_enabled" {{ 'checked' if s.dub_enabled }}> Lồng tiếng Việt (cần mở VoiceStudio)</label>
+      <label class="check"><input type="checkbox" name="dub_enabled" {{ 'checked' if s.dub_enabled }}> Lồng tiếng Việt</label>
       <label class="check"><input type="checkbox" name="dub_text_only" {{ 'checked' if s.dub_text_only }}>
         <span>Lồng tiếng cả video chỉ có chữ, không có lời (đọc phụ đề thành giọng)</span></label>
       <label for="tsrc">Lấy lời để dịch từ</label>
@@ -346,11 +346,11 @@
             <select id="vp-{{ g }}" name="voice_{{ g }}_profile">
               <option value="">Thiết kế theo mô tả bên dưới</option>
               {% for pr in lib %}<option value="{{ pr.name }}" {{ 'selected' if cur == pr.name }}>{{ pr.name }}</option>{% endfor %}
-              {% if cur and cur not in lib|map(attribute='name')|list %}<option value="{{ cur }}" selected>{{ cur }} (không thấy trong VoiceStudio)</option>{% endif %}
+              {% if cur and cur not in lib|map(attribute='name')|list %}<option value="{{ cur }}" selected>{{ cur }} (không thấy trong Giọng đã lưu)</option>{% endif %}
             </select></div>
         {% endfor %}
       </div>
-      <p class="hint">Giọng có sẵn lấy từ <a href="/voicestudio?tab=voices">VoiceStudio › Giọng đã lưu</a> (nhân bản từ file
+      <p class="hint">Giọng có sẵn lấy từ <a href="/voicestudio?tab=voices">Giọng nói › Giọng đã lưu</a> (nhân bản từ file
         ghi âm hoặc thiết kế rồi nghe thử ở đó).</p>
       <label for="vm">Mô tả giọng nam</label>
       <input type="text" autocomplete="off" id="vm" name="voice_male" value="{{ s.voice_male }}">

@@ -86,8 +86,8 @@ def _start_server():
     threading.Thread(target=server.run, name="dytool-server", daemon=True).start()
     for _ in range(150):                      # chờ server lên (tối đa ~30s)
         if server.started:
-            # việc nền khi mở app (model giọng nói, kiểm tra cập nhật) — không chờ, vào thẳng trang chính; chạy tự
-            # động KHÔNG tự bật (web/app.py begin_startup)
+            # màn hình khởi động /startup: bật sẵn backend tải Douyin + máy chủ giọng nói, chờ sẵn sàng rồi vào trang
+            # chính; chạy tự động KHÔNG tự bật (web/app.py begin_startup)
             app.state.begin_startup()
             return app, server
         time.sleep(0.2)
@@ -135,7 +135,7 @@ def _browser_mode(app, server, pystray, Image) -> None:
     import webbrowser
 
     def open_ui(*_):
-        webbrowser.open(URL + "/")
+        webbrowser.open(URL + "/startup")       # đang khởi động: tiến độ; xong rồi: tự vào trang chính
 
     if app:
         app.state.show_window = open_ui          # mở dytool.exe lần 2 -> mở lại tab giao diện
@@ -392,7 +392,7 @@ def main() -> None:
 
     window.events.closing += on_closing
     window.events.shown += lambda: _style_window(window)
-    window.events.shown += lambda: threading.Thread(target=load_ui, args=(URL + "/",), daemon=True).start()
+    window.events.shown += lambda: threading.Thread(target=load_ui, args=(URL + "/startup",), daemon=True).start()
     window.events.maximized += lambda: api._push()
     window.events.restored += lambda: api._push()
     window.events.shown += lambda: _allow_close_on_shutdown(state)

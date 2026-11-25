@@ -10,7 +10,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -189,37 +189,150 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     def _sub_cfg() -> dict:
         return cfg["edit"].setdefault("subtitles", {})
 
-    # ---------------- Việc nền khi mở app desktop ----------------
-    # (Màn hình khởi động /startup đã bỏ — người dùng yêu cầu: mở app vào thẳng trang chính.) Chỉ khởi động việc nền,
-    # KHÔNG chờ, KHÔNG bật backend nào (backend tải Douyin / máy chủ giọng nói bật khi bắt đầu chạy tự động hoặc khi
-    # 1 việc cần tới), KHÔNG tự bật chạy tự động. Douyin / AI chưa sẵn sàng thì trang Hôm nay đã nhắc ở "Cần bạn xử lý".
-    def begin_startup():
-        if app.state.startup_begun:
+    # ---------------- Màn hình khởi động (app desktop) ----------------
+    # Mở app: BẬT SẴN backend tải Douyin + máy chủ giọng nói (người dùng yêu cầu 2026-11-25: "khởi động backend trước
+    # khi vào app") rồi mới vào màn hình chính — chạy song song, chờ tới khi dùng được. Nút "Vào luôn" không phải chờ.
+    # KHÔNG tự bật chạy tự động. Máy chủ giọng nói vẫn tự tắt khi rảnh theo cài đặt ở trang Giọng nói (cả khi chạy
+    # tự động đang tắt — _idle_watch).
+    STARTUP_STEPS = [("ui", "Giao diện"), ("tdl", "Bộ tải video Douyin"), ("vs", "Giọng nói (lồng tiếng)"),
+                     ("browser", "Trình duyệt (nhân ShardX)"), ("douyin", "Đăng nhập Douyin"), ("ai", "AI dịch / viết lời")]
+    startup: dict = {"begun": False, "done": False, "at": 0.0,
+                     "steps": {k: {"name": n, "state": "wait", "detail": ""} for k, n in STARTUP_STEPS}}
+
+    def _st(key: str, state: str | None = None, detail: str | None = None) -> None:
+        step = startup["steps"][key]
+        if state:
+            step["state"] = state
+        if detail is not None:
+            step["detail"] = detail
+
+    def _step_tdl():
+        from .. import services
+        _st("tdl", "run", "đang bật (cổng 5555)…")
+        if services.tdl_alive(cfg):
+            _st("tdl", "ok", "đang chạy")
             return
-        app.state.startup_begun = True
+        if services.ensure_tdl(cfg, wait=120):
+            _st("tdl", "ok", "đã bật")
+        else:
+            _st("tdl", "err", "bật chưa được — xem data/tdl_server.log (tool tự thử lại khi cần tải)")
+
+    def _step_vs():
+        from .. import services
+        api = services.vs_api(cfg)
+        if urlparse_host(api) not in LOCAL_HOSTS:
+            _st("vs", "ok", f"đặt ở máy khác ({api})")
+            return
+        if not services.vs_model_ready():
+            from .. import voice_model
+            voice_model.ensure_background()      # lấy từ VoiceStudio cũ (nếu có) hoặc tải 3,3 GB ở nền, không chờ
+            _st("vs", "warn", "chưa có model — đang tải ở nền (3,3 GB), xem tiến độ ở trang Giọng nói")
+            return
+        _st("vs", "run", "đang bật máy chủ giọng nói…")
+        r = services.start_voicestudio(cfg)
+        if r == "crashed":
+            _st("vs", "err", "bật lên rồi tắt ngay — xem Nhật ký ở trang Giọng nói")
+            return
+        deadline = time.time() + 180
+        while time.time() < deadline:
+            try:
+                m = httpx.get(api + "/model/status", timeout=httpx.Timeout(3.0, connect=0.3)).json()
+            except (httpx.HTTPError, ValueError):
+                m = None
+            if m and m.get("loaded"):
+                _st("vs", "ok", f"sẵn sàng ({m.get('device') == 'cuda' and 'card đồ hoạ' or 'CPU'})")
+                return
+            if m and m.get("error"):
+                _st("vs", "err", m["error"][:200])
+                return
+            _st("vs", "run", (m or {}).get("detail") or "đang khởi động…")
+            if not services.vs_ours_running() and services.vs_state(cfg) == "off":
+                _st("vs", "err", "máy chủ giọng nói đã tắt — xem Nhật ký ở trang Giọng nói")
+                return
+            time.sleep(1.5)
+        _st("vs", "warn", "nạp model lâu hơn thường lệ — vẫn đang nạp ở nền")
+
+    def _step_browser():
+        from .. import browsers
+        t = browsers.install_engine_background()
+        if browsers.engine_installed():
+            _st("browser", "ok", "")         # kiểm tra bản mới tiếp ở nền
+            return
+        _st("browser", "run", "tải nhân lần đầu (~440 MB)…")
+        t.join(900)
+        _st("browser", "ok" if browsers.engine_installed() else "err",
+            "" if browsers.engine_installed() else "chưa tải được — xem Cài đặt › Trình duyệt")
+
+    def _step_douyin():
+        from ..cookies import cookie_status
+        _st("douyin", "run", "")
+        dy = cookie_status(cfg["douyin"].get("cookie", ""))
+        if not dy["logged_in"]:
+            _st("douyin", "warn", "hết hạn — đăng nhập lại" if dy.get("expired") else "chưa đăng nhập")
+        elif dy["days_left"] is not None and dy["days_left"] < 7:
+            _st("douyin", "warn", f"còn {dy['days_left']} ngày — nên gia hạn")
+        else:
+            _st("douyin", "ok", f"còn {dy['days_left']} ngày" if dy["days_left"] is not None else "")
+
+    def _step_ai():
+        from .. import ai
+        _st("ai", "run", "")
+        p = ai.active()
+        if p and ai.ready():
+            _st("ai", "ok", ai.PROVIDERS[p]["name"])
+        else:
+            _st("ai", "warn", "chưa cài / chưa đăng nhập — dùng dịch máy (Cài đặt › AI)")
+
+    def _idle_watch():
+        """Máy chủ giọng nói bật lúc mở app: rảnh lâu thì tắt (theo trang Giọng nói) cả khi chạy tự động đang tắt —
+        vòng lặp worker chỉ làm việc này lúc chạy tự động bật."""
+        from .. import services
+        while True:
+            time.sleep(60)
+            w = app.state.worker
+            if w is not None and w.running:
+                continue
+            try:
+                if services.vs_idle_stop(cfg):
+                    store.log("Rảnh lâu -> tắt máy chủ giọng nói (tự bật lại khi có video cần lồng tiếng)")
+            except Exception as e:
+                store.log(f"Tắt máy chủ giọng nói lỗi: {e}", "error")
+
+    def begin_startup():
+        if startup["begun"]:
+            return
+        startup.update(begun=True, at=time.time())
+        _st("ui", "ok")
 
         def run():
-            from .. import services, updates, voice_model
-            # (nhân trình duyệt: create_app đã gọi browsers.install_engine_background)
-            for name, job in (
-                # model giọng nói chưa có: lấy từ VoiceStudio cũ (nếu có) hoặc tải 3,3 GB ở nền
-                ("model giọng nói", lambda: urlparse_host(services.vs_api(cfg)) in LOCAL_HOSTS
-                 and not services.vs_model_ready() and voice_model.ensure_background()),
-                ("kiểm tra cập nhật", updates.start_background_checks),
-            ):
-                try:
-                    job()
-                except Exception as e:      # 1 việc lỗi không được chặn cả app
-                    store.log(f"Khởi động: {name} lỗi — {e}", "error")
-        threading.Thread(target=run, daemon=True, name="dytool-startup").start()
+            from concurrent.futures import ThreadPoolExecutor
+            jobs = {"tdl": _step_tdl, "vs": _step_vs, "browser": _step_browser, "douyin": _step_douyin, "ai": _step_ai}
 
-    app.state.startup_begun = False
+            def safe(key):
+                try:
+                    jobs[key]()
+                except Exception as e:      # 1 dịch vụ lỗi không được chặn cả app
+                    _st(key, "err", str(e)[:200])
+            with ThreadPoolExecutor(len(jobs)) as pool:
+                list(pool.map(safe, jobs))
+            from .. import updates
+            updates.start_background_checks()
+            startup["done"] = True
+        threading.Thread(target=run, daemon=True, name="dytool-startup").start()
+        threading.Thread(target=_idle_watch, daemon=True, name="vs-idle-watch").start()
+
     app.state.begin_startup = begin_startup
 
-    @app.get("/startup")
-    def startup_page():
-        """Đường dẫn cũ (bản trước mở app vào /startup) -> trang chính."""
-        return RedirectResponse("/", 303)
+    @app.get("/startup", response_class=HTMLResponse)
+    def startup_page(request: Request):
+        if not startup["begun"] or startup["done"]:
+            return RedirectResponse("/", 303)
+        return tpl.TemplateResponse(request, "startup.html", {"steps": startup["steps"]})
+
+    @app.get("/startup/status")
+    def startup_status():
+        return JSONResponse({"done": startup["done"], "elapsed": int(time.time() - startup["at"]),
+                             "steps": [{"key": k, **v} for k, v in startup["steps"].items()]})
 
     # ---------------- Trang VoiceStudio: điều khiển + toàn bộ tính năng VoiceStudio bằng giao diện dytool ----------------
     # (không nhúng giao diện của VoiceStudio — mọi trang gọi API backend qua vs_api.py)

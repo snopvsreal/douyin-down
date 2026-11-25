@@ -33,7 +33,7 @@
     <div class="row" style="gap:8px; align-items:flex-start">
       <div style="flex:1; min-width:0">
         <h2 id="vv-title" style="margin:0 0 4px">{{ v.page_name }} <span class="tag {{ 'tt' if tt }}">{{ 'TikTok' if tt else 'Facebook' }}</span></h2>
-        <span class="pill {{ cls }}">{{ STATUS_VI.get(v.status, v.status) }}</span>
+        <span class="pill {{ cls }}">{{ status_vi(v.status, v.platform) }}</span>
       </div>
       <button type="button" class="btn icon ghost" data-vv-close aria-label="Đóng">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style="fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
@@ -62,8 +62,13 @@
       {% set head, hint = (v.error.split(' — ', 1) + [''])[:2] %}
       {% set title, tech = (head.split(': ', 1) + [''])[:2] %}
       <div class="notice {{ 'err' if v.status == 'failed' else 'warn' }}" style="margin:10px 0 0">
+        {% if v.error.startswith('Không thấy bài trên') %}
+        {# lý do lấy đúng như nền tảng báo -> hiện thẳng, không giấu vào "Chi tiết kỹ thuật" #}
+        <div><b>{{ title }}</b>{% if tech %}: {{ tech }}{% endif %}{% if hint %}<div class="small" style="margin-top:4px">{{ hint }}</div>{% endif %}</div>
+        {% else %}
         <div><b>{{ title }}</b>{% if hint %} — {{ hint }}{% endif %}
-          {% if tech %}<details class="vv-tech"><summary>Chi tiết kỹ thuật</summary><code>{{ tech }}</code></details>{% endif %}</div></div>
+          {% if tech %}<details class="vv-tech"><summary>Chi tiết kỹ thuật</summary><code>{{ tech }}</code></details>{% endif %}</div>
+        {% endif %}</div>
     {% endif %}
 
     {% if can_review %}
@@ -88,16 +93,23 @@
           <a class="btn sm" target="_blank" rel="noopener"
              href="https://business.facebook.com/latest/posts/scheduled_posts?asset_id={{ v.asset_id }}">Xem bài đã lên lịch trên Facebook ↗</a>
         {% endif %}
-      {% elif v.status == 'uploaded' and v.fb_url %}
-        <a class="btn sm" target="_blank" rel="noopener" href="{{ v.fb_url }}">Xem bài đã đăng ↗</a>
-      {% elif v.status == 'uploaded' and not tt %}
-        <a class="btn sm" target="_blank" rel="noopener"
-           href="https://business.facebook.com/latest/posts/published_posts?asset_id={{ v.asset_id }}">Bài đã đăng trên Facebook ↗</a>
+      {% elif v.status == 'uploaded' and post_url(v.fb_url) %}
+        <a class="btn sm" target="_blank" rel="noopener" href="{{ post_url(v.fb_url) }}">Xem bài đã đăng ↗</a>
+      {% elif v.status == 'uploaded' %}
+        <button class="btn sm ghost" hx-post="/pages/{{ v.page_id }}/fetch-links" hx-swap="outerHTML" hx-disabled-elt="this"
+                title="Đọc danh sách bài trên {{ 'TikTok Studio' if tt else 'Facebook' }} để lấy link bài này (tự làm vài phút sau giờ đăng)">Lấy link bài</button>
+        {% if not tt %}<a class="btn sm ghost" target="_blank" rel="noopener"
+           href="https://business.facebook.com/latest/posts/published_posts?asset_id={{ v.asset_id }}">Bài đã đăng trên Facebook ↗</a>{% endif %}
+      {% endif %}
+      {% if v.status == 'uploaded' and v.error and v.error.startswith('Không thấy bài trên') %}
+        <button class="btn sm ghost" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/dismiss-missing" hx-swap="outerHTML"
+                hx-disabled-elt="this" title="Đã kiểm tra trên nền tảng — ẩn cảnh báo này">Bỏ cảnh báo</button>
       {% endif %}
     </div>
     {% if v.status == 'scheduled' and not tt %}
       <p class="hint" style="margin-top:8px">Bài hẹn giờ <b>chưa hiện trên trang Page</b> cho tới đúng giờ đăng — nó nằm trong
-        Meta Business Suite › Nội dung › <b>Đã lên lịch</b>. Muốn đổi giờ hoặc huỷ thì làm ở đó.</p>
+        Meta Business Suite › Nội dung › <b>Đã lên lịch</b>. Muốn đổi giờ hoặc huỷ thì làm ở đó. Qua giờ đăng, dytool tự
+        đổi sang <b>Đã đăng</b> rồi lấy link bài.</p>
     {% endif %}
   </div>
 </div>

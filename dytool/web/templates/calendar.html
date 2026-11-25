@@ -2,7 +2,7 @@
 {% block title %}Lịch đăng{% endblock %}
 {% block crumb %}Làm việc › <b>Lịch đăng</b>{% endblock %}
 {% block body %}
-{% from "_macros.html" import empty %}
+{% from "_macros.html" import empty, plat_icon, chan_av %}
 {% set pq = ('&page=' ~ cur_page) if cur_page else '' %}
 <div class="head">
   <div><h1>Lịch đăng</h1>
@@ -37,23 +37,27 @@
 {% if view == 'list' %}
 {# ---- danh sách lịch sắp đăng (thay cho bảng Lịch đăng cũ ở trang Duyệt video) ---- #}
 <div class="card table-card">
-  <table>
+  <table class="sched-table">
+    <colgroup><col class="c-time"><col class="c-chan"><col><col class="c-st"><col class="c-act"></colgroup>
     <tr><th>Giờ đăng</th><th>Kênh</th><th>Caption</th><th>Trạng thái</th><th></th></tr>
     {% for v in listing %}
+    {% set tt = v.platform == 'tiktok' %}
     <tr>
       <td class="num nowrap"><b>{{ vnt(v.scheduled_at, '%H:%M') }}</b> <span class="small muted">{{ vnt(v.scheduled_at, '%d/%m') }}</span></td>
-      <td class="small">{{ v.page_name }}{% if v.platform == 'tiktok' %} <span class="tag tt">TikTok</span>{% endif %}</td>
+      <td class="small"><span class="sched-chan" title="{{ v.page_name }} · {{ 'TikTok' if tt else 'Facebook' }}">
+        {{ chan_av(v.page_id, v.page_name, tt, size=22) }}<span class="trunc">{{ v.page_name }}</span></span></td>
       <td class="small"><button type="button" class="vv-open" data-vview="{{ v.page_id }}:{{ v.id }}" title="Xem lại video">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7-4.5z"/></svg><span class="trunc">{{ v.caption }}</span></button></td>
-      <td><span class="pill {{ 'ok' if v.status == 'scheduled' else 'info' }}">{{ STATUS_VI[v.status] }}</span></td>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.5v9l7-4.5z"/></svg><span class="trunc">{{ v.caption or '—' }}</span></button></td>
+      {# nền tảng đã có ở icon góc ảnh kênh -> nhãn ngắn, nhãn đầy đủ ở title #}
+      <td><span class="pill {{ 'ok' if v.status == 'scheduled' else 'info' }}" title="{{ status_vi(v.status, v.platform) }}">{{ status_vi(v.status) }}</span></td>
       <td class="cell-end">
         {% if v.status == 'schedule_pending' %}
-          <button class="btn sm ghost danger" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/unschedule" hx-swap="outerHTML"
+          <button class="btn sm ghost danger" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/unschedule" hx-swap="outerHTML" data-confirm-ok="Huỷ lịch"
                   hx-disabled-elt="this" hx-confirm="Huỷ lịch đăng lúc {{ vnt(v.scheduled_at, '%H:%M %d/%m') }}? Video quay lại Hộp duyệt.">Huỷ lịch</button>
-        {% elif v.platform == 'tiktok' %}
-          <a class="btn sm ghost" target="_blank" rel="noopener" href="https://www.tiktok.com/tiktokstudio/content">TikTok Studio ↗</a>
+        {% elif tt %}
+          <a class="btn sm ghost" target="_blank" rel="noopener" href="https://www.tiktok.com/tiktokstudio/content" title="Xem trong TikTok Studio">Mở ↗</a>
         {% else %}
-          <a class="btn sm ghost" target="_blank" rel="noopener" href="https://business.facebook.com/latest/posts/scheduled_posts?asset_id={{ v.asset_id }}">Đã lên lịch trên Facebook ↗</a>
+          <a class="btn sm ghost" target="_blank" rel="noopener" href="https://business.facebook.com/latest/posts/scheduled_posts?asset_id={{ v.asset_id }}" title="Xem bài đã lên lịch trong Meta Business Suite">Mở ↗</a>
         {% endif %}
       </td>
     </tr>
@@ -83,7 +87,7 @@
         <div class="cal-cell {{ 'today' if c.today }} {{ 'past' if c.past }}" role="cell"
              {% if not c.past %}data-drop data-date="{{ c.date }}" data-hm="{{ c.time }}"{% endif %}>
           {% for p in c.posts %}
-          <div class="cal-post {{ 'done' if p.done }}" style="--c:{{ p.color }}" title="{{ p.title }} — {{ p.page }}, {{ p.when }} · {{ STATUS_VI.get(p.status, p.status) }} (bấm để xem lại)"
+          <div class="cal-post {{ 'done' if p.done }}" style="--c:{{ p.color }}" title="{{ p.title }} — {{ p.page }}, {{ p.when }} · {{ status_vi(p.status, "tiktok" if p.tt else "facebook") }} (bấm để xem lại)"
                data-vview="{{ p.page_id }}:{{ p.id }}" tabindex="0" role="button"
                {% if p.movable %}draggable="true" data-pid="{{ p.page_id }}" data-vid="{{ p.id }}"{% endif %}>
             <b class="trunc">{{ p.title }}</b><span>{{ p.page }}{% if p.status == 'scheduled' %} · đã hẹn trên {{ 'TikTok' if p.tt else 'FB' }}{% elif p.status == 'uploaded' %} · đã đăng{% endif %}</span>

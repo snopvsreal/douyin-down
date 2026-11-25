@@ -4,12 +4,13 @@ import json
 import subprocess
 import sys
 import threading
+import re
 import time
 from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -22,9 +23,26 @@ HERE = Path(__file__).resolve().parent
 
 STATUS_VI = {
     "new": "Mới tìm thấy", "downloaded": "Đã tải", "review": "Chờ duyệt", "approved": "Chờ đăng",
-    "publish_now": "Đăng ngay", "schedule_pending": "Chờ gửi lịch lên FB", "scheduled": "Đã lên lịch trên FB", "uploaded": "Đã đăng", "rejected": "Đã bỏ", "failed": "Lỗi", "skipped": "Bỏ qua (lọc)",
+    "publish_now": "Đăng ngay", "schedule_pending": "Chờ gửi lịch", "scheduled": "Đã lên lịch", "uploaded": "Đã đăng", "rejected": "Đã bỏ", "failed": "Lỗi", "skipped": "Bỏ qua (lọc)",
     "uploading": "Đang đăng",
 }
+
+
+def post_url(url: str | None) -> str:
+    """Link bài thật trên nền tảng (reel / bài viết Facebook, video TikTok); link khác (trang soạn bài Business Suite
+    ghi lúc đăng ngay ở bản cũ) -> '' để giao diện không hiện "xem bài" trỏ sai chỗ."""
+    u = url or ""
+    return u if re.match(r"https://(www\.)?(facebook\.com/(reel/|[^/]+/posts/)|tiktok\.com/@)", u) else ""
+
+
+def status_vi(status: str, platform: str | None = None) -> str:
+    """Nhãn trạng thái của 1 video — ghi đúng nền tảng kênh (TikTok / Facebook) cho trạng thái lịch.
+    STATUS_VI để trung tính vì dùng cả cho bộ lọc chung nhiều kênh."""
+    label = STATUS_VI.get(status, status)
+    if platform and status in ("schedule_pending", "scheduled"):
+        where = "TikTok" if platform == "tiktok" else "Facebook"
+        label = {"schedule_pending": f"Chờ gửi lịch lên {where}", "scheduled": f"Đã lên lịch trên {where}"}[status]
+    return label
 
 
 # hiện ở Hộp duyệt: chờ duyệt + đã duyệt nhưng CHƯA gửi lên nền tảng (đổi giờ / giữ lại / bỏ được)
@@ -32,6 +50,11 @@ REVIEWABLE = "('review', 'approved', 'publish_now', 'schedule_pending')"
 QUEUED = ("approved", "publish_now", "schedule_pending")
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def urlparse_host(url: str) -> str:
+    from urllib.parse import urlsplit
+    return urlsplit(url).hostname or ""
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
@@ -64,6 +87,9 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     cfg["_data"] = data
     store = Store(data / "app.db")
     worker = Worker(cfg, store)
+    worker.start_sync()        # bài hẹn giờ qua giờ -> Đã đăng, rồi lấy link bài (chạy cả khi tắt Chạy tự động)
+    from .. import avatars as _avatars
+    _avatars.refresh_fb_background(store, data)        # ảnh Page Facebook chưa có (ảnh công khai, chạy nền)
     procs: dict[str, subprocess.Popen] = {}
 
     app = FastAPI(title="dytool")
@@ -87,11 +113,12 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     # css_v(): đổi theo lần sửa app.css (đọc lại mỗi trang) để trình duyệt không dùng bản CSS cũ trong cache
     from ..store import vn_fmt
     from .. import updates as _updates
-    tpl.env.globals.update(STATUS_VI=STATUS_VI, time=time, vnt=vn_fmt,     # vnt(ts, fmt): hiện giờ theo giờ VN
+    tpl.env.globals.update(STATUS_VI=STATUS_VI, status_vi=status_vi, post_url=post_url, time=time, vnt=vn_fmt,     # vnt(ts, fmt): hiện giờ theo giờ VN
                            css_v=lambda: int((HERE / "static" / "app.css").stat().st_mtime),
                            app_ver=lambda: _updates.installed("dytool"),   # cuối menu; đọc có nhớ 60 s
                            vs_cached_voices=lambda: __import__("dytool.vs_api", fromlist=["x"]).cached_profiles(),
-                           edit_state=worker.edit_state)      # nút Edit ngay (_edit_btn.html)
+                           edit_state=worker.edit_state,      # nút Edit ngay (_edit_btn.html)
+                           avatar_url=lambda pid: _avatars.url(data, pid))   # ảnh kênh (_macros.chan_av)
     tpl.env.filters["ago"] = lambda ts: _ago(ts)
 
     def _setup_failed() -> str | None:
@@ -169,8 +196,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
 
     # ---------------- Màn hình khởi động (app desktop) ----------------
     # Mở app: bật hết dịch vụ (song song) rồi mới vào màn hình chính -> lúc màn hình chính hiện là mọi thứ đã sẵn sàng.
-    # Worker chỉ bật sau khi xong (không tranh bật backend tải / VoiceStudio với màn hình này).
-    STARTUP_STEPS = [("ui", "Giao diện"), ("tdl", "Tải video Douyin"), ("vs", "VoiceStudio (lồng tiếng)"),
+    # Không tự bật chạy tự động: người dùng tự bấm "Chạy tự động" (lúc đó mới bật backend tải / VoiceStudio).
+    STARTUP_STEPS = [("ui", "Giao diện"), ("vs", "VoiceStudio (lồng tiếng)"),
                      ("browser", "Trình duyệt (nhân ShardX)"), ("douyin", "Đăng nhập Douyin"), ("ai", "AI dịch / viết lời")]
     startup: dict = {"begun": False, "done": False, "at": 0.0,
                      "steps": {k: {"name": n, "state": "wait", "detail": ""} for k, n in STARTUP_STEPS}}
@@ -182,56 +209,28 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         if detail is not None:
             step["detail"] = detail
 
-    def _step_tdl():
-        from ..services import ensure_tdl, tdl_alive
-        _st("tdl", "run", "đang bật backend tải…")
-        if tdl_alive(cfg) or ensure_tdl(cfg, config_path):
-            _st("tdl", "ok", "")
-        else:
-            _st("tdl", "err", "chưa bật được — tool sẽ thử lại khi cần tải (xem data/tdl_server.log)")
-
+    # Màn hình khởi động KHÔNG bật backend nào (backend tải Douyin, VoiceStudio): chúng chỉ bật khi bắt đầu chạy tự động
+    # (Worker.start -> _warm_backends) hoặc khi 1 việc cần tới (Edit ngay, trang VoiceStudio, nút bật). Ở đây chỉ xem
+    # VoiceStudio đã cài chưa để nhắc sớm. Nhân trình duyệt: đã có thì kiểm tra bản mới ở nền
+    # (browsers.wait_install: mở hồ sơ chờ cập nhật xong), chưa có thì chờ tải.
     def _step_vs():
         from .. import services
-        _st("vs", "run", "đang bật chạy ngầm…")
-        r = services.start_voicestudio(cfg)
-        if r == "missing":
+        _st("vs", "run", "đang kiểm tra…")
+        if urlparse_host(services.vs_api(cfg)) not in LOCAL_HOSTS:
+            _st("vs", "ok", f"đặt ở máy khác ({services.vs_api(cfg)})")
+        elif services.vs_runtime():
+            _st("vs", "ok", "đã cài — tự bật khi chạy tự động có video cần lồng tiếng")
+        else:
             _st("vs", "warn", "chưa cài xong — mở app VoiceStudio 1 lần (tải model, chấp nhận license)" if voicestudio_exe()
                 else "chưa cài — cần cho lồng tiếng (Cài đặt › VoiceStudio)")
-            return
-        if r == "remote":
-            _st("vs", "warn", f"đặt ở máy khác ({services.vs_api(cfg)})")
-            return
-        api = services.vs_api(cfg)
-        deadline = time.time() + 300
-        while time.time() < deadline:
-            try:   # giai đoạn 1: backend nạp thư viện (/startup/progress); 2: nạp model giọng (/model/status)
-                m = httpx.get(api + "/model/status", timeout=3)
-                if m.status_code == 200:
-                    j = m.json()
-                    if j.get("loaded"):
-                        _st("vs", "ok", "")
-                        return
-                    if j.get("error"):
-                        _st("vs", "err", f"nạp model lỗi: {str(j['error'])[:160]}")
-                        return
-                    _st("vs", None, f"nạp model giọng… {int(j.get('progress') or 0)}%")
-                else:
-                    p = httpx.get(api + "/startup/progress", timeout=3).json()
-                    _st("vs", None, (p.get("label") or "đang khởi động…").rstrip("…. ") + "…")
-            except (httpx.HTTPError, ValueError):
-                if services.start_voicestudio(cfg) == "crashed":
-                    _st("vs", "err", "bật lên rồi tắt ngay — xem data/voicestudio.log")
-                    return
-            time.sleep(1.5)
-        _st("vs", "err", "quá 5 phút chưa xong — tool sẽ thử lại khi cần lồng tiếng")
 
     def _step_browser():
         from .. import browsers
         t = browsers.install_engine_background()
-        if not browsers.engine_installed():
-            _st("browser", "run", "tải nhân lần đầu (~440 MB)…")
-        else:
-            _st("browser", "run", "kiểm tra bản mới…")
+        if browsers.engine_installed():
+            _st("browser", "ok", "")         # kiểm tra bản mới tiếp ở nền
+            return
+        _st("browser", "run", "tải nhân lần đầu (~440 MB)…")
         t.join(900)
         _st("browser", "ok" if browsers.engine_installed() else "err",
             "" if browsers.engine_installed() else "chưa tải được — xem Cài đặt › Trình duyệt")
@@ -264,7 +263,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
 
         def run():
             from concurrent.futures import ThreadPoolExecutor
-            jobs = {"tdl": _step_tdl, "vs": _step_vs, "browser": _step_browser, "douyin": _step_douyin, "ai": _step_ai}
+            jobs = {"vs": _step_vs, "browser": _step_browser, "douyin": _step_douyin, "ai": _step_ai}
 
             def safe(key):
                 try:
@@ -274,7 +273,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             with ThreadPoolExecutor(len(jobs)) as pool:
                 list(pool.map(safe, jobs))
             from .. import updates
-            worker.start()
+            # KHÔNG tự bật chạy tự động (người dùng yêu cầu): mở app xong chưa chạy gì, chưa bật backend nào —
+            # bấm "Chạy tự động" mới bắt đầu (Worker.start bật backend ở nền)
             updates.start_background_checks()
             startup["done"] = True
         threading.Thread(target=run, daemon=True, name="dytool-startup").start()
@@ -854,6 +854,14 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         need_key = not ai.ready()
         # "Cần bạn xử lý": gom mọi việc người dùng phải làm vào 1 chỗ
         todo = []
+        missing = store.q("SELECT v.id, v.page_id, v.error, p.platform FROM videos v JOIN pages p ON p.id=v.page_id "
+                          "WHERE v.status='uploaded' AND v.error LIKE 'Không thấy bài trên %' "
+                          "AND v.uploaded_at>? ORDER BY v.uploaded_at DESC", (time.time() - 14 * 86400,))
+        if missing:
+            m0 = missing[0]
+            todo.append({"kind": "err", "n": len(missing), "title": "Bài không thấy trên nền tảng sau giờ đăng",
+                         "sub": m0["error"].split(" — ")[0].split(": ", 1)[-1][:200], "btn": "Xem",
+                         "href": f"/?v={m0['page_id']}:{m0['id']}"})
         # mục "Chờ duyệt" của trang này (thay trang Hộp duyệt cũ — không lặp lại thành 1 thẻ "Cần bạn xử lý"):
         # video chờ duyệt + nhóm riêng video đã duyệt nhưng chưa gửi lên nền tảng (đổi giờ / giữ lại / bỏ được)
         rq_all = review_list()
@@ -942,13 +950,13 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                 items.append({"label": p["name"], "href": f"/pages/{p['id']}", "kind": "Kênh", "color": p["color"]})
         if len(ql) >= 2:
             like = f"%{q.strip()}%"
-            for v in store.q("SELECT v.id, v.page_id, v.desc, v.caption, v.status, p.name page_name FROM videos v "
+            for v in store.q("SELECT v.id, v.page_id, v.desc, v.caption, v.status, p.name page_name, p.platform FROM videos v "
                              "JOIN pages p ON p.id=v.page_id WHERE v.id LIKE ? OR v.desc LIKE ? OR v.caption LIKE ? "
                              "ORDER BY v.updated_at DESC LIMIT 8", (like, like, like)):
                 href = (f"/?v={v['page_id']}:{v['id']}" if v["status"] in ("review",) + QUEUED
                         else f"/queue?q={v['id']}")
                 items.append({"label": (v["caption"] or v["desc"] or v["id"])[:80], "href": href,
-                              "kind": STATUS_VI.get(v["status"], v["status"]), "sub": v["page_name"]})
+                              "kind": status_vi(v["status"], v["platform"]), "sub": v["page_name"]})
         return render(request, "_palette.html", items=items[:20], q=q)
 
     @app.get("/partials/services", response_class=HTMLResponse)
@@ -1677,20 +1685,88 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             store.upsert_page(aid, p["name"], p["profile_id"], p["asset_id"])
         store.x("UPDATE accounts SET status='da_dang_nhap', fb_user=? WHERE id=?", (res.get("fb_user"), aid))
         store.log(f"Tài khoản #{aid}: tìm thấy {len(res['pages'])} Page")
+        from .. import avatars
+        avatars.refresh_fb_background(store, data, only_missing=False, max_age_days=0)
 
-    def _save_tiktok(aid: int, who: dict):
-        """Tài khoản TikTok có đúng 1 kênh đăng (dòng pages platform='tiktok'), mặc định tắt."""
+    def _save_tiktok(aid: int, who: dict, login: bool = True):
+        """Tài khoản TikTok có đúng 1 kênh đăng (dòng pages platform='tiktok'), mặc định tắt. Tên kênh = tên hiển thị
+        trên TikTok (nickname), không phải tên người dùng tự gõ lúc thêm tài khoản; ảnh kênh -> data/avatars."""
         acc = store.one("SELECT * FROM accounts WHERE id=?", (aid,))
-        user = who.get("username") or ""
-        name = f"@{user}" if user else (acc["name"] if acc else f"TikTok #{aid}")
-        old = store.one("SELECT id FROM pages WHERE account_id=? AND platform='tiktok'", (aid,))
+        user = (who.get("username") or "").lstrip("@")
+        nick = (who.get("nickname") or "").strip()[:80]
+        old = store.one("SELECT id, name FROM pages WHERE account_id=? AND platform='tiktok'", (aid,))
+        if not user and not login:
+            store.log(f"Tài khoản TikTok #{aid}: không đọc được tên kênh (phiên đăng nhập hết? bấm Đăng nhập lại)",
+                      "error")
+            return
+        name = nick or (f"@{user}" if user else (old["name"] if old else acc["name"] if acc else f"TikTok #{aid}"))
         if old:     # đăng nhập lại: cập nhật tên, giữ cài đặt / nguồn của kênh
             store.x("UPDATE pages SET name=?, profile_id=?, asset_id=? WHERE id=?",
                     (name, user, user or f"tt{aid}", old["id"]))
+            pid = old["id"]
         else:
             store.upsert_page(aid, name, user, user or f"tt{aid}", platform="tiktok")
-        store.x("UPDATE accounts SET status='da_dang_nhap', fb_user=? WHERE id=?", (user, aid))
-        store.log(f"Tài khoản TikTok #{aid}: đã đăng nhập {name}")
+            pid = store.one("SELECT id FROM pages WHERE account_id=? AND platform='tiktok'", (aid,))["id"]
+        if user or nick:    # 1 tài khoản TikTok = 1 kênh: tài khoản mang luôn tên kênh
+            store.x("UPDATE accounts SET name=? WHERE id=?", (name, aid))
+        if login:
+            store.x("UPDATE accounts SET status='da_dang_nhap', fb_user=? WHERE id=?", (user, aid))
+        av = store.account_dir(data, aid) / "tt_avatar.img"
+        from .. import avatars
+        got_av = av.exists() and avatars.save(data, pid, av.read_bytes())
+        av.unlink(missing_ok=True)
+        store.log(f"Tài khoản TikTok #{aid}: {'đã đăng nhập' if login else 'cập nhật'} {name}"
+                  + (f" (@{user})" if user else "") + (" + ảnh kênh" if got_av else ""), page_id=pid)
+
+    @app.post("/accounts/{aid}/refresh-info")
+    def account_refresh_info(aid: int):
+        """Nút "Cập nhật tên & ảnh": TikTok -> mở trình duyệt của tài khoản đọc lại tên + ảnh kênh (vài giây);
+        Facebook -> lấy lại ảnh các Page (ảnh công khai, không mở trình duyệt)."""
+        acc = store.one("SELECT * FROM accounts WHERE id=?", (aid,))
+        if not acc:
+            return RedirectResponse("/accounts", 303)
+        from .. import avatars
+        if acc["platform"] != "tiktok":
+            def fb():
+                n = 0
+                for p in store.q("SELECT id, profile_id, asset_id FROM pages WHERE account_id=?", (aid,)):
+                    n += avatars.fetch_fb(data, p["id"], [p["asset_id"], p["profile_id"]])
+                store.log(f"Tài khoản #{aid}: cập nhật ảnh {n} Page")
+            _threading.Thread(target=fb, daemon=True).start()
+            return RedirectResponse("/accounts", 303)
+        key = f"info{aid}"
+        if (procs.get(key) and procs[key].poll() is None) or (procs.get(f"login{aid}") and
+                                                             procs[f"login{aid}"].poll() is None):
+            return RedirectResponse("/accounts", 303)
+        acc_dir = store.account_dir(data, aid)
+        code = ("import sys,json; from pathlib import Path; from dytool import tt_browser as t; "
+                "d=Path(sys.argv[1]); print('TT='+json.dumps(t.refresh_info(d)))")
+        log = open(acc_dir / "info.log", "w")
+        p = procs[key] = subprocess.Popen([sys.executable, "-c", code, str(acc_dir)], cwd=ROOT,
+                                          stdout=log, stderr=subprocess.STDOUT)
+        store.log(f"Tài khoản TikTok #{aid}: đang đọc lại tên + ảnh kênh…")
+
+        def watch():
+            p.wait()
+            log.close()
+            procs.pop(key, None)
+            out = (acc_dir / "info.log").read_text(errors="ignore")
+            line = next((l for l in out.splitlines() if l.startswith("TT=")), None)
+            if line:
+                _save_tiktok(aid, json.loads(line[3:]), login=False)
+            else:
+                last = (out.strip().splitlines() or [""])[-1][:200]
+                store.log(f"Tài khoản TikTok #{aid}: không đọc được tên + ảnh kênh — {last}", "error")
+        _threading.Thread(target=watch, daemon=True).start()
+        return RedirectResponse("/accounts", 303)
+
+    @app.get("/avatars/{pid}")
+    def avatar(pid: int):
+        from .. import avatars
+        f = avatars.path(data, pid)
+        if not f.is_file():
+            return PlainTextResponse("", 404)
+        return FileResponse(f, media_type="image/png", headers={"Cache-Control": "max-age=86400"})
 
     @app.get("/partials/accounts", response_class=HTMLResponse)
     def accounts_poll(request: Request):
@@ -1900,6 +1976,25 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             return RedirectResponse("/accounts", 303)
         store.x("DELETE FROM sources WHERE id=?", (sid,))
         return RedirectResponse(f"/pages/{row['page_id']}?tab=nguon", 303)
+
+    @app.post("/videos/{pid}/{vid}/dismiss-missing")
+    def dismiss_missing(pid: int, vid: str):
+        """Đã kiểm tra trên nền tảng: bỏ cảnh báo 'không thấy bài' (giữ trạng thái Đã đăng)."""
+        store.set_video_if(vid, pid, expect=("uploaded",), error=None)
+        return HTMLResponse('<span class="small muted">Đã bỏ cảnh báo</span>')
+
+    @app.post("/pages/{pid}/fetch-links")
+    def fetch_links_now(pid: int):
+        """Nút "Lấy link bài": đọc ngay danh sách bài của kênh (luồng nền, chờ việc nặng đang chạy xong)."""
+        def run():
+            with worker._busy:
+                try:
+                    if not worker.fetch_links(pid):
+                        store.log("Lấy link bài: chưa thấy bài nào khớp", page_id=pid)
+                except Exception as e:
+                    store.log(f"Lấy link bài lỗi: {e}", "error", pid)
+        threading.Thread(target=run, daemon=True).start()
+        return HTMLResponse('<span class="small muted">Đang lấy link bài… tự hiện khi xong</span>')
 
     @app.post("/pages/{pid}/scan")
     def scan_now(pid: int):

@@ -18,9 +18,38 @@ TT_MAX_AHEAD = 10 * 86400 - 3600   # TikTok chỉ hẹn giờ trong 10 ngày t�
 TT_MIN_AHEAD = 25 * 60             # TikTok cần >= 20 phút (chừa 5 phút cho thời gian tải lên)
 
 
+def _real_link(url: str | None, platform: str) -> bool:
+    return (url or "").startswith("https://www.tiktok.com/@" if platform == "tiktok" else "https://www.facebook.com/")
+
+
 def _hex_to_ffmpeg(color: str) -> str:
     c = color.strip().lstrip("#")
     return "0x" + c.upper() if len(c) == 6 else "0x0066FF"
+
+
+MODEL_IDLE_SECONDS = 300
+
+
+def release_models() -> bool:
+    """Bỏ các model AI nạp trong tiến trình (Whisper ~0,5-1,5 GB, RapidOCR, ECAPA nhận nam/nữ) để trả RAM khi rảnh.
+    Trước đây giữ mãi tới lúc tắt app. Chỉ đụng module đã nạp (không import thêm); lần edit sau tự nạp lại (vài giây)."""
+    import gc
+    import sys
+    freed = False
+    for mod, fn in (("dytool.subtitles", "_whisper"), ("dytool.hardsub", "_ocr"), ("dytool.gender", "_model")):
+        f = getattr(sys.modules.get(mod), fn, None)
+        if f is not None and f.cache_info().currsize:
+            f.cache_clear()
+            freed = True
+    if freed:
+        gc.collect()
+        torch = sys.modules.get("torch")
+        try:
+            if torch is not None and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+    return freed
 
 
 class Worker:
@@ -37,11 +66,16 @@ class Worker:
         self._vs_starting = False       # đã ghi log "đang bật VoiceStudio" cho lần bật này
         self._tdl_retry_at = 0.0
         self._last_cleanup = 0.0
+        self._last_work = time.time()     # lần cuối làm 1 việc (để trả RAM model AI khi rảnh lâu)
         # chỉ 1 việc nặng / lần trên cả máy (VoiceStudio 1 GPU): vòng chạy tự động và việc bấm tay cùng giữ khoá này
         self._busy = threading.Lock()
         self._manual: list[tuple[int, str]] = []      # (page_id, video_id) người dùng bấm "Edit ngay"
         self._manual_lock = threading.Lock()
         self._manual_thread: threading.Thread | None = None
+        # bài hẹn giờ qua giờ -> Đã đăng + lấy link bài (start_sync)
+        self._sync_thread: threading.Thread | None = None
+        self._link_tries: dict[tuple[int, str], int] = {}     # (page_id, video_id) -> số lần đọc chưa thấy bài
+        self._link_next: dict[tuple[int, str], float] = {}
 
     # ---------- điều khiển ----------
     _mutex = None      # khoá toàn máy: chỉ 1 tiến trình dytool được chạy worker (mở app 2 lần, thêm run_ui.bat…)
@@ -78,7 +112,30 @@ class Worker:
         self._recover_uploading()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
+        threading.Thread(target=self._warm_backends, daemon=True, name="warm-backends").start()
         self.store.log("Đã bật chạy tự động")
+
+    def _dub_work_pending(self) -> bool:
+        """Có video Mới tìm thấy / Đã tải của kênh đang bật + bật lồng tiếng (sắp cần VoiceStudio)."""
+        ids = [p["id"] for p in self._pages() if self.store.page_settings(p).get("dub_enabled")]
+        if not ids:
+            return False
+        marks = ",".join("?" * len(ids))
+        return self.store.one(f"SELECT 1 FROM videos WHERE status IN ('new', 'downloaded') AND page_id IN ({marks}) "
+                              "LIMIT 1", tuple(ids)) is not None
+
+    def _warm_backends(self) -> None:
+        """Bắt đầu chạy tự động -> bật sẵn backend ở nền (mở app không bật gì — màn hình khởi động nhanh, máy nhẹ khi
+        chưa chạy): backend tải Douyin khi có kênh đang bật; VoiceStudio chỉ khi có video sắp cần lồng tiếng
+        (~800 MB RAM + VRAM, nạp model ~2 phút). Không chờ: việc nào cần mà backend chưa sẵn sàng thì tự chờ / để sau."""
+        from . import services
+        try:
+            if self._pages() and not services.tdl_alive(self.cfg):
+                threading.Thread(target=services.ensure_tdl, args=(self.cfg,), daemon=True, name="tdl-start").start()
+            if self._dub_work_pending():
+                services.start_voicestudio(self.cfg)
+        except Exception as e:
+            self.store.log(f"Bật sẵn backend lỗi: {e}", "error")
 
     UNSURE = ("dytool bị tắt / mất kết nối khi đang đăng — KIỂM TRA trên {where} xem bài đã lên chưa, "
               "chưa có thì duyệt lại (tool không tự đăng lại để tránh đăng trùng)")
@@ -189,6 +246,7 @@ class Worker:
             self._keep_awake(False)
             if not self._loop_alive():
                 self.current = "Đang dừng"
+                release_models()          # hết việc bấm tay, chạy tự động đang tắt -> trả RAM model AI ngay
 
     def _run_manual(self, page, row):
         """Edit 1 video người dùng bấm. Kênh bật lồng tiếng: VoiceStudio chưa chạy thì bật và CHỜ (tối đa 5 phút) —
@@ -258,6 +316,7 @@ class Worker:
             self._run_loop()
         finally:
             self._keep_awake(False)
+            release_models()
 
     def _run_loop(self):
         while self.running:
@@ -275,6 +334,10 @@ class Worker:
                 traceback.print_exc()
                 did = False
             progress.end()
+            if did:
+                self._last_work = time.time()
+            elif time.time() - self._last_work > MODEL_IDLE_SECONDS:
+                release_models()              # rảnh > 5 phút: trả RAM Whisper / OCR / nhận giọng (nạp lại vài giây)
             if not did:
                 from . import services
                 try:
@@ -809,6 +872,169 @@ class Worker:
         except Exception as e:
             self.store.log(f"[{page['name']}] Không xếp được lượt đăng kèm TikTok cho {row['id']}: {e}",
                            "error", page["id"])
+
+    # ---------- bài hẹn giờ tới giờ -> "Đã đăng" (theo đồng hồ) + lấy link bài ----------
+    LINK_DELAY = 180                       # đăng xong 3 phút mới đọc link (Facebook còn xử lý thước phim)
+    LINK_RETRY = (30 * 60, 3 * 3600)       # không thấy bài: thử lại sau 30 phút, 3 giờ — rồi thôi
+    LINK_DAYS = 3
+    _LINK_SQL = ("SELECT v.id, v.page_id, v.caption, v.uploaded_at, v.fb_url, p.platform, p.asset_id, p.profile_id, "
+                 "p.name page_name, p.account_id FROM videos v JOIN pages p ON p.id=v.page_id "
+                 "WHERE v.status='uploaded' AND v.uploaded_at>? AND v.uploaded_at<=? ")
+
+    def _flip_due(self) -> int:
+        """Theo đồng hồ, không mở trình duyệt: bài đã hẹn giờ (Facebook / TikTok / đăng kèm) qua giờ -> Đã đăng.
+        Nền tảng tự đăng đúng giờ; link bài lấy sau (fetch_links)."""
+        now = int(time.time())
+        n = 0
+        for v in self.store.q("SELECT v.id, v.page_id, v.scheduled_at, p.name, p.platform FROM videos v "
+                              "JOIN pages p ON p.id=v.page_id WHERE v.status='scheduled' AND v.scheduled_at<=?", (now,)):
+            if self.store.set_video_if(v["id"], v["page_id"], expect=("scheduled",), status="uploaded",
+                                       uploaded_at=v["scheduled_at"]):
+                n += 1
+                where = "TikTok" if v["platform"] == "tiktok" else "Facebook"
+                self.store.log(f"[{v['name']}] Tới giờ hẹn {vn_time(v['scheduled_at']):%H:%M %d/%m}: {v['id']} "
+                               f"đã đăng trên {where}", page_id=v["page_id"])
+        for cp in self.store.q("SELECT * FROM crossposts WHERE status='scheduled' AND scheduled_at<=?", (now,)):
+            self.store.set_crosspost(cp["video_id"], cp["src_page_id"], cp["dst_page_id"], status="uploaded")
+            n += 1
+        return n
+
+    def _link_candidates(self) -> dict[int, list]:
+        """Video đã đăng (3 ngày qua, đăng được 3 phút) chưa có link bài thật, tới lượt đọc: {page_id: [video]}."""
+        now = time.time()
+        due: dict[int, list] = {}
+        for v in self.store.q(self._LINK_SQL, (now - self.LINK_DAYS * 86400, now - self.LINK_DELAY)):
+            if _real_link(v["fb_url"], v["platform"]):
+                continue
+            key = (v["page_id"], v["id"])
+            tries = self._link_tries.get(key, 0)
+            if tries > len(self.LINK_RETRY) or (tries and now < self._link_next.get(key, 0)):
+                continue                                    # đã thử đủ / chưa tới lượt thử lại
+            due.setdefault(v["page_id"], []).append(v)
+        return due
+
+    def fetch_links(self, page_id: int | None = None) -> int:
+        """Mở trình duyệt ẩn (CHỈ ĐỌC) 1 lần / kênh có video cần link: Facebook = bảng Đã đăng trong Business Suite,
+        TikTok = TikTok Studio › Nội dung; ghép theo caption + giờ đăng -> lưu link (Facebook: cả giờ đăng thật).
+        page_id: chỉ kênh đó, mọi video đã đăng 30 ngày qua chưa có link, bỏ qua lượt chờ (nút Lấy link bài).
+        Trả về số video có link mới."""
+        from . import fb_browser, tt_browser
+        if page_id is None:
+            due = self._link_candidates()
+        else:
+            now = time.time()
+            due = {page_id: [v for v in self.store.q(self._LINK_SQL + "AND v.page_id=?",
+                                                     (now - 30 * 86400, now, page_id))
+                             if not _real_link(v["fb_url"], v["platform"])]}
+        n = 0
+        for pid, vids in due.items():
+            if not vids:
+                continue
+            v0 = vids[0]
+            tt = v0["platform"] == "tiktok"
+            where = "TikTok" if tt else "Facebook"
+            if self._no_profile(v0["account_id"]):
+                continue
+            acc_dir = self.store.account_dir(self.data, v0["account_id"])
+            # lần đọc cuối của 1 video (hoặc bấm tay): đọc thêm chữ trên dòng để biết nền tảng báo gì nếu không khớp
+            last = page_id is not None or any(self._link_tries.get((pid, v["id"]), 0) >= len(self.LINK_RETRY)
+                                              for v in vids)
+            caps = [(v["caption"] or "").strip() for v in vids] if last else None
+            rows: dict = {}
+            tt_items: list = []
+            try:
+                if tt:
+                    tt_items = tt_browser.content_items(acc_dir, v0["profile_id"] or "", find=caps, rows=rows)
+                    posts = [{"post_id": p["item_id"], "title": p["title"], "created_at": p["post_time"],
+                              "state": "SCHEDULED" if p["scheduled"] else "", "url": p["url"]} for p in tt_items]
+                else:
+                    r = fb_browser.read_tab(acc_dir, v0["asset_id"], v0["page_name"], find=caps)
+                    posts, rows = r["posts"], r["rows"]
+            except Exception as e:
+                self.store.log(f"[{v0['page_name']}] Không đọc được danh sách bài trên {where} để lấy link: {e}",
+                               "error", pid)
+                posts = None
+            found = {} if posts is None else fb_browser.match_posts(
+                [{"id": v["id"], "caption": v["caption"] or "", "ref_ts": v["uploaded_at"],
+                  "window": (30 * 60, 12 * 3600)} for v in vids], posts)
+            for v in vids:
+                key = (pid, v["id"])
+                post = found.get(v["id"])
+                if post and post.get("url"):
+                    extra = {} if tt else {"uploaded_at": post["created_at"]}   # giờ Facebook đăng thật
+                    if self.store.set_video_if(v["id"], pid, expect=("uploaded",), fb_url=post["url"], error=None,
+                                               **extra):
+                        n += 1
+                    self._link_tries.pop(key, None)
+                    continue
+                tries = self._link_tries[key] = self._link_tries.get(key, 0) + 1
+                if tries <= len(self.LINK_RETRY) and page_id is None:
+                    self._link_next[key] = time.time() + self.LINK_RETRY[tries - 1]
+                elif posts is not None:
+                    self._link_tries[key] = len(self.LINK_RETRY) + 1        # đã báo, không tự thử nữa
+                    reason = self._why_missing(v, tt, acc_dir, rows, tt_items)
+                    msg = f"Không thấy bài trên {where} sau giờ đăng: {reason}"
+                    self.store.set_video_if(v["id"], pid, expect=("uploaded",),
+                                            error=msg + f" — kiểm tra trên {where}; bài đã lên thì bấm Lấy link bài")
+                    self.store.log(f"[{v['page_name']}] {v['id']}: {msg}", "error", pid)
+        return n
+
+    def _why_missing(self, v, tt: bool, acc_dir, rows: dict, tt_items: list) -> str:
+        """Bài không có trong danh sách đã đăng: kiểm tra lại theo cách cũ (bài còn nằm ở mục hẹn giờ không) và lấy
+        lý do đúng như nền tảng hiện (chữ trên dòng của bài)."""
+        from . import fb_browser
+        cap = (v["caption"] or "").strip()
+        key = fb_browser._norm(cap)[:40]
+        if tt:
+            it = next((i for i in tt_items if key and fb_browser._norm(i["title"]).startswith(key[:30])), None)
+            row = rows.get(cap, "")
+            if not it:
+                return "TikTok Studio không có video này (TikTok không đăng hoặc đã gỡ bài)"
+            bits = []
+            if it["scheduled"]:
+                bits.append("TikTok vẫn để bài ở trạng thái hẹn giờ, chưa đăng")
+            if it["in_review"]:
+                bits.append("TikTok đang xét duyệt bài")
+            if not it.get("public", True):
+                bits.append("bài không ở chế độ công khai")
+            return "; ".join(bits or ["TikTok Studio có bài nhưng giờ đăng khác giờ hẹn"]) + \
+                (f" (TikTok Studio ghi: {row})" if row else "")
+        # Facebook: bài có còn trong mục Đã lên lịch không
+        try:
+            r = fb_browser.read_tab(acc_dir, v["asset_id"], v["page_name"], tab="scheduled", find=[cap])
+        except Exception as e:
+            return f"không đọc được mục Đã lên lịch ({e})"
+        row = r["rows"].get(cap, "")
+        if any(key and fb_browser._norm(p["title"]).startswith(key[:30]) for p in r["posts"]) or row:
+            return "Facebook vẫn để bài trong mục Đã lên lịch, chưa đăng" + (f" (Business Suite ghi: {row})" if row else "")
+        if rows.get(cap):
+            return f"bài có trong mục Đã đăng nhưng giờ đăng khác giờ hẹn (Business Suite ghi: {rows[cap]})"
+        return ("không có trong mục Đã đăng lẫn Đã lên lịch của Page — Facebook không đăng bài này "
+                "(có thể vướng bản quyền / bị gỡ) hoặc bài đã bị xoá")
+
+    def start_sync(self) -> None:
+        """Luồng nền nhẹ (chạy cả khi tắt Chạy tự động). Mỗi phút: đổi bài hẹn giờ đã qua giờ sang Đã đăng (chỉ SQL);
+        có video cần link thì mở trình duyệt ẩn lấy link — chỉ khi không có việc nặng nào đang chạy (khoá _busy)."""
+        if self._sync_thread and self._sync_thread.is_alive():
+            return
+
+        def loop():
+            time.sleep(20)
+            while True:
+                try:
+                    self._flip_due()
+                    if self._link_candidates() and self._claim_machine_lock() \
+                            and self._busy.acquire(blocking=False):
+                        try:
+                            self.fetch_links()
+                        finally:
+                            self._busy.release()
+                except Exception as e:
+                    self.store.log(f"Cập nhật bài đã đăng lỗi: {e}", "error")
+                    traceback.print_exc()
+                time.sleep(60)
+        self._sync_thread = threading.Thread(target=loop, daemon=True, name="post-sync")
+        self._sync_thread.start()
 
     def _stopped(self, e: Exception, page, row, what: str) -> bool:
         """Bấm Dừng (progress.Cancelled, hoặc chương trình con bị nút Dừng tắt nên báo lỗi khác) -> ghi nhật ký, True."""

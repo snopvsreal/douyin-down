@@ -122,6 +122,17 @@
 {# Xem lại 1 video ở mọi trạng thái: phần tử có data-vview="<page_id>:<video_id>" (trang Video, Lịch đăng…) #}
 <dialog class="vview" id="vview" aria-labelledby="vv-title" tabindex="-1"></dialog>
 
+{# Hộp hỏi lại cho mọi hx-confirm (thay confirm() gốc: trong cửa sổ app bấm Huỷ ở hộp gốc thì nút Dừng mất) #}
+<dialog class="dy-confirm" id="dy-confirm" aria-labelledby="dc-msg">
+  <form method="dialog">
+    <p id="dc-msg" class="dc-msg"></p>
+    <div class="dc-act">
+      <button type="submit" value="cancel" class="btn" autofocus>Huỷ</button>
+      <button type="submit" value="ok" class="btn primary" id="dc-ok">Đồng ý</button>
+    </div>
+  </form>
+</dialog>
+
 {# Vùng đọc to cho trình đọc màn hình: chỉ được cập nhật (hx-swap-oob) khi bước đăng nhập đổi, không theo từng giây #}
 <div id="sr-live" class="sr-only" aria-live="polite"></div>
 <script>
@@ -148,6 +159,7 @@
     const typing = (a) => a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) &&
       !['checkbox', 'radio', 'button', 'submit', 'range', 'color', 'file', 'hidden'].includes(a.type);
     const busy = () => typing(document.activeElement) || dirty || document.getElementById('palette')?.open ||
+      document.getElementById('dy-confirm')?.open ||
       [...document.querySelectorAll('main video')].some(v => !v.paused) ||
       !!document.querySelector('.dragging, .drop-on, main .htmx-request, main form.htmx-request, main [data-live-hold]');
     const refresh = async (v) => {
@@ -180,6 +192,28 @@
       } catch (e) { return; }
       if (pending && !busy()) { const v = pending; pending = false; refresh(v); }
     }, 3000);
+  }
+  // Hỏi lại (hx-confirm) bằng <dialog id="dy-confirm"> trong trang thay cho confirm() gốc của trình duyệt / WebView2.
+  // Trong lúc hộp mở: không tự làm mới (poll "every …" và cập nhật trực tiếp) -> nút đang hỏi không bị thay mất,
+  // bấm Huỷ thì mọi thứ giữ nguyên. Chữ nút xác nhận: data-confirm-ok trên phần tử (mặc định "Đồng ý").
+  if (!window.__dyConfirm) {
+    window.__dyConfirm = true;
+    document.addEventListener('htmx:confirm', (e) => {
+      const q = e.detail.question;
+      const d = document.getElementById('dy-confirm');
+      if (!q || !d) return;
+      e.preventDefault();
+      d.querySelector('#dc-msg').textContent = q;
+      d.querySelector('#dc-ok').textContent = e.detail.elt.getAttribute('data-confirm-ok') || 'Đồng ý';
+      d.returnValue = '';
+      d.onclose = () => { if (d.returnValue === 'ok') e.detail.issueRequest(true); };
+      d.showModal();
+    });
+    document.addEventListener('htmx:beforeRequest', (e) => {
+      if (!document.getElementById('dy-confirm')?.open) return;
+      const trig = e.detail.elt.getAttribute && (e.detail.elt.getAttribute('hx-trigger') || '');
+      if (/\bevery\b/.test(trig)) e.preventDefault();        // poll tự làm mới: chờ hộp hỏi đóng
+    });
   }
   // Sáng / tối / theo máy (cuối menu). Lưu localStorage; "theo máy" = bỏ data-theme -> theo Windows.
   if (!window.__dyTheme) {

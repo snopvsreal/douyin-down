@@ -16,7 +16,7 @@
   {% elif task.no_return %}
     <div class="run-sub" title="Đã bấm đăng trên nền tảng — chờ biết bài đã lên chưa rồi mới dừng được">Đang bấm đăng — chờ xong</div>
   {% else %}
-    <button type="button" class="btn sm run-stop" hx-post="/worker/cancel" hx-target="#runcard" hx-swap="innerHTML"
+    <button type="button" class="btn sm run-stop" hx-post="/worker/cancel" hx-target="#runcard" hx-swap="innerHTML" data-confirm-ok="Dừng"
             hx-disabled-elt="this" title="Dừng việc đang làm và tạm dừng chạy tự động. Bật lại thì việc này làm lại từ đầu."
             hx-confirm="Dừng {{ task.title|lower }}{% if task.page %} ({{ task.page }}){% endif %}? Chạy tự động sẽ tạm dừng; bật lại thì việc này làm lại từ đầu.">
       <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/></svg>Dừng</button>

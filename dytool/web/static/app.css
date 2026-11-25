@@ -1429,3 +1429,55 @@ main { margin-inline: auto; }
 
 /* nút Edit ngay (_edit_btn.html) */
 .edit-now { display: inline-flex; align-items: center; gap: 6px; }
+
+/* hộp hỏi lại (hx-confirm) thay confirm() gốc — base.html #dy-confirm */
+.dy-confirm { width: min(420px, 92vw); padding: 20px 20px 16px; border: 1px solid var(--line); border-radius: 16px;
+  background: var(--raised); color: var(--t1); box-shadow: var(--shadow-float); }
+.dy-confirm::backdrop { background: #0d1311a6; backdrop-filter: blur(2px); }
+.dy-confirm .dc-msg { margin: 0 0 18px; line-height: 22px; }
+.dy-confirm .dc-act { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ảnh kênh + icon nền tảng (_macros.chan_av / plat_icon) thay chấm màu + chữ "TT" / "FB" */
+.plat-ico { flex: none; vertical-align: -2px; }
+.plat-ico.tt { fill: var(--t1); }
+.plat-ico.fb { fill: #0866ff; }
+[data-theme=dark] .plat-ico.fb { fill: #4c8dff; }
+.chan-av { position: relative; flex: none; display: inline-grid; place-items: center; width: var(--av); height: var(--av);
+  border-radius: 50%; color: #fff; font-weight: 600; font-size: calc(var(--av) * .45); line-height: 1; }
+.chan-av > img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block;
+  box-shadow: 0 0 0 1px var(--line); }
+/* huy hiệu nền tảng ở góc ảnh: đĩa tròn đặc màu nền tảng + viền cùng màu nền chỗ đặt (--av-ring) để tách khỏi ảnh */
+.chan-av { --av-ring: var(--tile); }
+.chan-av-badge { position: absolute; right: -2px; bottom: -2px; display: grid; place-items: center;
+  width: calc(var(--av) * .44); height: calc(var(--av) * .44); min-width: 11px; min-height: 11px;
+  border-radius: 50%; box-shadow: 0 0 0 2px var(--av-ring); line-height: 0; }
+.chan-av-badge .plat-ico { width: 100%; height: 100%; stroke: none; }
+.chan-av-badge.fb { background: #fff; }
+.chan-av-badge.fb .plat-ico { fill: #0866ff; }
+.chan-av-badge.tt { background: #111; }
+.chan-av-badge.tt .plat-ico { fill: #fff; width: 62%; height: 62%; }
+/* menu trái: luật chung .nav-item svg (18px, chỉ nét viền) không được áp lên icon nền tảng */
+.nav-item .plat-ico { stroke: none; }
+.nav-item .chan-av-badge .plat-ico { width: 100%; height: 100%; }
+.nav-item .chan-av-badge.tt .plat-ico { width: 62%; height: 62%; }
+nav.side .chan-av { --av-ring: var(--side-bg); }
+nav.side .nav-item.on .chan-av { --av-ring: var(--side-bg); }
+.nav-chan .chan-av > img { box-shadow: none; }
+.nav-chan .chan-av { --av: 22px; }
+.nav-chan.off .chan-av > img { filter: grayscale(1); opacity: .5; }
+.nav-chan.off .chan-av:not(:has(> img)) { opacity: .5; }
+.ch-head-av { margin-right: 4px; }
+.acc-page { display: inline-flex; align-items: center; gap: 10px; }
+.rv-plat { display: inline-flex; align-items: center; gap: 5px; }
+
+/* Lịch đăng › Danh sách (calendar.html): cột cố định, caption co giãn + cắt "…" -> không tràn ngang */
+.sched-table { table-layout: fixed; width: 100%; min-width: 560px; }
+.sched-table .c-time { width: 104px; }
+.sched-table .c-chan { width: 164px; }
+.sched-table .c-st { width: 140px; }
+.sched-table .c-act { width: 96px; }
+.sched-table td { overflow: hidden; }
+.sched-table .vv-open, .sched-table .vv-open .trunc, .sched-table .sched-chan .trunc { max-width: 100%; }
+.sched-table .sched-chan { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sched-table .sched-chan .trunc { min-width: 0; }
+.sched-table .pill { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }

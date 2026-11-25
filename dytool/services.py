@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -24,6 +25,7 @@ def tdl_alive(cfg: dict) -> bool:
 
 
 _proc: subprocess.Popen | None = None      # backend tải đã bật lần gần nhất
+_tdl_lock = threading.Lock()
 
 
 def ensure_tdl(cfg: dict, config_path: str = "config.yaml", wait: float = 90) -> bool:
@@ -32,12 +34,13 @@ def ensure_tdl(cfg: dict, config_path: str = "config.yaml", wait: float = 90) ->
     if tdl_alive(cfg):
         return True
     data = Path(cfg["_data"])
-    if _proc is None or _proc.poll() is not None:    # lần trước còn đang khởi động -> chờ tiếp, không bật thêm
-        detach = ({"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
-                  if sys.platform == "win32" else {"start_new_session": True})
-        with open(data / "tdl_server.log", "a") as log:     # tiến trình con giữ handle riêng; đóng bản của mình
-            _proc = subprocess.Popen([sys.executable, "-m", "dytool.cli", "-c", str(ROOT / config_path), "server"],
-                                     cwd=ROOT, stdout=log, stderr=log, stdin=subprocess.DEVNULL, **detach)
+    with _tdl_lock:            # bật sẵn lúc bắt đầu chạy tự động + worker cần tải cùng lúc -> chỉ bật 1 backend
+        if _proc is None or _proc.poll() is not None:    # lần trước còn đang khởi động -> chờ tiếp, không bật thêm
+            detach = ({"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
+                      if sys.platform == "win32" else {"start_new_session": True})
+            with open(data / "tdl_server.log", "a") as log:     # tiến trình con giữ handle riêng; đóng bản của mình
+                _proc = subprocess.Popen([sys.executable, "-m", "dytool.cli", "-c", str(ROOT / config_path), "server"],
+                                         cwd=ROOT, stdout=log, stderr=log, stdin=subprocess.DEVNULL, **detach)
     deadline = time.time() + wait
     while time.time() < deadline:
         if tdl_alive(cfg):

@@ -2,34 +2,53 @@
 
 import sys
 
+# Chương trình nặng CPU chạy lâu (edit video, tách giọng): chạy ở mức ưu tiên "dưới bình thường" -> vẫn dùng hết CPU
+# lúc máy rảnh, nhưng nhường cửa sổ dytool / trình duyệt / việc người dùng đang làm -> app không đơ khi đang edit.
+_LOW_PRIORITY = {"ffmpeg", "ffprobe"}
+_PRIORITY_FLAGS = 0x20 | 0x40 | 0x80 | 0x100 | 0x4000 | 0x8000   # mọi *_PRIORITY_CLASS
 
-def _hide_child_consoles() -> None:
-    """App desktop chạy bằng pythonw (không có console): mỗi lần gọi chương trình dòng lệnh (ffmpeg, ffprobe,
-    python của backend tải Douyin, thư viện bên ngoài…) Windows lại bật 1 cửa sổ cmd nhảy lên rồi tắt.
-    Khi tiến trình này không có console -> mặc định mọi tiến trình con chạy với CREATE_NO_WINDOW.
-    Chạy từ cmd / terminal (có console) thì không đổi gì: tiến trình con dùng chung console đó, không bật cửa sổ mới.
-    App có giao diện (trình duyệt, VoiceStudio…) không bị ảnh hưởng: cờ này chỉ áp cho chương trình console."""
+
+def _heavy(args) -> bool:
+    if isinstance(args, (str, bytes)) or not args:
+        return False
+    try:
+        items = [str(a) for a in args]
+    except TypeError:
+        return False
+    name = items[0].replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".exe")
+    return name in _LOW_PRIORITY or (len(items) > 2 and items[1] == "-m" and items[2] == "demucs")
+
+
+def _patch_popen() -> None:
+    """Windows, mọi tiến trình con:
+    - App desktop chạy bằng pythonw (không có console): mỗi lần gọi chương trình dòng lệnh (ffmpeg, ffprobe, python
+      của backend tải Douyin…) Windows lại bật 1 cửa sổ cmd nhảy lên rồi tắt -> thêm CREATE_NO_WINDOW. Chạy từ cmd /
+      terminal (có console) thì không thêm: tiến trình con dùng chung console đó. Ai cố ý mở console riêng thì để nguyên.
+    - ffmpeg / ffprobe / Demucs: BELOW_NORMAL_PRIORITY_CLASS (trừ khi người gọi đã tự chọn mức ưu tiên)."""
     if sys.platform != "win32":
         return
     import ctypes
     import subprocess
+    if getattr(subprocess.Popen, "_dytool_patched", False):
+        return
     try:
-        if ctypes.windll.kernel32.GetConsoleWindow():
-            return
+        no_console = not ctypes.windll.kernel32.GetConsoleWindow()
     except (AttributeError, OSError):
-        return
-    if getattr(subprocess.Popen, "_dytool_no_window", False):
-        return
+        no_console = False
     orig = subprocess.Popen.__init__
 
     def __init__(self, *args, **kwargs):
         flags = kwargs.get("creationflags", 0) or 0
-        if not flags & subprocess.CREATE_NEW_CONSOLE:     # ai cố ý mở console riêng thì để nguyên
-            kwargs["creationflags"] = flags | subprocess.CREATE_NO_WINDOW
+        if no_console and not flags & subprocess.CREATE_NEW_CONSOLE:
+            flags |= subprocess.CREATE_NO_WINDOW
+        if not flags & _PRIORITY_FLAGS and _heavy(args[0] if args else kwargs.get("args")):
+            flags |= subprocess.BELOW_NORMAL_PRIORITY_CLASS
+        if flags:
+            kwargs["creationflags"] = flags
         orig(self, *args, **kwargs)
 
     subprocess.Popen.__init__ = __init__
-    subprocess.Popen._dytool_no_window = True
+    subprocess.Popen._dytool_patched = True
 
 
-_hide_child_consoles()
+_patch_popen()

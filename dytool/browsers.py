@@ -212,6 +212,14 @@ def install_engine_background() -> threading.Thread:
     return _install_thread
 
 
+def wait_install(timeout: float = 900) -> None:
+    """Đang tải / cập nhật nhân ở nền (màn hình khởi động không còn chờ bước này) -> chờ xong rồi mới mở hồ sơ,
+    không mở nhân đang chép dở."""
+    t = _install_thread
+    if t is not None and t.is_alive() and t is not threading.current_thread():
+        t.join(timeout)
+
+
 # ---------------- hồ sơ ----------------
 
 def get_choice(acc_dir: Path) -> dict:
@@ -662,6 +670,7 @@ def attach(pw, acc_dir: Path, headless: bool):
     sess = None
     ws = _running_cdp(PROFILES_DIR / pid)
     if not ws:
+        wait_install()
         try:
             with _quiet():
                 kw = _launch_kwargs(pid)

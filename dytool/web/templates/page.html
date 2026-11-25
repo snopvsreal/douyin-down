@@ -3,11 +3,11 @@
 {% block crumb %}Kênh › <b>{{ page.name }}</b>{% endblock %}
 {% block body %}
 {% from "_ch_live.html" import pill, summary %}
-{% from "_macros.html" import empty %}
+{% from "_macros.html" import empty, chan_av %}
 {% set tt = page.platform == 'tiktok' %}
 {% set gender_vi = {'auto': 'tự nhận nam / nữ', 'male': 'luôn giọng nam', 'female': 'luôn giọng nữ'} %}
 <div class="head ch-head">
-  <span class="ch-av lg" style="background:{{ color }}" aria-hidden="true">{{ page.name[:1]|upper }}</span>
+  {{ chan_av(page.id, page.name, tt, color, size=48, cls='ch-head-av') }}
   <div style="min-width:0">
     <div class="row" style="gap:10px"><h1 class="trunc" style="max-width:none">{{ page.name }}</h1>
       {{ pill(page) }}</div>
@@ -65,7 +65,7 @@
         <div class="small muted num">♥ {{ '{:,}'.format(v.likes or 0) }} · {{ (v.duration or 0)|round|int }}s ·
           <a href="https://www.douyin.com/video/{{ v.id }}" target="_blank" rel="noopener">xem gốc</a>
           {% if v.source %}<span title="{{ v.source }}"> · {{ v.source.split(':', 1)[-1][:24] }}</span>{% endif %}</div></td>
-      <td><span class="pill {{ cls }}">{{ STATUS_VI.get(v.status, v.status) }}</span>
+      <td><span class="pill {{ cls }}">{{ status_vi(v.status, page.platform) }}</span>
         {% if v.error %}<div class="small err-text" style="margin-top:3px">{{ v.error[:140] }}</div>{% endif %}
         {% if v.status == 'downloaded' %}<div style="margin-top:6px">{% with pid=page.id, vid=v.id %}{% include "_edit_btn.html" %}{% endwith %}</div>{% endif %}</td>
       <td class="small num nowrap">
@@ -75,7 +75,7 @@
       <td class="cell-end">
         {% if v.status == 'failed' %}<button class="btn sm" hx-post="/videos/{{ page.id }}/{{ v.id }}/retry" hx-swap="outerHTML">Thử lại</button>
 
-        {% elif v.status == 'uploaded' and v.fb_url %}<a class="small" href="{{ v.fb_url }}" target="_blank" rel="noopener">xem bài ↗</a>
+        {% elif v.status == 'uploaded' and post_url(v.fb_url) %}<a class="small" href="{{ post_url(v.fb_url) }}" target="_blank" rel="noopener">xem bài ↗</a>
         {% elif v.status == 'review' %}<button type="button" class="btn sm" data-vview="{{ page.id }}:{{ v.id }}" data-vseq="{{ page.id }}" title="Xem video và duyệt ngay tại đây — xong tự mở video chờ duyệt kế tiếp của kênh">Duyệt</button>{% endif %}</td>
     </tr>
     {% else %}

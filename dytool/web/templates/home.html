@@ -2,7 +2,7 @@
 {% block title %}Hôm nay{% endblock %}
 {% block crumb %}Làm việc › <b>Hôm nay</b>{% endblock %}
 {% block body %}
-{% from "_macros.html" import empty %}
+{% from "_macros.html" import empty, plat_icon %}
 {#
   Trang Hôm nay (thiết kế lại 2026-11): trả lời đúng thứ tự 3 câu người dùng hỏi mỗi lần mở app —
   1. Việc gì chờ mình?  2. Hôm nay đang chạy thế nào?  3. Có gì hỏng không?
@@ -81,7 +81,7 @@
     <span class="rv-dur num">{{ (v.duration or 0)|round|int }}s</span>
     <span class="rv-chan" style="--c: {{ colors.get(v.page_id, 'var(--primary)') }}">{{ v.page_name }}</span></span>
   <span class="rv-meta"><b class="clamp2">{{ v.caption or v.desc or v.id }}</b>
-    <span class="small muted">{{ 'TikTok' if v.platform == 'tiktok' else 'Facebook' }} · ♥ {{ '{:,}'.format(v.likes or 0) }}</span>
+    <span class="small muted rv-plat">{{ plat_icon(v.platform == 'tiktok', 12) }} ♥ {{ '{:,}'.format(v.likes or 0) }}</span>
     {% if v.status != 'review' %}<span class="pill info rv-auto">{% if v.status == 'schedule_pending' and v.scheduled_at %}Gửi lịch {{ vnt(v.scheduled_at, '%H:%M %d/%m') }}{% elif v.status == 'publish_now' %}Đăng ngay{% else %}Theo cài đặt kênh{% endif %}</span>{% endif %}</span>
 </div>
 {% endmacro %}

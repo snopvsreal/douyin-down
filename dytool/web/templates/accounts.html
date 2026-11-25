@@ -9,7 +9,7 @@
 </div>
 {% if logging_in %}<div hx-get="/partials/accounts" hx-trigger="every 3s [!document.hidden]" hx-swap="none"></div>{% endif %}
 
-{% from "_macros.html" import profile_line, empty with context %}
+{% from "_macros.html" import profile_line, empty, chan_av, plat_icon with context %}
 
 {# vừa chuyển từ app ShardBrowser sang trình duyệt nhúng -> các tài khoản cũ phải đăng nhập lại 1 lần #}
 {% if relogin %}
@@ -43,6 +43,10 @@
       {% if not tt and a.status == 'da_dang_nhap' %}
         <form method="post" action="/accounts/{{ a.id }}/discover"><button class="btn sm ghost" title="Tìm lại các Page tài khoản này quản lý">Quét lại Page</button></form>
       {% endif %}
+      {% if a.status == 'da_dang_nhap' %}
+        <form method="post" action="/accounts/{{ a.id }}/refresh-info" hx-disabled-elt="find button"><button class="btn sm ghost"
+              title="{{ 'Đọc lại tên kênh và ảnh đại diện từ TikTok (mở trình duyệt của tài khoản vài giây)' if tt else 'Lấy lại ảnh đại diện các Page' }}">{{ 'Cập nhật tên & ảnh' if tt else 'Cập nhật ảnh' }}</button></form>
+      {% endif %}
       {# hx-confirm (không dùng onsubmit="return confirm"): body có hx-boost, htmx gửi form trước khi xét kết quả
          confirm() -> bấm Huỷ vẫn bị xoá. hx-confirm: Huỷ = htmx không gửi gì #}
       <form method="post" action="/accounts/{{ a.id }}/delete"
@@ -59,7 +63,8 @@
   <table>
     {% for p in mine %}
     <tr>
-      <td><a href="/pages/{{ p.id }}"><b>{{ p.name }}</b></a>
+      <td><a href="/pages/{{ p.id }}" class="acc-page">{{ chan_av(p.id, p.name, tt, size=28) }}<b>{{ p.name }}</b></a>
+        {% if tt and p.profile_id %}<span class="small muted">@{{ p.profile_id }}</span>{% endif %}
         {% if tt %}{% set used = mirrors.get(p.id, []) %}
           <div class="small muted">{% if used %}Đăng kèm cho {{ used|join(', ') }}{% else %}Chưa Page nào đăng kèm vào kênh này{% endif %}</div>
         {% endif %}</td>
@@ -80,7 +85,7 @@
 <div class="platforms">
   <section class="platform" aria-labelledby="h-fb">
     <div class="platform-head">
-      <h2 id="h-fb">Facebook</h2>
+      <h2 id="h-fb" class="row" style="gap:8px">{{ plat_icon(false, 18) }}Facebook</h2>
       <p class="hint">Đăng nhập 1 lần, tool tự tìm các Page tài khoản đó quản lý.</p>
     </div>
     <form method="post" action="/accounts" class="add-bar">
@@ -94,7 +99,7 @@
 
   <section class="platform" id="tiktok" aria-labelledby="h-tt">
     <div class="platform-head">
-      <h2 id="h-tt">TikTok</h2>
+      <h2 id="h-tt" class="row" style="gap:8px">{{ plat_icon(true, 18) }}TikTok</h2>
       <p class="hint">Mỗi tài khoản là 1 kênh: đăng riêng, hoặc đăng kèm trong cài đặt 1 Page Facebook.</p>
     </div>
     <form method="post" action="/accounts" class="add-bar">

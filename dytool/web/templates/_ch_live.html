@@ -19,9 +19,10 @@
 </section>
 {%- endmacro %}
 
+{% from "_macros.html" import chan_av %}
 {% macro nav_chan(ch, on=false, oob=false) -%}
-<a href="/pages/{{ ch.id }}" id="nav-ch-{{ ch.id }}" class="nav-item nav-chan {{ 'on' if on }}" {{ 'aria-current=page' if on }}
+<a href="/pages/{{ ch.id }}" id="nav-ch-{{ ch.id }}" class="nav-item nav-chan {{ 'on' if on }} {{ '' if ch.enabled else 'off' }}" {{ 'aria-current=page' if on }}
    title="{{ ch.name }} — {{ 'đang bật' if ch.enabled else 'đang tắt' }}" {{ 'hx-swap-oob=outerHTML' if oob }}>
-  <span class="chan-dot" style="background:{{ ch.color if ch.enabled else 'var(--t-dis)' }}" aria-hidden="true"></span>
-  <span class="label">{{ ch.name }}</span><span class="ptag">{{ 'TT' if ch.tt else 'FB' }}</span></a>
+  {{ chan_av(ch.id, ch.name, ch.tt, ch.color, size=22) }}
+  <span class="label">{{ ch.name }}</span><span class="sr-only">{{ ' (TikTok)' if ch.tt else ' (Facebook)' }}</span></a>
 {%- endmacro %}

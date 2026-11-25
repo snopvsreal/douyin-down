@@ -87,7 +87,7 @@ def _start_server():
     for _ in range(150):                      # chờ server lên (tối đa ~30s)
         if server.started:
             # bật hết dịch vụ (backend tải, VoiceStudio, nhân trình duyệt…) song song; màn hình khởi động /startup
-            # hiện tiến độ; xong mới bật worker + hỏi bản cập nhật (web/app.py begin_startup)
+            # hiện tiến độ; xong thì hỏi bản cập nhật; chạy tự động KHÔNG tự bật (web/app.py begin_startup)
             app.state.begin_startup()
             return app, server
         time.sleep(0.2)
@@ -286,20 +286,41 @@ def main() -> None:
                 return
         except httpx.HTTPError:
             pass
-        app = server = None                    # server chạy từ run_ui.bat -> chỉ mở cửa sổ gắn vào nó
+        own = None                             # server chạy từ run_ui.bat -> chỉ mở cửa sổ gắn vào nó
     else:
-        try:
-            app, server = _start_server()
-        except Exception as e:
-            traceback.print_exc()
-            _message(f"dytool không khởi động được:\n{e}\n\nChi tiết: {ROOT / 'data' / 'app.log'}")
-            return
+        # Bật server ở luồng riêng, SONG SONG với nạp pywebview / pystray (~1,5 s mỗi thứ) -> cửa sổ hiện sớm hơn
+        # vài giây; cửa sổ chờ server sẵn sàng rồi mới tải giao diện (load_ui)
+        own = {"app": None, "server": None, "err": None, "ready": threading.Event()}
+
+        def boot():
+            try:
+                own["app"], own["server"] = _start_server()
+            except Exception as e:
+                traceback.print_exc()
+                own["err"] = e
+            finally:
+                own["ready"].set()
+        threading.Thread(target=boot, daemon=True, name="dytool-boot").start()
+
+    def server_up() -> bool:
+        """Chờ server của mình lên (chạy gắn vào server có sẵn thì True ngay). Lỗi -> báo người dùng, False."""
+        if own is None:
+            return True
+        own["ready"].wait()
+        if own["err"] is not None:
+            _message(f"dytool không khởi động được:\n{own['err']}\n\nChi tiết: {ROOT / 'data' / 'app.log'}")
+            return False
+        return True
+
+    def _app():
+        return own["app"] if own else None
 
     from PIL import Image
     import pystray
 
     if not _has_webview2():
-        _browser_mode(app, server, pystray, Image)
+        if server_up():
+            _browser_mode(_app(), own and own["server"], pystray, Image)
         return
     import webview
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True     # link douyin / facebook mở bằng trình duyệt
@@ -329,6 +350,7 @@ def main() -> None:
             pass
 
     def quit_app(icon=None, item=None):
+        app = _app()
         w = app.state.worker if app else None
         busy = w is not None and w.running and w.current not in ("Đang chờ việc mới", "Đang dừng")
         if busy and not window.create_confirmation_dialog(
@@ -353,22 +375,33 @@ def main() -> None:
         return False
 
     def toggle_worker(icon, item):
-        w = app.state.worker
-        w.stop() if w.running else w.start()
+        app = _app()
+        if app:
+            w = app.state.worker
+            w.stop() if w.running else w.start()
 
-    if app:
-        app.state.show_window = show
+    def load_ui(url: str):
+        """Cửa sổ đã hiện (trang trống) -> chờ server lên rồi mới tải giao diện."""
+        if not server_up():
+            state["quitting"] = True
+            window.destroy()
+            return
+        if own:
+            own["app"].state.show_window = show
+        _frameless(window, url)
+
     window.events.closing += on_closing
     window.events.shown += lambda: _style_window(window)
-    window.events.shown += lambda: threading.Thread(target=_frameless, args=(window, URL + "/startup"), daemon=True).start()
+    window.events.shown += lambda: threading.Thread(target=load_ui, args=(URL + "/startup",), daemon=True).start()
     window.events.maximized += lambda: api._push()
     window.events.restored += lambda: api._push()
     window.events.shown += lambda: _allow_close_on_shutdown(state)
 
     menu_items = [pystray.MenuItem("Mở dytool", lambda i, it: show(), default=True)]
-    if app:
+    if own:
         menu_items.append(pystray.MenuItem(
-            lambda it: "Tạm dừng chạy tự động" if app.state.worker.running else "Bật chạy tự động", toggle_worker))
+            lambda it: "Tạm dừng chạy tự động" if _app() and _app().state.worker.running else "Bật chạy tự động",
+            toggle_worker))
     menu_items += [pystray.Menu.SEPARATOR, pystray.MenuItem("Thoát dytool", quit_app)]
     def _icon_image():
         # đọc hết vào bộ nhớ rồi đóng file: Image.open giữ file mở -> trình cài bản mới không ghi đè được dytool.ico
@@ -388,6 +421,7 @@ def main() -> None:
         tray.stop()
     except Exception:
         pass
+    app, server = _app(), own and own["server"]
     if app:
         # tắt hết dịch vụ đi kèm: worker (như nút Dừng), trình duyệt đã mở, VoiceStudio chạy ngầm, backend tải Douyin,
         # cửa sổ đăng nhập, ffmpeg… — thoát app là không còn gì chạy ngầm

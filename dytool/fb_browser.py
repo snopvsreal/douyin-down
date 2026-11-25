@@ -377,3 +377,156 @@ def login_and_discover(acc_dir: Path) -> dict:
     ls.write(st, ls.FB_STEPS, "Tìm các Page", state="done",
              msg=f"Đã đăng nhập Facebook, tìm thấy {len(res['pages'])} Page")
     return res
+
+
+# ---------- bài đã đăng (đổi trạng thái bài hẹn giờ khi Facebook đã đăng + lấy link bài) ----------
+PUBLISHED = "https://business.facebook.com/latest/posts/published_posts?asset_id={asset_id}"
+
+
+def _walk_posts(o, out: dict) -> None:
+    """Tìm các bài trong dữ liệu GraphQL của Business Suite (bảng Nội dung): nút có entity_id + title + post_type."""
+    if isinstance(o, dict):
+        if o.get("entity_type") == "FB_PAGE_POST" and o.get("entity_id") and "title" in o:
+            vid = (o.get("video") or {}).get("id") or ""
+            owner = str((o.get("owner") or {}).get("entity_id") or "")
+            pid = str(o["entity_id"])
+            state = (o.get("video") or {}).get("publishing_state_enum") or \
+                (o.get("tofu_business_content_info") or {}).get("unpublished_content_publishing_stage") or ""
+            out[pid] = {
+                "post_id": pid, "video_id": str(vid), "owner_id": owner, "title": o.get("title") or "",
+                "created_at": int(o.get("created_at") or 0), "state": state,
+                "url": (f"https://www.facebook.com/reel/{vid}" if vid else
+                        f"https://www.facebook.com/{owner}/posts/{pid}" if owner else ""),
+            }
+        for v in o.values():
+            _walk_posts(v, out)
+    elif isinstance(o, list):
+        for v in o:
+            _walk_posts(v, out)
+
+
+def parse_posts(texts: list[str]) -> list[dict]:
+    """texts: phản hồi GraphQL (mỗi dòng 1 JSON) + nội dung các thẻ <script type=application/json> của trang."""
+    import json
+    out: dict[str, dict] = {}
+    for t in texts:
+        if "FB_PAGE_POST" not in t:
+            continue
+        for line in t.splitlines():
+            line = line.strip()
+            if line.startswith("for (;;);"):
+                line = line[9:]
+            try:
+                _walk_posts(json.loads(line), out)
+            except ValueError:
+                continue
+    return sorted(out.values(), key=lambda p: -p["created_at"])
+
+
+# chữ hiện trên dòng của từng bài trong bảng (lý do / trạng thái nền tảng báo: "Under review", "Only me"…).
+# Tìm phần tử sâu nhất chứa đầu caption rồi leo lên cha tới khi cha chứa cả bài khác -> đó là 1 dòng.
+ROW_JS = """(keys) => {
+  const norm = t => (t || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+  const out = {};
+  const skip = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'svg']);
+  const all = [...document.querySelectorAll('body *')].filter(e => !skip.has(e.tagName) && e.getClientRects().length);
+  for (const k of keys) {
+    const key = norm(k).slice(0, 30);
+    if (!key) continue;
+    let el = null;
+    for (const e of all) {
+      if (norm(e.innerText).includes(key) && ![...e.children].some(c => norm(c.innerText).includes(key))) { el = e; break; }
+    }
+    if (!el) continue;
+    const others = keys.map(x => norm(x).slice(0, 30)).filter(x => x && x !== key);
+    while (el.parentElement && el.parentElement !== document.body) {
+      const pt = norm(el.parentElement.innerText);
+      if (others.some(o => pt.includes(o)) || pt.length > 600) break;
+      el = el.parentElement;
+    }
+    out[k] = (el.innerText || '').replace(/\\s*\\n\\s*/g, ' · ').slice(0, 300);
+  }
+  return out;
+}"""
+
+SCHEDULED = "https://business.facebook.com/latest/posts/scheduled_posts?asset_id={asset_id}"
+
+
+def read_tab(acc_dir: Path, asset_id: str, page_name: str = "", tab: str = "published",
+             find: list[str] | None = None) -> dict:
+    """CHỈ ĐỌC 1 bảng trong Business Suite › Nội dung: tab "published" (Đã đăng) / "scheduled" (Đã lên lịch).
+    Trả về {"posts": [...], "rows": {caption: chữ trên dòng của bài đó}} — rows chỉ cho các caption trong find."""
+    from playwright.sync_api import sync_playwright
+    bodies: list[str] = []
+    with sync_playwright() as pw:
+        ctx = _context(pw, acc_dir, headless=True)
+        try:
+            if not logged_in(ctx):
+                raise FBError("Phiên Facebook hết hạn — đăng nhập lại ở trang Tài khoản")
+            page = ctx.new_page()
+
+            def on_resp(r):
+                if "graphql" in r.url:
+                    try:
+                        bodies.append(r.text())
+                    except Exception:
+                        pass
+            page.on("response", on_resp)
+            url = (SCHEDULED if tab == "scheduled" else PUBLISHED).format(asset_id=asset_id)
+            page.goto(url, wait_until="domcontentloaded", timeout=90000)
+            if f"asset_id={asset_id}" not in page.url:
+                raise FBError(f"Business Suite không mở được Page {page_name or asset_id} (tài khoản còn quản lý Page?)")
+            posts: list[dict] = []
+            prev = -1
+            for i in range(20):                     # chờ bảng tải xong: số bài đứng yên (tối đa ~40 s)
+                page.wait_for_timeout(2000)
+                scripts = page.evaluate("() => [...document.querySelectorAll('script[type=\"application/json\"]')]"
+                                        ".map(s => s.textContent).filter(t => t.includes('FB_PAGE_POST'))")
+                posts = parse_posts(list(bodies) + scripts)
+                if len(posts) == prev and (posts or i >= 5):     # bảng trống (vd. không còn bài hẹn giờ): ~12 s
+                    break
+                prev = len(posts)
+            rows = page.evaluate(ROW_JS, [c for c in (find or []) if c]) if find else {}
+            return {"posts": posts, "rows": rows}
+        finally:
+            ctx.close()
+
+
+def published_posts(acc_dir: Path, asset_id: str, page_name: str = "") -> list[dict]:
+    """CHỈ ĐỌC: bài đã đăng gần đây của Page (bảng 'Đã đăng' trong Business Suite, mới nhất trước).
+    Mỗi bài: post_id, video_id, owner_id, title (= caption), created_at (giờ đăng thật), url (link reel / bài)."""
+    return read_tab(acc_dir, asset_id, page_name)["posts"]
+
+
+def _norm(s: str) -> str:
+    import re
+    return re.sub(r"\s+", " ", s or "").strip().lower()
+
+
+def match_posts(videos: list[dict], posts: list[dict]) -> dict[str, dict]:
+    """Ghép video trong dytool với bài trên Page. videos: {id, caption, ref_ts (giờ hẹn / giờ đăng), window: (trước, sau)
+    giây}. Cùng caption (hoặc cùng 40 ký tự đầu) + giờ đăng trong cửa sổ; nhiều bài khớp -> bài gần giờ nhất.
+    Mỗi bài chỉ ghép 1 video. Trả về {video_id: post}."""
+    used: set[str] = set()
+    res: dict[str, dict] = {}
+    for v in sorted(videos, key=lambda x: x["ref_ts"]):
+        nv = _norm(v.get("caption", ""))
+        before, after = v.get("window", (15 * 60, 12 * 3600))
+        best = None
+        for p in posts:
+            if p["post_id"] in used or not p["created_at"] or p.get("state") not in ("", "PUBLISHED"):
+                continue
+            if not (v["ref_ts"] - before <= p["created_at"] <= v["ref_ts"] + after):
+                continue
+            np_ = _norm(p["title"])
+            if nv:
+                if not (nv == np_ or (len(nv) >= 12 and (np_.startswith(nv[:40]) or nv.startswith(np_[:40])))):
+                    continue
+            elif np_:
+                continue
+            if best is None or abs(p["created_at"] - v["ref_ts"]) < abs(best["created_at"] - v["ref_ts"]):
+                best = p
+        if best:
+            used.add(best["post_id"])
+            res[v["id"]] = best
+    return res

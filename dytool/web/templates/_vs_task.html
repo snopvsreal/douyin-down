@@ -1,0 +1,60 @@
+{# Kết quả 1 việc dài của trang Giọng nói (đọc hàng loạt / lồng tiếng video / giọng -> chữ) — đang chạy thì tự hỏi lại 2 s / lần #}
+<div class="vs-job vs-task" id="task-{{ key }}" aria-live="polite"
+     {% if t and t.state == 'run' %}hx-get="/partials/vs-task?key={{ key }}" hx-trigger="every 2s [!document.hidden]" hx-swap="outerHTML"{% endif %}>
+  {% if t and t.state == 'run' %}
+    {% set mine = prog and prog.title == 'Lồng tiếng file' %}
+    <div class="row" style="gap:8px; width:100%; flex-wrap:wrap">
+      <span class="spin" aria-hidden="true"></span>
+      <b class="small">{{ t.label }}</b>
+      {% if key == 'dubfile' %}
+        <span class="small muted">{% if mine %}{{ (prog.steps|last).name if prog.steps else 'Đang bắt đầu' }}{% if prog.detail %} · {{ prog.detail }}{% endif %}
+          {% elif prog %}Đang chờ việc khác xong ({{ prog.title }}){% else %}Đang bắt đầu…{% endif %}</span>
+      {% elif t.total %}
+        <span class="small muted">{{ t.done }} / {{ t.total }}{{ ' giây' if key == 'stt' }}</span>
+      {% endif %}
+      <span class="small muted">· {{ ((time.time() - t.at)|int) }} giây</span>
+      <div class="spacer"></div>
+      {% if not t.stop %}
+        <button type="button" class="btn sm ghost danger" hx-post="/voicestudio/task/{{ key }}/stop" hx-target="#task-{{ key }}" hx-swap="outerHTML">Dừng</button>
+      {% else %}<span class="small muted">Đang dừng…</span>{% endif %}
+    </div>
+    {% if t.total and key != 'dubfile' %}
+      <progress max="{{ t.total }}" value="{{ t.done }}" style="width:100%">{{ t.done }} / {{ t.total }}</progress>
+    {% endif %}
+    {% if t.detail and key != 'dubfile' %}<p class="small muted trunc" style="margin:0; width:100%">{{ t.detail }}</p>{% endif %}
+  {% elif t and t.state in ('ok', 'stopped') %}
+    <div style="width:100%">
+      <p class="small" style="margin:0 0 8px"><b>{{ t.label }}</b> ·
+        {% if t.state == 'stopped' %}<span class="muted">đã dừng{% if t.done %} — xong {{ t.done }} / {{ t.total }}{% endif %}</span>
+        {% else %}<span class="muted">xong trong {{ ((t.end or t.at) - t.at)|int }} giây{% if t.lang %} · ngôn ngữ nhận ra: {{ t.lang }}{% endif %}</span>{% endif %}</p>
+      {% if key == 'dubfile' and 'long-tieng.mp4' in t.files %}
+        <video controls preload="metadata" src="/voicestudio/task/dubfile/file/long-tieng.mp4?t={{ t.at|int }}" style="max-width:100%; max-height:480px; background:#000; border-radius:8px"></video>
+      {% endif %}
+      {% if key == 'stt' and t.files %}
+        <label for="stt-out" class="sr-only">Lời nghe được</label>
+        <textarea id="stt-out" rows="8" readonly style="width:100%">{{ t.text }}</textarea>
+      {% endif %}
+      {% if key == 'batch' and 'tat-ca.wav' in t.files %}
+        <audio controls preload="none" src="/voicestudio/task/batch/file/tat-ca.wav?t={{ t.at|int }}" aria-label="Ghép tất cả"></audio>
+      {% endif %}
+      <div class="row" style="gap:6px; flex-wrap:wrap; margin-top:8px">
+        {% for name, label in t.files.items() %}
+          {% if key != 'batch' or not name[0].isdigit() %}
+            <a class="btn sm{{ ' primary' if loop.first }}" href="/voicestudio/task/{{ key }}/file/{{ name }}?dl=1" download>Tải {{ label }}</a>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% if key == 'batch' and t.files %}
+        <details style="margin-top:8px"><summary class="small">Nghe từng dòng ({{ t.done }})</summary>
+          {% for name, label in t.files.items() %}{% if name[0].isdigit() %}
+            <div class="row" style="gap:8px; margin-top:6px"><span class="small muted">{{ name[:3] }}</span>
+              <audio controls preload="none" src="/voicestudio/task/batch/file/{{ name }}" aria-label="Dòng {{ name[:3] }}"></audio>
+              <span class="small trunc">{{ label }}</span></div>
+          {% endif %}{% endfor %}
+        </details>
+      {% endif %}
+    </div>
+  {% elif t and t.state == 'err' %}
+    <span class="hint" style="margin:0; color:var(--err-text)">Lỗi ({{ t.label }}): {{ t.msg }}</span>
+  {% endif %}
+</div>

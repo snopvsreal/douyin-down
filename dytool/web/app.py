@@ -336,7 +336,13 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
 
     # ---------------- Trang VoiceStudio: điều khiển + toàn bộ tính năng VoiceStudio bằng giao diện dytool ----------------
     # (không nhúng giao diện của VoiceStudio — mọi trang gọi API backend qua vs_api.py)
-    VS_TABS = ("speak", "voices", "history", "pron", "log")
+    VS_TABS = ("speak", "batch", "dubfile", "stt", "voices", "history", "pron", "log")
+    # Whisper nhận được (mã của Whisper); "" = tự nhận
+    STT_LANGS = (("", "Tự nhận ngôn ngữ"), ("vi", "Tiếng Việt"), ("zh", "Tiếng Trung"), ("en", "Tiếng Anh"),
+                 ("yue", "Tiếng Quảng Đông"), ("ja", "Tiếng Nhật"), ("ko", "Tiếng Hàn"), ("th", "Tiếng Thái"),
+                 ("id", "Tiếng Indonesia"), ("ms", "Tiếng Mã Lai"), ("km", "Tiếng Khmer"), ("lo", "Tiếng Lào"),
+                 ("hi", "Tiếng Hindi"), ("ar", "Tiếng Ả Rập"), ("ru", "Tiếng Nga"), ("fr", "Tiếng Pháp"),
+                 ("de", "Tiếng Đức"), ("es", "Tiếng Tây Ban Nha"), ("pt", "Tiếng Bồ Đào Nha"), ("it", "Tiếng Ý"))
 
     def _voice_usage() -> dict[str, list[str]]:
         """tên giọng (chữ thường) -> kênh đang dùng nó để lồng tiếng."""
@@ -364,7 +370,13 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         tab = tab if tab in VS_TABS else ""
         ctx: dict = {"info": services.vs_info(cfg), "tab": tab,
                      "jobs": _vs_jobs, "va": vs_api, "err": "", "v": v}
-        if tab in ("speak", "voices", "history") and ctx["info"]["state"] == "ok":
+        ctx["tasks"] = _vs_tasks
+        if tab in ("dubfile", "batch", "stt"):
+            from .. import progress
+            ctx["prog"] = progress.snapshot()
+            ctx["channels"] = _channel_voices()
+            ctx["stt_langs"] = STT_LANGS
+        if tab in ("speak", "voices", "history", "batch") and ctx["info"]["state"] == "ok":
             try:
                 ctx["profiles"] = vs_api.profiles(cfg)
                 if tab in ("speak", "history"):
@@ -526,6 +538,264 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         name = f"dytool-{key}-{time.strftime('%Y%m%d-%H%M%S')}.wav" if dl else None
         return FileResponse(_job_file(key), media_type="audio/wav", filename=name, headers={"Cache-Control": "no-store"})
 
+    # ----- việc dài có nhiều file kết quả (đọc hàng loạt / lồng tiếng 1 file video / giọng -> chữ) -----
+    # khoá -> {"state": run|ok|err|stopped, "label", "at", "msg", "done", "total", "detail", "files": {tên: nhãn},
+    #          "text", "stop"}
+    _vs_tasks: dict = {}
+    TASK_KEYS = ("batch", "dubfile", "stt")
+    TASK_FILE_RE = __import__("re").compile(r"^[A-Za-z0-9_.-]{1,60}$")
+
+    def _task_dir(key: str) -> Path:
+        return data / "work" / f"vs_task_{key}"
+
+    def _start_task(request: Request, key: str, label: str, fn) -> HTMLResponse:
+        """fn(t) tự ghi file vào _task_dir(key) và cập nhật t (done / total / files / text). Chạy ở luồng nền."""
+        t = {"state": "run", "label": label, "at": time.time(), "msg": "", "done": 0, "total": 0, "detail": "",
+             "files": {}, "text": "", "stop": False}
+        _vs_tasks[key] = t
+
+        def run():
+            from .. import progress
+            try:
+                fn(t)
+                t["state"] = "stopped" if t["stop"] else "ok"
+            except progress.Cancelled:
+                t["state"] = "stopped"
+            except Exception as e:
+                t.update(state="stopped" if t["stop"] else "err", msg=str(e)[:500])
+            t["end"] = time.time()
+        threading.Thread(target=run, daemon=True, name=f"vs-task-{key}").start()
+        return vs_task_partial(request, key)
+
+    def _task_busy(key: str) -> bool:
+        return (_vs_tasks.get(key) or {}).get("state") == "run"
+
+    def _fresh_task_dir(key: str) -> Path:
+        import shutil
+        d = _task_dir(key)
+        shutil.rmtree(d, ignore_errors=True)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    async def _save_upload(f, dest: Path, max_mb: int) -> int:
+        """Chép file tải lên ra đĩa từng khúc (video có thể vài trăm MB). Quá max_mb -> ValueError."""
+        n = 0
+        with open(dest, "wb") as out:
+            while True:
+                chunk = await f.read(1 << 20)
+                if not chunk:
+                    break
+                n += len(chunk)
+                if n > max_mb * 1024 * 1024:
+                    raise ValueError(f"File quá lớn (tối đa {max_mb} MB)")
+                out.write(chunk)
+        if not n:
+            raise ValueError("File trống")
+        return n
+
+    @app.get("/partials/vs-task", response_class=HTMLResponse)
+    def vs_task_partial(request: Request, key: str):
+        from .. import progress
+        if key not in TASK_KEYS:
+            return PlainTextResponse("", 400)
+        return tpl.TemplateResponse(request, "_vs_task.html", {"key": key, "t": _vs_tasks.get(key),
+                                                               "prog": progress.snapshot()})
+
+    @app.post("/voicestudio/task/{key}/stop", response_class=HTMLResponse)
+    def vs_task_stop(request: Request, key: str):
+        from .. import progress
+        t = _vs_tasks.get(key)
+        if key not in TASK_KEYS or not t or t["state"] != "run":
+            return PlainTextResponse("Không có việc nào đang chạy", 400)
+        t["stop"] = True
+        if key == "dubfile":
+            snap = progress.snapshot()
+            if snap and snap.get("title") == "Lồng tiếng file":
+                progress.cancel()
+        return vs_task_partial(request, key)
+
+    @app.get("/voicestudio/task/{key}/file/{name}")
+    def vs_task_file(key: str, name: str, dl: int = 0):
+        from fastapi.responses import FileResponse
+        t = _vs_tasks.get(key)
+        if key not in TASK_KEYS or not TASK_FILE_RE.match(name) or not t or name not in t["files"]:
+            return PlainTextResponse("", 404)
+        f = _task_dir(key) / name
+        if not f.is_file():
+            return PlainTextResponse("", 404)
+        return FileResponse(f, filename=f"dytool-{key}-{name}" if dl else None, headers={"Cache-Control": "no-store"})
+
+    @app.post("/voicestudio/batch", response_class=HTMLResponse)
+    async def vs_batch(request: Request):
+        """Đọc hàng loạt: mỗi dòng 1 file wav (001.wav…), kèm 1 file ghép tất cả + zip. Không ghi Lịch sử."""
+        import random
+        from .. import vs_api
+        if (bad := _vs_ready()):
+            return bad
+        if _task_busy("batch"):
+            return PlainTextResponse("Đang đọc hàng loạt — đợi xong hoặc bấm Dừng", 400)
+        form = await request.form()
+        g = lambda k, d="": str(form.get(k, d) or d)
+        lines = [" ".join(x.split()) for x in g("text").splitlines()]
+        lines = [x for x in lines if x]
+        if not lines:
+            return PlainTextResponse("Gõ văn bản — mỗi dòng 1 bản đọc", 400)
+        if len(lines) > 300:
+            return PlainTextResponse(f"Tối đa 300 dòng mỗi lần (đang có {len(lines)})", 400)
+        if any(len(x) > 3000 for x in lines):
+            return PlainTextResponse("Có dòng dài quá 3.000 ký tự — dùng Tạo giọng nói cho văn bản dài", 400)
+        prof, instruct = g("voice"), ""
+        if g("src", "saved") == "design":
+            prof, instruct = "", vs_api.instruct_of(extra=g("vd_extra"), **_vd(form))
+        elif not prof:
+            return PlainTextResponse("Chọn 1 giọng đã lưu (hoặc chuyển sang Thiết kế)", 400)
+        language = g("language", "vi") if g("language", "vi") in vs_api.LANG_NAMES else "vi"
+        seed = g("seed").strip()
+        try:
+            speed = float(g("speed", "1"))
+            gap = max(0.0, min(5.0, float(g("gap", "0.5") or 0)))
+        except ValueError:
+            speed, gap = 1.0, 0.5
+        sd = int(seed) if seed.lstrip("-").isdigit() else None
+        if instruct and sd is None:          # giọng thiết kế: cố định seed để mọi dòng cùng 1 giọng
+            sd = random.randint(0, 2 ** 31 - 1)
+        kw = dict(profile_id=prof, instruct=instruct, language=language, speed=speed, seed=sd,
+                  effect=g("effect", "broadcast"), pronounce=g("pronounce") == "on", record=False)
+
+        def fn(t):
+            import io
+            import zipfile
+            import numpy as np
+            import soundfile as sf
+            from .. import services
+            d = _fresh_task_dir("batch")
+            t["total"] = len(lines)
+            parts, sr = [], 24000
+            for i, line in enumerate(lines, 1):
+                if t["stop"]:
+                    break
+                t["detail"] = line[:100]
+                wav, _meta = vs_api.generate(cfg, line, **kw)
+                name = f"{i:03d}.wav"
+                (d / name).write_bytes(wav)
+                a, sr = sf.read(io.BytesIO(wav), dtype="float32")
+                parts.append(a if a.ndim == 1 else a.mean(axis=1))
+                t["done"] = i
+                t["files"][name] = line[:120]
+                services.vs_touch()
+            if not parts:
+                return
+            seq = []
+            for a in parts:
+                seq += [a, np.zeros(int(sr * gap), dtype=np.float32)]
+            sf.write(d / "tat-ca.wav", np.concatenate(seq[:-1]), sr, subtype="PCM_16")
+            (d / "noi-dung.txt").write_text("\n".join(f"{i:03d}.wav\t{x}" for i, x in
+                                                      enumerate(lines[:len(parts)], 1)), "utf-8")
+            with zipfile.ZipFile(d / "tat-ca.zip", "w", zipfile.ZIP_DEFLATED) as z:
+                for name in [*t["files"], "noi-dung.txt"]:
+                    z.write(d / name, name)
+            t["files"] = {"tat-ca.wav": "Ghép tất cả (.wav)", "tat-ca.zip": "Từng file (.zip)", **t["files"]}
+        return _start_task(request, "batch", f"{len(lines)} dòng", fn)
+
+    @app.post("/voicestudio/dubfile", response_class=HTMLResponse)
+    async def vs_dubfile(request: Request):
+        """Edit + lồng tiếng 1 file video bất kỳ theo Cài đặt kênh đã chọn (như `dytool edit-file`). Không đăng, không
+        thêm vào hàng video của kênh."""
+        if _task_busy("dubfile"):
+            return PlainTextResponse("Đang lồng tiếng 1 file — đợi xong hoặc bấm Dừng", 400)
+        form = await request.form()
+        f = form.get("file")
+        try:
+            pid = int(str(form.get("pid", "")))
+        except ValueError:
+            return PlainTextResponse("Chọn kênh để lấy cài đặt edit / lồng tiếng", 400)
+        if not store.one("SELECT id FROM pages WHERE id=?", (pid,)):
+            return PlainTextResponse("Không có kênh này", 404)
+        if not getattr(f, "filename", None):
+            return PlainTextResponse("Chọn file video (.mp4, .mov…)", 400)
+        d = _fresh_task_dir("dubfile")
+        ext = Path(f.filename).suffix.lower()
+        src = d / ("goc" + (ext if ext in (".mp4", ".mov", ".mkv", ".webm", ".avi", ".flv", ".m4v") else ".mp4"))
+        try:
+            await _save_upload(f, src, 2048)
+        except ValueError as e:
+            return PlainTextResponse(str(e), 400)
+        label = Path(f.filename).name[:80]
+
+        def fn(t):
+            t["total"] = 1
+            out = d / "long-tieng.mp4"
+            try:
+                worker.edit_file(pid, src, out, label=label, should_stop=lambda: t["stop"])
+            except Exception:
+                out.unlink(missing_ok=True)
+                raise
+            finally:
+                src.unlink(missing_ok=True)
+            t["done"] = 1
+            t["files"] = {"long-tieng.mp4": "Video đã edit"}
+        return _start_task(request, "dubfile", label, fn)
+
+    @app.post("/voicestudio/stt", response_class=HTMLResponse)
+    async def vs_stt(request: Request):
+        """Giọng nói -> chữ (faster-whisper ngay trong dytool, không cần máy chủ giọng nói): .txt + phụ đề .srt."""
+        if _task_busy("stt"):
+            return PlainTextResponse("Đang chuyển 1 file — đợi xong hoặc bấm Dừng", 400)
+        form = await request.form()
+        f = form.get("file")
+        if not getattr(f, "filename", None):
+            return PlainTextResponse("Chọn file âm thanh / video", 400)
+        lang = str(form.get("language", "") or "")
+        lang = lang if lang in dict(STT_LANGS) else ""
+        model = str(form.get("model", "small"))
+        model = model if model in ("small", "medium") else "small"
+        d = _fresh_task_dir("stt")
+        src = d / ("goc" + (Path(f.filename).suffix.lower()[:6] or ".bin"))
+        try:
+            await _save_upload(f, src, 2048)
+        except ValueError as e:
+            return PlainTextResponse(str(e), 400)
+
+        def fn(t):
+            from .. import subtitles
+
+            def srt_ts(x: float) -> str:
+                ms = int(round(x * 1000))
+                h, ms = divmod(ms, 3600000)
+                m, ms = divmod(ms, 60000)
+                sec, ms = divmod(ms, 1000)
+                return f"{h:02d}:{m:02d}:{sec:02d},{ms:03d}"
+            t["detail"] = "Đang đọc file…"
+            try:
+                pcm = subtitles.load_pcm(src)
+            except Exception:
+                raise RuntimeError("Không đọc được âm thanh trong file này — thử file khác (.mp3, .wav, .mp4)")
+            finally:
+                src.unlink(missing_ok=True)
+            total = len(pcm) / 16000
+            if total < 0.5:
+                raise RuntimeError("File không có tiếng (hoặc quá ngắn)")
+            t["total"] = max(1, int(total))
+            t["detail"] = f"Đang nạp model nhận giọng ({model}; lần đầu phải tải về)…"
+            segs_it, info = subtitles._whisper(model).transcribe(pcm, language=lang or None, vad_filter=True)
+            t["lang"] = info.language
+            segs = []
+            for sg in segs_it:
+                if t["stop"]:
+                    break
+                if sg.text.strip():
+                    segs.append((sg.start, sg.end, sg.text.strip()))
+                t["done"] = min(t["total"], int(sg.end))
+                t["detail"] = sg.text.strip()[:100]
+            text = "\n".join(x[2] for x in segs)
+            (d / "loi.txt").write_text(text, "utf-8")
+            (d / "phu-de.srt").write_text("\n".join(f"{i}\n{srt_ts(a)} --> {srt_ts(b)}\n{x}\n"
+                                                    for i, (a, b, x) in enumerate(segs, 1)), "utf-8")
+            t["text"] = text
+            t["done"] = t["total"]
+            t["files"] = {"loi.txt": "Lời (.txt)", "phu-de.srt": "Phụ đề (.srt)"}
+        return _start_task(request, "stt", Path(f.filename).name[:80], fn)
+
     def _vs_ready() -> PlainTextResponse | None:
         from .. import services
         if services.vs_state(cfg) != "ok":
@@ -575,7 +845,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         text = g("text")
         if not text.strip():
             return PlainTextResponse("Gõ văn bản cần đọc", 400)
-        language = g("language", "vi") if g("language", "vi") in dict(vs_api.LANGS) else "vi"
+        language = g("language", "vi") if g("language", "vi") in vs_api.LANG_NAMES else "vi"
         src = g("src", "saved")
         seed = g("seed").strip()
         sd = int(seed) if seed.lstrip("-").isdigit() else None
@@ -607,7 +877,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     def vs_describe(request: Request, describe: str = Form(""), prefix: str = Form("sp")):
         """Mô tả tự do -> điền sẵn các ô thiết kế giọng (như ô "Describe your voice" của VoiceStudio)."""
         from .. import vs_api
-        if prefix not in ("sp", "ds"):
+        if prefix not in ("sp", "ds", "bt"):
             prefix = "sp"
         try:
             d = vs_api.describe(cfg, describe)
@@ -619,7 +889,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     @app.post("/voicestudio/preset", response_class=HTMLResponse)
     def vs_preset(request: Request, i: int = Form(...), prefix: str = Form("sp")):
         from .. import vs_api
-        if not 0 <= i < len(vs_api.DESIGN_PRESETS) or prefix not in ("sp", "ds"):
+        if not 0 <= i < len(vs_api.DESIGN_PRESETS) or prefix not in ("sp", "ds", "bt"):
             return PlainTextResponse("Mẫu không hợp lệ", 400)
         name, attrs, tags = vs_api.DESIGN_PRESETS[i]
         return tpl.TemplateResponse(request, "_vs_design.html", {"va": vs_api, "vd": attrs, "prefix": prefix,
@@ -642,7 +912,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     @app.post("/voicestudio/pron/add")
     def vs_pron_add(term: str = Form(""), replacement: str = Form(""), language: str = Form("*")):
         from .. import vs_api
-        if language != "*" and language not in dict(vs_api.LANGS):
+        if language != "*" and language not in vs_api.LANG_NAMES:
             language = "*"
         try:
             vs_api.pron_add(cfg, term, replacement, language)
@@ -700,7 +970,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         lang = str(form.get("language") or "vi")
         try:
             await run_in_threadpool(vs_api.clone, cfg, str(form.get("name", "")), audio, f.filename,
-                                    str(form.get("ref_text", "")), lang if lang in dict(vs_api.LANGS) else "vi")
+                                    str(form.get("ref_text", "")), lang if lang in vs_api.LANG_NAMES else "vi")
         except vs_api.VSError as e:
             return PlainTextResponse(str(e), 400)
         return _vs_back(f"Giọng nói: đã nhân bản giọng '{form.get('name')}'")
@@ -1270,7 +1540,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         shown.sort(key=lambda p: (not p["pinned"], not p["running"]))      # ghim lên đầu, rồi hồ sơ đang mở
         return render(request, "browsers.html", profiles=shown, all_count=len(profiles), tags=tags, tag=tag, q=q,
                       usage=usage, total_mb=round(sum(p["size_mb"] or 0 for p in profiles), 1),
-                      check_sites=browsers.CHECK_SITES, **_bctx())
+                      check_sites=browsers.CHECK_SITES, platforms=browsers.PLATFORMS, **_bctx())
 
     @app.post("/browsers/{pid}/pin")
     def browsers_pin(pid: str, back: str = Form("/browsers")):
@@ -1347,10 +1617,20 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         return RedirectResponse(back if back.startswith("/browsers") else "/browsers", 303)
 
     @app.post("/browsers/new")
-    def browsers_new(name: str = Form(""), lang: str = Form("auto")):
-        from .. import browsers
+    def browsers_new(name: str = Form(""), lang: str = Form("auto"), platform: str = Form("Windows"),
+                     template: str = Form(""), refresh_rate: str = Form("")):
+        from .. import browser_mgr, browsers
         name = " ".join(name.split())[:80] or "Hồ sơ mới"
-        return _bop(lambda: browsers.create_profile(name, english=lang == "en"),
+        rr = int(refresh_rate) if refresh_rate.isdigit() and 24 <= int(refresh_rate) <= 480 else None
+        if template:
+            try:
+                known = {t for ids in browser_mgr.templates().values() for t in ids}
+            except Exception:
+                known = set()
+            if template not in known:
+                return PlainTextResponse("Không có mẫu máy này", 400)
+        return _bop(lambda: browsers.create_profile(name, english=lang == "en", platform=platform,
+                                                    template=template, refresh_rate=rr),
                     lambda c: f"/browsers/{c['profile_id']}", f"Đã tạo hồ sơ trình duyệt '{name}'")
 
     # ----- proxy -----
@@ -1468,7 +1748,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         return render(request, "browser_detail.html", prof=p,   # không đặt tên `p`: base.html dùng biến p cho menu
                       used=_profile_usage().get(pid, []), templates=tpls,
                       noise_on=browser_mgr.noise_on(pid), noise_vectors=browser_mgr.NOISE_VECTORS,
-                      webrtc_modes=browser_mgr.WEBRTC, extensions=browser_mgr.list_extensions(), **_bctx())
+                      webrtc_modes=browser_mgr.WEBRTC, extensions=browser_mgr.list_extensions(),
+                      platforms=browsers.PLATFORMS, screen_modes=browsers.SCREEN_MODES, **_bctx())
 
     @app.post("/browsers/{pid}/open")
     def browsers_open(pid: str, back: str = Form("")):
@@ -1526,6 +1807,15 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     def browsers_bookmarks(pid: str, text: str = Form("")):
         from .. import browser_mgr
         return _bop(lambda: browser_mgr.save_bookmarks(pid, text), f"/browsers/{pid}?saved=bm#bookmark")
+
+    @app.post("/browsers/{pid}/launch")
+    def browsers_launch_opts(pid: str, screen_mode: str = Form(""), quic: str = Form("auto"),
+                             hide_name: str = Form(""), android_media: str = Form(""), webrtc_ip: str = Form(""),
+                             refresh_rate: str = Form("")):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.save_launch(pid, screen_mode, quic, bool(hide_name), bool(android_media),
+                                                    webrtc_ip, refresh_rate),
+                    f"/browsers/{pid}?saved=launch#khoi-dong")
 
     @app.post("/browsers/{pid}/advanced")
     def browsers_advanced(pid: str, extra_args: str = Form("")):

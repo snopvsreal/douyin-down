@@ -8,7 +8,7 @@
 <div class="settings">
 <nav class="toc" aria-label="Mục cài đặt hồ sơ">
   <a href="#chung">Chung</a><a href="#mang">Proxy · mạng</a><a href="#van-tay">Dấu vân tay</a><a href="#cookie">Cookie</a>
-  <a href="#tien-ich">Tiện ích</a><a href="#bookmark">Bookmark</a><a href="#nang-cao">Nâng cao</a>
+  <a href="#khoi-dong">Khởi động</a><a href="#tien-ich">Tiện ích</a><a href="#bookmark">Bookmark</a><a href="#nang-cao">Nâng cao</a>
 </nav>
 <div>
 
@@ -92,23 +92,31 @@
   <div class="card">
     <table class="small">
       <tr><td class="muted">Mẫu máy</td><td>{{ prof.template }}</td></tr>
-      <tr><td class="muted">Hệ điều hành · CPU · RAM</td><td>{{ prof.os }} · {{ prof.cores }} nhân · {{ prof.ram }} GB</td></tr>
-      <tr><td class="muted">Card đồ hoạ</td><td>{{ prof.gpu or '—' }}</td></tr>
-      <tr><td class="muted">Màn hình</td><td>{{ prof.screen }} <span class="muted">(khi mở dùng kích thước màn hình thật)</span></td></tr>
+      <tr><td class="muted">Hệ điều hành · CPU · RAM</td><td>{{ prof.os }}{% if prof.platform_version %} {{ prof.platform_version }}{% endif %}{% if prof.mobile %} <span class="pill">Điện thoại</span>{% endif %} · {{ prof.cores }} nhân · {{ prof.ram }} GB</td></tr>
+      <tr><td class="muted">Card đồ hoạ</td><td>{{ prof.gpu or '—' }}{% if prof.webgpu %} <span class="muted">· có WebGPU</span>{% endif %}</td></tr>
+      <tr><td class="muted">Màn hình</td><td>{{ prof.screen }} · tỉ lệ điểm ảnh {{ prof.dpr }} · {{ prof.refresh_rate or 60 }} Hz
+        <span class="muted">({{ screen_modes.get(prof.screen_mode, 'mặc định theo hệ điều hành') }})</span></td></tr>
+      <tr><td class="muted">Cảm ứng</td><td>{{ prof.touch ~ ' điểm chạm' if prof.touch else 'Không' }}</td></tr>
+      <tr><td class="muted">Múi giờ · ngôn ngữ</td><td>{{ 'Theo IP' if prof.timezone == 'auto' else prof.timezone }} · {{ 'Theo IP' if prof.lang == 'auto' else prof.lang }}</td></tr>
     </table>
     <form method="post" action="/browsers/{{ prof.id }}/fingerprint" class="row" style="gap:8px; flex-wrap:wrap; margin-top:12px"
           hx-confirm="Đổi dấu vân tay của hồ sơ {{ prof.name }}? Cookie giữ nguyên, nhưng với trang web đây như máy khác — tài khoản đang đăng nhập có thể bị hỏi xác minh lại."
           hx-disabled-elt="find button">
       <label for="f-tpl" class="sr-only">Mẫu máy</label>
       <select id="f-tpl" name="template" class="auto">
-        <option value="">Ngẫu nhiên (Windows)</option>
+        <option value="">Ngẫu nhiên — chọn hệ điều hành bên cạnh</option>
         {% for plat, ids in templates.items() %}
-          <optgroup label="{{ plat }}">{% for t in ids %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</optgroup>
+          <optgroup label="{{ plat }} ({{ ids|length }})">{% for t in ids %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</optgroup>
         {% endfor %}
+      </select>
+      <label for="f-os" class="sr-only">Hệ điều hành (khi chọn ngẫu nhiên)</label>
+      <select id="f-os" name="platform" class="auto">
+        {% for k, l in platforms %}<option value="{{ k }}" {{ 'selected' if prof.os == k }}>{{ l }}</option>{% endfor %}
       </select>
       <button class="btn">Tạo dấu vân tay mới</button>
     </form>
-    <p class="hint">220 mẫu máy thật của ShardBrowser; phần cứng (số nhân, RAM) được chọn ngẫu nhiên hợp với máy này.</p>
+    <p class="hint">220 mẫu máy thật của ShardX (Windows, macOS, Linux, điện thoại Android); phần cứng (số nhân, RAM)
+      được chọn ngẫu nhiên hợp với máy này. Hồ sơ Android mở trang bản điện thoại, thao tác bằng chạm.</p>
 
     <form method="post" action="/browsers/{{ prof.id }}/noise" style="margin-top:12px">
       <fieldset style="border:0; padding:0; margin:0">
@@ -141,6 +149,39 @@
     <p class="hint">Định dạng JSON của dytool / Playwright / EditThisCookie / Cookie-Editor. File cookie chứa phiên đăng nhập —
       giữ kín như mật khẩu. Hồ sơ đang tắt thì dytool tự mở ẩn vài giây để đọc / ghi.</p>
   </div>
+</section>
+
+{# ---- Khởi động ---- #}
+<section class="group" id="khoi-dong" aria-labelledby="h-kd">
+  <h2 id="h-kd">Khởi động</h2>
+  {% if saved == 'launch' %}<div class="notice" role="status">Đã lưu — áp dụng từ lần mở sau.</div>{% endif %}
+  <form method="post" action="/browsers/{{ prof.id }}/launch" class="card">
+    <div class="grid g2">
+      <div><label for="l-scr">Màn hình</label>
+        <select id="l-scr" name="screen_mode">
+          <option value="">Mặc định theo hệ điều hành</option>
+          {% for k, v in screen_modes.items() %}<option value="{{ k }}" {{ 'selected' if prof.screen_mode == k }}>{{ v }}</option>{% endfor %}
+        </select>
+        <p class="hint">Mặc định: Windows / Linux dùng màn hình thật, macOS giữ của mẫu (thu nhỏ nếu lớn hơn). Điện thoại luôn giữ màn hình của mẫu.</p></div>
+      <div><label for="l-rr">Tần số quét (Hz)</label>
+        <input type="number" id="l-rr" name="refresh_rate" min="24" max="480" step="1" value="{{ prof.refresh_rate or '' }}" placeholder="60">
+        <p class="hint">Trang web đo được bằng cách đếm khung hình. Để trống = 60 Hz như phần lớn máy; không chạy nhanh hơn màn hình thật.</p></div>
+      <div><label for="l-quic">QUIC (HTTP/3)</label>
+        <select id="l-quic" name="quic">
+          <option value="auto" {{ 'selected' if prof.quic == 'auto' }}>Tự động — bật khi proxy SOCKS5 có UDP</option>
+          <option value="on" {{ 'selected' if prof.quic == 'on' }}>Luôn bật</option>
+          <option value="off" {{ 'selected' if prof.quic == 'off' }}>Luôn tắt</option>
+        </select></div>
+      <div><label for="l-ip">IP công khai cho WebRTC</label>
+        <input type="text" id="l-ip" name="webrtc_ip" value="{{ prof.webrtc_ip }}" placeholder="trống = tự lấy theo proxy" spellcheck="false" autocomplete="off">
+        <p class="hint">Chỉ cần khi proxy ra Internet bằng IP khác IP kiểm tra được.</p></div>
+    </div>
+    <div class="row" style="gap:16px; flex-wrap:wrap; margin-top:10px">
+      <label class="check"><input type="checkbox" name="hide_name" value="1" {{ 'checked' if prof.hide_name }}> Ẩn tên hồ sơ trên thanh địa chỉ / tiêu đề cửa sổ</label>
+      <label class="check" {{ 'title="Chỉ có tác dụng với hồ sơ điện thoại"'|safe if not prof.mobile }}><input type="checkbox" name="android_media" value="1" {{ 'checked' if prof.android_media }}> Bộ giải mã video kiểu Android{% if not prof.mobile %} <span class="muted">(chỉ hồ sơ điện thoại)</span>{% endif %}</label>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn primary">Lưu</button></div>
+  </form>
 </section>
 
 {# ---- Tiện ích ---- #}

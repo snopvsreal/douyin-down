@@ -278,7 +278,12 @@ def list_profiles() -> list[dict]:
     return sorted(out, key=lambda p: p["name"].lower())
 
 
-def create_profile(name: str, english: bool = False) -> dict:
+# hệ điều hành của mẫu dấu vân tay (thư viện 220 mẫu máy thật của ShardX) — lọc theo navigator.platform
+PLATFORMS = (("Windows", "Windows"), ("macOS", "macOS"), ("Linux", "Linux"), ("Android", "Android (điện thoại)"))
+
+
+def create_profile(name: str, english: bool = False, platform: str = "Windows", template: str = "",
+                   refresh_rate: int | None = None) -> dict:
     """Hồ sơ mới y như nút "New profile" của ShardBrowser (SDK create_profile: mẫu dấu vân tay Windows thật + phần
     cứng ngẫu nhiên phù hợp máy). Múi giờ / ngôn ngữ để "auto" — SDK lấy theo IP mỗi lần mở (máy ở VN -> giờ VN,
     tiếng Việt), không giữ của mẫu (vd. Ba Lan). english=True (TikTok): giao diện tiếng Anh vì bộ chọn của
@@ -286,7 +291,11 @@ def create_profile(name: str, english: bool = False) -> dict:
     s = sdk()
     try:
         with _quiet():
-            p = s.create_profile(platform="Windows")
+            if template:
+                p = s.create_profile(template, refresh_rate=refresh_rate)
+            else:
+                p = s.create_profile(platform=platform if platform in dict(PLATFORMS) else "Windows",
+                                     refresh_rate=refresh_rate)
     except Exception as e:
         raise BrowserError(f"Không tạo được hồ sơ trình duyệt: {e}") from e
     cfg = p.config
@@ -432,6 +441,10 @@ def _write_bookmarks(udd: Path, items: list[dict]) -> None:
         pf.write_text(json.dumps(prefs, ensure_ascii=False), "utf-8")
 
 
+SCREEN_MODES = {"profile": "Đúng màn hình của mẫu máy", "cap_to_host": "Theo mẫu, thu nhỏ nếu lớn hơn màn hình thật",
+                "use_host": "Màn hình thật của máy này"}
+
+
 def _launch_kwargs(pid: str) -> dict:
     """Cài đặt riêng của hồ sơ -> tham số sdk.launch: proxy, WebRTC, tiện ích, tham số thêm; ghi bookmark."""
     meta = read_meta(pid)
@@ -448,6 +461,17 @@ def _launch_kwargs(pid: str) -> dict:
         args.append("--load-extension=" + ",".join(exts))
     if args:
         kw["extra_args"] = args
+    # tuỳ chọn khởi động của nhân ShardX (trang hồ sơ › Khởi động)
+    if meta.get("screen_mode") in SCREEN_MODES:
+        kw["screen_mode"] = meta["screen_mode"]
+    if meta.get("quic") in ("on", "off"):
+        kw["quic"] = meta["quic"] == "on"
+    if meta.get("hide_name"):
+        kw["hide_profile_name"] = True
+    if meta.get("android_media"):
+        kw["android_media"] = True
+    if meta.get("webrtc_ip") and kw["webrtc"] != "block":
+        kw["webrtc_public_ip"] = meta["webrtc_ip"]
     try:
         _write_bookmarks(PROFILES_DIR / pid, meta.get("bookmarks") or [])
     except OSError:
@@ -539,8 +563,23 @@ def profile_details(only: str | None = None) -> list[dict]:
                     "proxy_id": meta.get("proxy_id") or "", "webrtc": meta.get("webrtc") or "auto",
                     "extensions": meta.get("extensions") or [], "bookmarks": meta.get("bookmarks") or [],
                     "extra_args": meta.get("extra_args") or "", "pinned": bool(meta.get("pinned")),
-                    "size_mb": profile_size_mb(p["id"]), "opened_here": s is not None})
+                    "size_mb": profile_size_mb(p["id"]), "opened_here": s is not None,
+                    "platform_version": (cfg.get("client_hints") or {}).get("platform_version") or "",
+                    "mobile": _claims_mobile(cfg), "touch": nav.get("max_touch_points") or 0,
+                    "timezone": cfg.get("timezone") or "", "webgpu": bool((cfg.get("webgpu") or {}).get("limits")),
+                    "refresh_rate": scr.get("refresh_rate") or 0, "dpr": scr.get("device_pixel_ratio") or 1,
+                    "screen_mode": meta.get("screen_mode") or "", "quic": meta.get("quic") or "auto",
+                    "hide_name": bool(meta.get("hide_name")), "android_media": bool(meta.get("android_media")),
+                    "webrtc_ip": meta.get("webrtc_ip") or ""})
     return out
+
+
+def _claims_mobile(cfg: dict) -> bool:
+    from shardx import Profile
+    try:
+        return Profile(cfg).claims_mobile
+    except Exception:
+        return False
 
 
 def open_window(pid: str) -> None:

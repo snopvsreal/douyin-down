@@ -22,7 +22,29 @@ LANGS = (("vi", "Tiếng Việt"), ("en", "Tiếng Anh"), ("zh", "Tiếng Trung"
          ("fr", "Tiếng Pháp"), ("de", "Tiếng Đức"), ("es", "Tiếng Tây Ban Nha"), ("pt", "Tiếng Bồ Đào Nha"),
          ("it", "Tiếng Ý"), ("nl", "Tiếng Hà Lan"), ("pl", "Tiếng Ba Lan"), ("tr", "Tiếng Thổ Nhĩ Kỳ"),
          ("Auto", "Tự nhận theo văn bản"))
-LANG_NAMES = {**dict(LANGS), "English": "Tiếng Anh", "Vietnamese": "Tiếng Việt"}
+
+
+def _all_langs() -> tuple[tuple[str, str], ...]:
+    """Mọi ngôn ngữ OmniVoice đọc được (~600, bảng omnivoice/utils/lang_map.py) -> ((mã ISO 639, tên tiếng Anh)…).
+    Nạp đúng file bảng, không import gói omnivoice (kéo theo torch, chậm)."""
+    import importlib.util
+    try:
+        spec = importlib.util.find_spec("omnivoice")
+        loc = Path(next(iter(spec.submodule_search_locations))) / "utils" / "lang_map.py"
+        sp = importlib.util.spec_from_file_location("_ov_lang_map", loc)
+        mod = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(mod)
+        names = {}
+        for name, code in mod.LANG_NAME_TO_ID.items():
+            names.setdefault(code, name.title())
+    except Exception:
+        return ()
+    main = {k for k, _ in LANGS}
+    return tuple(sorted(((c, n) for c, n in names.items() if c not in main), key=lambda x: x[1]))
+
+
+ALL_LANGS = _all_langs()
+LANG_NAMES = {**dict(ALL_LANGS), **dict(LANGS), "English": "Tiếng Anh", "Vietnamese": "Tiếng Việt"}
 EFFECTS = (("broadcast", "Phát thanh — âm lượng đều, ấm, rõ"), ("raw", "Nguyên bản — không xử lý"),
            ("podcast", "Podcast — gần mic, nén mạnh"), ("cinematic", "Điện ảnh — vang nhẹ"),
            ("warm", "Ấm — dày tiếng trầm"), ("bright", "Sáng — trong, thoáng"))
@@ -69,7 +91,11 @@ ADVANCED = (("num_step", "Số bước (Steps)", 8, 64, 1, "Nhiều bước = k�
             ("t_shift", "t_shift", 0.05, 1, 0.05, "Phân bố bước khử nhiễu. Để trống nếu không chắc."),
             ("position_temperature", "Nhiệt độ vị trí", 0, 10, 0.1, "Cao = ngắt nhịp đa dạng hơn."),
             ("class_temperature", "Nhiệt độ âm", 0, 2, 0.05, "Cao = biến hoá hơn, dễ lỗi phát âm."),
-            ("layer_penalty_factor", "Phạt tầng (layer penalty)", 0, 10, 0.1, "Để trống nếu không chắc."))
+            ("layer_penalty_factor", "Phạt tầng (layer penalty)", 0, 10, 0.1, "Để trống nếu không chắc."),
+            ("audio_chunk_duration", "Văn bản dài: mỗi đoạn (giây)", 5, 60, 1,
+             "Văn bản dài được đọc từng đoạn khoảng chừng này giây rồi nối. Mặc định 15."),
+            ("audio_chunk_threshold", "Văn bản dài: chia khi dài hơn (giây)", 10, 600, 1,
+             "Chỉ chia đoạn khi ước lượng bản đọc dài hơn ngưỡng này. Mặc định 30."))
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
@@ -247,7 +273,7 @@ def generate(cfg: dict, text: str, profile_id: str = "", instruct: str = "", lan
              speed: float = 1.0, seed: int | None = None, effect: str = "broadcast", num_step=None,
              duration=None, ref_audio: bytes | None = None, ref_name: str = "", ref_text: str = "",
              advanced: dict | None = None, denoise: bool = True, postprocess: bool | None = None,
-             pronounce: bool = True) -> tuple[bytes, dict]:
+             pronounce: bool = True, record: bool = True) -> tuple[bytes, dict]:
     """Đọc văn bản (ghi vào Lịch sử của VoiceStudio). Văn bản dài được VoiceStudio tự chia đoạn rồi nối.
     Giọng: profile_id (giọng đã lưu) | ref_audio (file ghi âm dùng 1 lần, kèm lời trong file nếu có) | instruct (thiết
     kế). Trả (wav, thông tin: id, giây, thời gian tạo, seed)."""
@@ -258,7 +284,8 @@ def generate(cfg: dict, text: str, profile_id: str = "", instruct: str = "", lan
         raise VSError("Văn bản quá dài (tối đa 20.000 ký tự mỗi lần)")
     data = {"text": text, "language": language or "vi", "speed": str(max(0.5, min(2.0, float(speed or 1)))),
             "effect_preset": effect if effect in dict(EFFECTS) else "broadcast",
-            "denoise": "true" if denoise else "false", "pronounce": "true" if pronounce else "false"}
+            "denoise": "true" if denoise else "false", "pronounce": "true" if pronounce else "false",
+            "record": "true" if record else "false"}
     files = None
     if profile_id:
         data["profile_id"] = check_id(profile_id)

@@ -681,7 +681,8 @@ def build_app():
                        num_step: str = Form(""), guidance_scale: str = Form(""), t_shift: str = Form(""),
                        position_temperature: str = Form(""), class_temperature: str = Form(""),
                        layer_penalty_factor: str = Form(""), pronounce: str = Form("true"),
-                       ref_audio: UploadFile | None = File(None)):
+                       audio_chunk_duration: str = Form(""), audio_chunk_threshold: str = Form(""),
+                       record: str = Form("true"), ref_audio: UploadFile | None = File(None)):
         """Trang Tạo giọng nói: đọc + hiệu ứng + ghi Lịch sử."""
         from starlette.concurrency import run_in_threadpool
         prof = None
@@ -691,7 +692,9 @@ def build_app():
                 raise ApiError(404, "Không còn giọng này")
         gen = {"num_step": _num(num_step, True), "guidance_scale": _num(guidance_scale), "t_shift": _num(t_shift),
                "position_temperature": _num(position_temperature), "class_temperature": _num(class_temperature),
-               "layer_penalty_factor": _num(layer_penalty_factor), "denoise": denoise != "false"}
+               "layer_penalty_factor": _num(layer_penalty_factor), "denoise": denoise != "false",
+               # văn bản dài: OmniVoice tự chia thành đoạn ~N giây khi ước lượng dài hơn ngưỡng
+               "audio_chunk_duration": _num(audio_chunk_duration), "audio_chunk_threshold": _num(audio_chunk_threshold)}
         if postprocess_output:
             gen["postprocess_output"] = postprocess_output != "false"
         sp = _num(speed)
@@ -714,8 +717,11 @@ def build_app():
                 tmp_ref.unlink(missing_ok=True)
         wav = await run_in_threadpool(apply_effect, wav_bytes(audio), effect_preset)
         mode = "clone" if (prof or tmp_ref) else "design" if instruct else "auto"
-        item = _record(wav, text=text, mode=mode, language=language, instruct=instruct if mode == "design" else "",
-                       profile_id=prof["id"] if prof else None, seed=used_seed, gen_time=gt)
+        if record == "false":           # đọc hàng loạt: không ghi Lịch sử (300 bản sẽ bị đẩy mất)
+            item = {"id": "", "duration_seconds": len(audio) / SR}
+        else:
+            item = _record(wav, text=text, mode=mode, language=language, instruct=instruct if mode == "design" else "",
+                           profile_id=prof["id"] if prof else None, seed=used_seed, gen_time=gt)
         return Response(wav, media_type="audio/wav",
                         headers={"x-audio-id": item["id"], "x-audio-duration": str(item["duration_seconds"] or ""),
                                  "x-gen-time": f"{gt:.2f}", "x-seed": str(used_seed)})

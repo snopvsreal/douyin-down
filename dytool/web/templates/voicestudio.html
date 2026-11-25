@@ -3,6 +3,8 @@
 {% block crumb %}Hệ thống › <b>Giọng nói</b>{% endblock %}
 {% block body %}
 {% set st = info.state %}
+{% macro lang_opts(sel) %}{% for k, l in va.LANGS %}<option value="{{ k }}" {{ 'selected' if sel == k }}>{{ l }}</option>{% endfor %}
+  {% if va.ALL_LANGS %}<optgroup label="Ngôn ngữ khác ({{ va.ALL_LANGS|length }})">{% for k, l in va.ALL_LANGS %}<option value="{{ k }}" {{ 'selected' if sel == k }}>{{ l }}</option>{% endfor %}</optgroup>{% endif %}{% endmacro %}
 {% set names = {} %}{% for pr in profiles %}{% set _ = names.update({pr.id: pr.name}) %}{% endfor %}
 <div class="head">
   <div><h1>Giọng nói</h1>
@@ -11,17 +13,17 @@
 </div>
 
 <nav class="filters" aria-label="Mục Giọng nói">
-  {% for k, label in (('', 'Tổng quan'), ('speak', 'Tạo giọng nói'), ('voices', 'Giọng đã lưu'), ('history', 'Lịch sử'), ('pron', 'Phát âm'), ('log', 'Nhật ký')) %}
+  {% for k, label in (('', 'Tổng quan'), ('speak', 'Tạo giọng nói'), ('batch', 'Đọc hàng loạt'), ('dubfile', 'Lồng tiếng video'), ('stt', 'Giọng → chữ'), ('voices', 'Giọng đã lưu'), ('history', 'Lịch sử'), ('pron', 'Phát âm'), ('log', 'Nhật ký')) %}
     <a href="/voicestudio{{ '?tab=' ~ k if k }}" class="pill {{ 'on' if tab == k }}" {{ 'aria-current=page' if tab == k }}>{{ label }}</a>
   {% endfor %}
 </nav>
 
-{% if tab in ('speak', 'voices', 'history', 'pron') and st != 'ok' %}
+{% if tab in ('speak', 'batch', 'voices', 'history', 'pron') and st != 'ok' %}
   {% include "_vs_status.html" %}
   <div hx-get="/partials/vs-ready" hx-trigger="every 3s [!document.hidden]" hx-swap="none"></div>
   <p class="hint">Mục này cần máy chủ giọng nói đang chạy — bấm <b>Bật</b> rồi đợi chấm xanh (khoảng 30 giây), trang tự hiện.</p>
 
-{% elif tab in ('speak', 'voices', 'history', 'pron') and err %}
+{% elif tab in ('speak', 'batch', 'voices', 'history', 'pron') and err %}
   {% from "_macros.html" import empty %}
   {% call empty('box', 'Không lấy được dữ liệu giọng nói', act='<a class="btn sm" href="/voicestudio?tab=' ~ tab ~ '">Thử lại</a>') %}{{ err }}{% endcall %}
 
@@ -96,7 +98,7 @@
 
       <div class="grid g2" style="gap:0 10px">
         <div><label for="sp-lang">Ngôn ngữ</label>
-          <select id="sp-lang" name="language">{% for k, l in va.LANGS %}<option value="{{ k }}" {{ 'selected' if (rz.language or 'vi') == k }}>{{ l }}</option>{% endfor %}</select></div>
+          <select id="sp-lang" name="language">{{ lang_opts(rz.language or 'vi') }}</select></div>
         <div><label for="sp-fx">Xử lý âm thanh</label>
           <select id="sp-fx" name="effect">{% for k, l in va.EFFECTS %}<option value="{{ k }}" title="{{ l }}">{{ l.split(' — ')[0] }}</option>{% endfor %}</select></div>
       </div>
@@ -136,6 +138,118 @@
   </section>
 
 
+{# ======================= Đọc hàng loạt ======================= #}
+{% elif tab == 'batch' %}
+  <form class="vs-speak" id="bt-form" hx-post="/voicestudio/batch" hx-encoding="multipart/form-data" hx-target="#task-batch"
+        hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]">
+    <div class="vs-speak-main">
+      <div class="card">
+        <p class="hint" style="margin-top:0">Mỗi dòng đọc thành 1 file riêng (<code>001.wav</code>, <code>002.wav</code>…) — hợp
+          cho lời thoại, câu quảng cáo, từng cảnh. Xong có thêm 1 file ghép tất cả và 1 file .zip. Không ghi vào Lịch sử.</p>
+        <label for="bt-text" class="sr-only">Các dòng cần đọc</label>
+        <textarea id="bt-text" name="text" rows="14" maxlength="200000" required placeholder="Dòng 1…&#10;Dòng 2…&#10;Dòng 3…"></textarea>
+        <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap">
+          <button type="submit" class="btn primary" {{ 'disabled' if (tasks.batch or {}).state == 'run' }}>Đọc tất cả</button>
+          <label class="btn sm ghost" style="margin:0" title="Mở file .txt / .srt — mỗi dòng / mỗi câu phụ đề 1 bản đọc">Mở file…
+            <input type="file" accept=".txt,.srt,.csv,text/plain" id="bt-txt" hidden></label>
+          <div class="spacer"></div><span class="small muted"><span id="bt-n">0</span> dòng (tối đa 300)</span>
+        </div>
+        {% with key = 'batch', t = tasks.get('batch') %}{% include "_vs_task.html" %}{% endwith %}
+      </div>
+    </div>
+    <div class="card vs-speak-opts">
+      <fieldset class="vs-src">
+        <legend>Giọng</legend>
+        <div class="seg" role="radiogroup">
+          {% for k, l in (('saved', 'Đã lưu'), ('design', 'Thiết kế')) %}
+            <label><input type="radio" name="src" value="{{ k }}" {{ 'checked' if (k == 'saved') == (profiles|length > 0) }}><span>{{ l }}</span></label>
+          {% endfor %}
+        </div>
+        <div class="vs-src-panel" data-src="saved">
+          {% if profiles %}
+            <label for="bt-voice" class="sr-only">Giọng đã lưu</label>
+            <select id="bt-voice" name="voice">{% for pr in profiles %}<option value="{{ pr.id }}">{{ pr.name }}</option>{% endfor %}</select>
+          {% else %}<p class="hint">Chưa có giọng nào — tạo ở <a href="/voicestudio?tab=voices">Giọng đã lưu</a>.</p>{% endif %}
+        </div>
+        <div class="vs-src-panel" data-src="design">
+          {% with prefix = 'bt', vd = {}, describe = '', tags = '' %}{% include "_vs_design.html" %}{% endwith %}
+          <p class="hint" style="margin:4px 0 0">Seed giữ cố định cho cả loạt để mọi dòng cùng 1 giọng.</p>
+        </div>
+      </fieldset>
+      <div class="grid g2" style="gap:0 10px">
+        <div><label for="bt-lang">Ngôn ngữ</label>
+          <select id="bt-lang" name="language">{{ lang_opts('vi') }}</select></div>
+        <div><label for="bt-fx">Xử lý âm thanh</label>
+          <select id="bt-fx" name="effect">{% for k, l in va.EFFECTS %}<option value="{{ k }}" title="{{ l }}">{{ l.split(' — ')[0] }}</option>{% endfor %}</select></div>
+        <div><label for="bt-speed">Tốc độ</label>
+          <input id="bt-speed" type="number" name="speed" min="0.5" max="2" step="0.05" value="1"></div>
+        <div><label for="bt-gap">Nghỉ giữa các dòng (giây)</label>
+          <input id="bt-gap" type="number" name="gap" min="0" max="5" step="0.1" value="0.5"></div>
+        <div><label for="bt-seed">Seed</label>
+          <input id="bt-seed" type="number" name="seed" placeholder="ngẫu nhiên"></div>
+      </div>
+      <label class="check"><input type="checkbox" name="pronounce" checked> Áp dụng <a href="/voicestudio?tab=pron">từ điển phát âm</a></label>
+    </div>
+  </form>
+
+{# ======================= Lồng tiếng video ======================= #}
+{% elif tab == 'dubfile' %}
+  <div class="grid g2" style="align-items:start">
+    <form class="card" hx-post="/voicestudio/dubfile" hx-encoding="multipart/form-data" hx-target="#task-dubfile"
+          hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]">
+      <h3 style="margin:0 0 4px">Lồng tiếng 1 video có sẵn</h3>
+      <p class="hint" style="margin-top:0">Video tiếng Trung bất kỳ trên máy → phụ đề + lồng tiếng Việt, làm đúng như video Douyin
+        của kênh (che sub Trung, lật, phủ màu, giọng nam / nữ của kênh). Chỉ tạo file để tải về — không đăng, không thêm vào
+        hàng video.</p>
+      <label for="df-file">File video</label>
+      <input id="df-file" type="file" name="file" accept="video/*,.mkv,.flv" required>
+      <label for="df-pid">Dùng cài đặt của kênh</label>
+      {% if channels %}
+        <select id="df-pid" name="pid">
+          {% for ch in channels %}<option value="{{ ch.id }}">{{ ch.name }}{{ '' if ch.dub else ' — tắt lồng tiếng (chỉ edit / phụ đề)' }}</option>{% endfor %}
+        </select>
+        <p class="hint">Đổi cách edit / giọng ở trang kênh › Cài đặt kênh › Edit &amp; lồng tiếng.</p>
+      {% else %}<p class="hint">Chưa có kênh nào — tạo kênh ở Tài khoản trước.</p>{% endif %}
+      <button type="submit" class="btn primary" style="margin-top:8px" {{ 'disabled' if not channels or (tasks.dubfile or {}).state == 'run' }}>Lồng tiếng</button>
+      <span class="hint htmx-indicator" style="margin-left:8px">Đang tải file lên…</span>
+    </form>
+    <div class="card">
+      <h3 style="margin:0 0 4px">Kết quả</h3>
+      {% with key = 'dubfile', t = tasks.get('dubfile') %}{% include "_vs_task.html" %}{% endwith %}
+      {% if not tasks.get('dubfile') %}<p class="hint">Video 1 phút mất khoảng 3–8 phút (tách giọng, nghe, dịch, đọc, ghép).
+        Cùng lúc chỉ làm 1 việc nặng: đang edit video của kênh thì việc này chờ tới lượt.</p>{% endif %}
+    </div>
+  </div>
+
+{# ======================= Giọng nói -> chữ ======================= #}
+{% elif tab == 'stt' %}
+  <div class="grid g2" style="align-items:start">
+    <form class="card" hx-post="/voicestudio/stt" hx-encoding="multipart/form-data" hx-target="#task-stt"
+          hx-swap="outerHTML" hx-disabled-elt="find button[type=submit]">
+      <h3 style="margin:0 0 4px">Chuyển giọng nói thành chữ</h3>
+      <p class="hint" style="margin-top:0">File ghi âm hoặc video → lời (.txt) và phụ đề có thời gian (.srt). Chạy ngay trên máy
+        (Whisper), không cần bật máy chủ giọng nói.</p>
+      <label for="st-file">File âm thanh / video</label>
+      <input id="st-file" type="file" name="file" accept="audio/*,video/*,.mkv,.flv" required>
+      <div class="grid g2" style="gap:0 10px">
+        <div><label for="st-lang">Ngôn ngữ trong file</label>
+          <select id="st-lang" name="language">{% for k, l in stt_langs %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></div>
+        <div><label for="st-model">Độ chính xác</label>
+          <select id="st-model" name="model">
+            <option value="small">Nhanh (small)</option>
+            <option value="medium">Chính xác hơn (medium — lần đầu tải ~1,5 GB)</option>
+          </select></div>
+      </div>
+      <button type="submit" class="btn primary" style="margin-top:10px" {{ 'disabled' if (tasks.stt or {}).state == 'run' }}>Chuyển thành chữ</button>
+      <span class="hint htmx-indicator" style="margin-left:8px">Đang tải file lên…</span>
+    </form>
+    <div class="card">
+      <h3 style="margin:0 0 4px">Kết quả</h3>
+      {% with key = 'stt', t = tasks.get('stt') %}{% include "_vs_task.html" %}{% endwith %}
+      {% if not tasks.get('stt') %}<p class="hint">Nhanh khoảng 3–5 lần thời lượng file trên CPU này.</p>{% endif %}
+    </div>
+  </div>
+
 {# ======================= Giọng đã lưu ======================= #}
 {% elif tab == 'voices' %}
   <section class="section" aria-labelledby="h-new" style="margin-top:0">
@@ -151,7 +265,7 @@
         <input id="cl-file" type="file" name="file" accept="audio/*,video/mp4" required>
         <div class="grid g2" style="gap:0 10px">
           <div><label for="cl-lang">Ngôn ngữ</label>
-            <select id="cl-lang" name="language">{% for k, l in va.LANGS %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></div>
+            <select id="cl-lang" name="language">{{ lang_opts('vi') }}</select></div>
         </div>
         <label for="cl-text">Lời nói trong file <span class="muted">(để trống = tự nghe ra chữ)</span></label>
         <textarea id="cl-text" name="ref_text" rows="2" maxlength="1000"></textarea>
@@ -374,6 +488,26 @@
   </section>
 {% endif %}
 <script>
+  (() => {   // Đọc hàng loạt: đếm dòng, mở file, chọn nguồn giọng
+    const f = document.getElementById('bt-form');
+    if (!f || f.dataset.ready) return;
+    f.dataset.ready = '1';
+    const ta = f.querySelector('#bt-text'), n = f.querySelector('#bt-n');
+    const count = () => { n.textContent = ta.value.split('\n').filter(x => x.trim()).length; };
+    ta.addEventListener('input', count); count();
+    f.querySelector('#bt-txt')?.addEventListener('change', async (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      let t = await file.text();
+      if (/\.srt$/i.test(file.name)) t = t.replace(/^\d+\s*$/gm, '').replace(/^[\d:,.]+ --> [\d:,.]+.*$/gm, '').replace(/\n{2,}/g, '\n').trim();
+      ta.value = t; count(); e.target.value = '';
+    });
+    const panels = f.querySelectorAll('.vs-src-panel');
+    const srcSync = () => {
+      const v = f.querySelector('input[name=src]:checked')?.value;
+      panels.forEach(p => { p.hidden = p.dataset.src !== v; });
+    };
+    f.querySelectorAll('input[name=src]').forEach(r => r.addEventListener('change', srcSync)); srcSync();
+  })();
   (() => {   // Tạo giọng nói — chạy lại mỗi lần vẽ trang: cờ trên form
     const f = document.getElementById('sp-form');
     if (!f || f.dataset.ready) return;

@@ -176,6 +176,34 @@ def save_network(pid: str, proxy_id: str, webrtc: str) -> None:
     write_meta(pid, proxy_id=proxy_id, webrtc=webrtc if webrtc in WEBRTC else "auto")
 
 
+def save_launch(pid: str, screen_mode: str, quic: str, hide_name: bool, android_media: bool, webrtc_ip: str,
+                refresh_rate: str) -> None:
+    """Tuỳ chọn khởi động của nhân ShardX: cách dựng màn hình, QUIC, ẩn tên hồ sơ, codec Android, IP công khai cho
+    WebRTC, tần số quét màn hình (ghi vào dấu vân tay — trang web đo bằng requestAnimationFrame)."""
+    import ipaddress
+    ip = webrtc_ip.strip()
+    if ip:
+        try:
+            ip = str(ipaddress.ip_address(ip))
+        except ValueError:
+            raise BrowserError("IP công khai cho WebRTC không hợp lệ (vd. 203.0.113.5) — để trống = tự lấy theo proxy")
+    rr = refresh_rate.strip()
+    if rr and not (rr.isdigit() and 24 <= int(rr) <= 480):
+        raise BrowserError("Tần số quét phải từ 24 đến 480 Hz (để trống = 60 Hz như phần lớn máy)")
+    write_meta(pid, screen_mode=screen_mode if screen_mode in browsers.SCREEN_MODES else None,
+               quic=quic if quic in ("on", "off") else None, hide_name=True if hide_name else None,
+               android_media=True if android_media else None, webrtc_ip=ip or None)
+    s = browsers.sdk()
+    prof = s.open_profile(browsers.profile_dir(pid).name)
+    scr = prof.config.setdefault("screen", {})
+    if rr:
+        scr["refresh_rate"] = int(rr)
+    else:
+        scr.pop("refresh_rate", None)
+    with _quiet():
+        s.save_profile(prof)
+
+
 def save_advanced(pid: str, extra_args: str) -> None:
     browsers.parse_extra_args(extra_args)                  # báo lỗi nếu có tham số bị chặn
     write_meta(pid, extra_args=extra_args.strip()[:1000])
@@ -209,7 +237,7 @@ def templates() -> dict[str, list[str]]:
     key = (fp.stat().st_mtime, len(list(fp.glob("*.json"))))
     if _tpl_cache.get("key") != key:
         with _quiet():
-            _tpl_cache["val"] = {plat: s.list_profiles(platform=plat) for plat in ("Windows", "macOS")}
+            _tpl_cache["val"] = {plat: s.list_profiles(platform=plat) for plat, _l in browsers.PLATFORMS}
         _tpl_cache["key"] = key
     return _tpl_cache["val"]
 
@@ -221,7 +249,7 @@ def regenerate(pid: str, template: str = "", platform: str = "Windows") -> str:
     old = s.open_profile(browsers.profile_dir(pid).name)
     with _quiet():
         cfg = dict(s.library.load(template).config if template else
-                   s.random_profile(platform=platform if platform in ("Windows", "macOS") else "Windows").config)
+                   s.random_profile(platform=platform if platform in dict(browsers.PLATFORMS) else "Windows").config)
     randomize_hardware(cfg, profile_id=uuid.uuid4().hex)    # hạt giống mới -> phần cứng khác lần trước
     randomize_platform_version(cfg)
     nav_old, nav = old.config.get("navigator") or {}, cfg.setdefault("navigator", {})
@@ -231,6 +259,9 @@ def regenerate(pid: str, template: str = "", platform: str = "Windows") -> str:
             nav[k] = nav_old[k]
     if str(nav_old.get("language", "")).startswith("en"):
         cfg["icu_locale"] = old.config.get("icu_locale", "en-US")
+    rr = (old.config.get("screen") or {}).get("refresh_rate")
+    if rr:                                                    # tần số quét người dùng đã chọn: giữ
+        cfg.setdefault("screen", {})["refresh_rate"] = rr
     on = [v for v, b in (old.config.get("noise") or {}).items() if isinstance(b, dict) and b.get("enabled")]
     from shardx import Profile
     p = Profile(cfg, id=old.id)
@@ -268,9 +299,12 @@ def clone(pid: str) -> dict:
     meta = read_meta(pid)
     cfg = json.loads((src / "profile.json").read_text("utf-8"))
     eng = str((cfg.get("navigator") or {}).get("language", "")).startswith("en")
-    c = browsers.create_profile(f"{meta.get('name') or pid} (bản sao)"[:80], english=eng)
+    rr = (cfg.get("screen") or {}).get("refresh_rate")
+    c = browsers.create_profile(f"{meta.get('name') or pid} (bản sao)"[:80], english=eng,
+                                refresh_rate=int(rr) if rr else None)
     new = c["profile_id"]
-    keep = {k: meta[k] for k in ("notes", "tags", "proxy_id", "webrtc", "extensions", "bookmarks", "extra_args")
+    keep = {k: meta[k] for k in ("notes", "tags", "proxy_id", "webrtc", "extensions", "bookmarks", "extra_args",
+                                 "screen_mode", "quic", "hide_name", "android_media", "webrtc_ip")
             if k in meta}
     write_meta(new, **keep)
     tpl = cfg.get("name") or ""

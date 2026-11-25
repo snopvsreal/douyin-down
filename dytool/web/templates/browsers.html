@@ -27,6 +27,10 @@
         <option value="auto">Ngôn ngữ theo IP</option>
         <option value="en">Tiếng Anh (TikTok)</option>
       </select>
+      <label for="np-os" class="sr-only">Hệ điều hành giả lập</label>
+      <select id="np-os" name="platform" class="auto" title="Hệ điều hành của mẫu máy (dấu vân tay). Chọn mẫu cụ thể ở trang hồ sơ › Dấu vân tay">
+        {% for k, l in platforms %}<option value="{{ k }}">{{ l }}</option>{% endfor %}
+      </select>
       <button class="btn primary">Tạo hồ sơ</button>
     </form>
   </div>

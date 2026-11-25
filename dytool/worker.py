@@ -274,6 +274,43 @@ class Worker:
         self.store.log(f"[{page['name']}] Edit thủ công {row['id']}", page_id=page["id"])
         self._edit(page, row)
 
+    def edit_file(self, page_id: int, src: Path, dst: Path, label: str = "", should_stop=None) -> None:
+        """Trang Giọng nói › Lồng tiếng video: edit + lồng tiếng 1 file người dùng tải lên theo Cài đặt kênh `page_id`
+        (không thêm vào hàng video của kênh, không đăng). Chờ việc nặng đang chạy xong (khoá _busy) rồi mới làm; bấm
+        Dừng = ném progress.Cancelled. Kênh bật lồng tiếng: bật giọng nói và chờ tối đa 5 phút."""
+        from . import progress, services
+        from .editor import edit
+        page = self.store.one("SELECT * FROM pages WHERE id=?", (page_id,))
+        if not page:
+            raise RuntimeError("Không có kênh này")
+        with self._busy:
+            if should_stop and should_stop():        # bấm Dừng lúc còn chờ việc khác xong
+                raise progress.Cancelled()
+            self._keep_awake(True)
+            progress.begin("edit", "Lồng tiếng file", page["name"], "", label or src.name)
+            self.current = f"Lồng tiếng file {label or src.name}"
+            try:
+                ecfg = self.page_edit_cfg(page)
+                if ecfg["dub"].get("enabled"):
+                    deadline = time.time() + 300
+                    while (r := services.start_voicestudio(self.cfg)) != "ok":
+                        if r != "starting" or time.time() > deadline:
+                            raise RuntimeError({"missing": "Chưa có model giọng nói (đang tải ở nền)",
+                                                "crashed": "Máy chủ giọng nói bật lên rồi tắt ngay — xem Nhật ký",
+                                                "starting": "Máy chủ giọng nói bật quá 5 phút chưa xong"}.get(
+                                r, "Máy chủ giọng nói không trả lời"))
+                        progress.step("Đang bật giọng nói (nạp model)…")
+                        for _ in range(5):
+                            progress.check()
+                            time.sleep(1)
+                edit(src, dst, self.data / "work", ecfg)
+                services.vs_touch()
+            finally:
+                progress.end()
+                self._keep_awake(self.running)
+                if not self.running:
+                    self.current = "Đang dừng"
+
     def scan_now(self, page_id: int):
         self._last_scan[page_id] = 0
 

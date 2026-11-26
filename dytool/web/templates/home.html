@@ -6,9 +6,11 @@
 {#
   Trang Hôm nay (thiết kế lại 2026-11): trả lời đúng thứ tự 3 câu người dùng hỏi mỗi lần mở app —
   1. Việc gì chờ mình?  2. Hôm nay đang chạy thế nào?  3. Có gì hỏng không?
-  Đầu trang: lời chào + 1 câu tóm tắt + nút chính. Dưới: 4 ô tổng quan. Thân 2 cột: trái = hàng chờ duyệt (lưới video 9:16)
-  + việc cần xử lý; phải (dính khi cuộn) = Lịch hôm nay, Kênh (Đang làm / Tiếp theo: hộp mở từ thẻ Chạy tự động
-  cuối menu — người dùng 2026-11-26 muốn trang chủ gọn hơn). Cuối: dây chuyền video dạng các bước nối nhau.
+  VỪA 1 MÀN HÌNH, KHÔNG CUỘN (người dùng 2026-11-26; .today = khung cao đúng phần còn lại của cửa sổ, chỉ bật khi
+  cửa sổ đủ to — app.css "Hôm nay vừa 1 màn hình"): dòng chào + nút · 4 ô tổng quan · thân 2 cột lấp phần còn lại:
+  trái = việc cần xử lý + dải video chờ duyệt NẰM NGANG (video co theo chiều cao, nhiều thì lướt ngang; video tự duyệt
+  chưa gửi nối đuôi, có nhãn) + dây chuyền dạng dải mảnh; phải = Lịch hôm nay, Kênh (mỗi khối tự cuộn bên trong).
+  Đang làm / Tiếp theo: hộp mở từ thẻ Chạy tự động cuối menu. Nhật ký: nút ở dòng chào mở hộp #logpop.
 #}
 {% set t = totals %}
 {% set n_today = today|selectattr('cls', 'equalto', 'ok')|list|length %}
@@ -18,6 +20,7 @@
 {% set greet = 'Chào buổi sáng' if hour < 11 else ('Chào buổi trưa' if hour < 14 else ('Chào buổi chiều' if hour < 18 else 'Chào buổi tối')) %}
 {% set cap_used = chans|sum(attribute='n') %}{% set cap_all = chans|sum(attribute='cap') %}
 
+<div class="today">
 <header class="today-hero">
   <div>
     <p class="today-date">{{ wd }}, {{ today_label }}</p>
@@ -30,14 +33,15 @@
       {%- if rq and todo %} Và <b>{{ todo|length }} việc</b> cần xử lý.{% endif %}</p>
   </div>
   <div class="today-hero-act">
+    <button type="button" class="btn" aria-haspopup="dialog"
+            onclick="const d=document.getElementById('logpop'); d.showModal(); htmx.trigger(d.querySelector('.log'), 'logpop-open')">Nhật ký</button>
     <a class="btn" href="/calendar">Lịch tuần</a>
     {% if rq %}<button type="button" class="btn primary lg" data-vview="{{ rq[0].key }}" data-vseq="0">Duyệt {{ rq|length }} video</button>{% endif %}
   </div>
 </header>
 
 {# thanh tiến trình đăng nhập Douyin; câu đọc to cho trình đọc màn hình đi qua #sr-live (base.html) #}
-<div hx-get="/partials/login/douyin" hx-trigger="load, every 1s [!document.hidden]" hx-swap="innerHTML" class="lp-slot"
-     style="margin-bottom:16px"></div>
+<div hx-get="/partials/login/douyin" hx-trigger="load, every 1s [!document.hidden]" hx-swap="innerHTML" class="lp-slot"></div>
 {% if msg %}<div class="notice" role="status">{{ msg }}</div>{% endif %}
 
 {# ---------- 4 ô tổng quan ---------- #}
@@ -82,8 +86,9 @@
     <span class="rv-dur num">{{ (v.duration or 0)|round|int }}s</span>
     <span class="rv-chan" style="--c: {{ colors.get(v.page_id, 'var(--primary)') }}">{{ v.page_name }}</span></span>
   <span class="rv-meta"><b class="clamp2">{{ v.caption or v.desc or v.id }}</b>
-    <span class="small muted rv-plat">{{ plat_icon(v.platform == 'tiktok', 12) }} ♥ {{ '{:,}'.format(v.likes or 0) }}</span>
-    {% if v.status != 'review' %}<span class="pill info rv-auto">{% if v.status == 'schedule_pending' and v.scheduled_at %}Gửi lịch {{ vnt(v.scheduled_at, '%H:%M %d/%m') }}{% elif v.status == 'publish_now' %}Đăng ngay{% else %}Theo cài đặt kênh{% endif %}</span>{% endif %}</span>
+    <span class="small muted rv-plat">{{ plat_icon(v.platform == 'tiktok', 12) }}
+      {%- if v.status != 'review' %} <span class="pill info rv-auto">Tự duyệt · {% if v.status == 'schedule_pending' and v.scheduled_at %}{{ vnt(v.scheduled_at, '%H:%M %d/%m') }}{% elif v.status == 'publish_now' %}đăng ngay{% else %}chờ lượt{% endif %}</span>
+      {%- else %} ♥ {{ '{:,}'.format(v.likes or 0) }}{% endif %}</span></span>
 </div>
 {% endmacro %}
 
@@ -121,23 +126,17 @@
     </section>
     {% endif %}
 
-    <section id="cho-duyet" aria-labelledby="h-rq" class="today-sec">
+    <section id="cho-duyet" aria-labelledby="h-rq" class="today-sec rq-sec">
       <div class="sec-h"><h2 id="h-rq">Chờ duyệt{% if rq %} <span class="count">{{ rq|length }}</span>{% endif %}</h2>
-        {% if rq %}<span class="small muted">bấm 1 video để xem và duyệt — xong tự mở video kế</span>{% endif %}</div>
-      {% if rq %}
-        <div class="rq-grid">{% for v in rq[:24] %}{{ rq_card(v, '0') }}{% endfor %}</div>
-        {% if rq|length > 24 %}<p class="small muted" style="margin-top:10px">Còn {{ rq|length - 24 }} video nữa — bấm <b>Duyệt {{ rq|length }} video</b> để duyệt lần lượt hết.</p>{% endif %}
+        {% if rq %}<span class="small muted">bấm 1 video để xem và duyệt — xong tự mở video kế</span>{% endif %}
+        {% if rq_auto %}<span class="small muted rq-auto-note" title="Kênh bật tự đăng: video edit xong được tự duyệt — vẫn đổi giờ, giữ lại hoặc bỏ được trước khi tool đăng">+ {{ rq_auto|length }} tự duyệt, chưa gửi</span>{% endif %}</div>
+      {% if rq or rq_auto %}
+        <div class="rq-row">{% for v in rq[:40] %}{{ rq_card(v, '0') }}{% endfor %}{% for v in rq_auto[:24] %}{{ rq_card(v, '') }}{% endfor %}
+          {% if rq|length > 40 %}<p class="small muted rq-more">Còn {{ rq|length - 40 }} video nữa — bấm <b>Duyệt {{ rq|length }} video</b> để duyệt lần lượt hết.</p>{% endif %}</div>
       {% else %}
         <div class="today-empty">
           {% call empty('ok', 'Không còn video nào chờ duyệt', tone='ok', sm=true) %}Video edit xong sẽ hiện ở đây{% if t.get('downloaded') %} — đang có {{ t.downloaded }} video chờ edit{% endif %}.{% endcall %}
         </div>
-      {% endif %}
-      {% if rq_auto %}
-      <details class="rq-auto"{{ ' open' if not rq }}>
-        <summary>Đã duyệt, chưa gửi lên nền tảng <span class="count">{{ rq_auto|length }}</span>
-          <span class="small muted">— đổi giờ, giữ lại hoặc bỏ trước khi tool đăng</span></summary>
-        <div class="rq-grid">{% for v in rq_auto[:24] %}{{ rq_card(v, '') }}{% endfor %}</div>
-      </details>
       {% endif %}
     </section>
 
@@ -149,9 +148,9 @@
       ('Chờ đăng', t.get('approved', 0) + t.get('publish_now', 0) + t.get('schedule_pending', 0) + t.get('uploading', 0), '/calendar', ''),
       ('Đã hẹn giờ', t.get('scheduled', 0), '/calendar', ''),
       ('Đã đăng', t.get('uploaded', 0), '/queue?status=uploaded', 'fin')] %}
-    <section class="today-sec" aria-labelledby="h-pipe">
+    <section class="today-sec pipe-sec" aria-labelledby="h-pipe">
       <div class="sec-h"><h2 id="h-pipe">Dây chuyền video</h2>
-        <span class="small muted">mỗi video đi lần lượt qua các bước — bấm 1 bước để xem</span>
+        <span class="small muted">bấm 1 bước để xem các video ở bước đó</span>
         {% if t.get('failed') %}<a class="pill err" href="/queue?status=failed">{{ t.failed }} lỗi</a>{% endif %}</div>
       <nav class="pipe" aria-label="Số video ở từng bước">
         {% for label, n, href, cls in steps %}
@@ -196,10 +195,29 @@
   </aside>
 </div>
 
-<details class="card fold section">
-  <summary>Nhật ký <span class="small muted" style="font-weight:400">— mọi việc tool đã làm, mới nhất ở trên</span></summary>
-  {# chỉ tải khi mở mục Nhật ký, và chỉ làm mới mỗi 5s khi đang mở #}
+</div>
+
+<script>
+  // dải video chờ duyệt nằm ngang: lăn chuột dọc = lướt ngang (gắn 1 lần — trang tự làm mới chạy lại script này)
+  if (!window.__dyRqWheel) {
+    window.__dyRqWheel = true;
+    document.addEventListener('wheel', (e) => {
+      const row = e.target.closest && e.target.closest('.rq-row');
+      if (!row || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY) || row.scrollWidth <= row.clientWidth) return;
+      e.preventDefault(); row.scrollLeft += e.deltaY;
+    }, { passive: false });
+  }
+</script>
+
+{# Nhật ký: hộp mở từ nút ở dòng chào; chỉ tải khi mở, làm mới 5 s / lần khi đang mở. Nằm trong <main> -> trang
+   tự làm mới hoãn lại khi hộp mở #}
+<dialog class="runpop logpop" id="logpop" aria-labelledby="lp-title" onclick="if (event.target === this) this.close()">
+  <header class="rp-head">
+    <div class="rp-title"><h2 id="lp-title">Nhật ký</h2><span class="small muted">mọi việc tool đã làm, mới nhất ở trên</span></div>
+    <button type="button" class="rp-x" aria-label="Đóng" title="Đóng (Esc)" onclick="this.closest('dialog').close()">
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m3.5 3.5 9 9m0-9-9 9"/></svg></button>
+  </header>
   <div class="log" hx-get="/partials/log" hx-swap="innerHTML"
-       hx-trigger="toggle from:closest details, every 5s [(this.closest('details').open) && !document.hidden]"></div>
-</details>
+       hx-trigger="logpop-open, every 5s [this.closest('dialog').open && !document.hidden]"></div>
+</dialog>
 {% endblock %}

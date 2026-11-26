@@ -1571,3 +1571,75 @@ html.theme-swap *, html.theme-swap *::before, html.theme-swap *::after { transit
 .rp-next-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .rp-next-main > span:first-child { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
 .rp-when { white-space: nowrap; padding-top: 2px; }
+
+/* =====================================================================================================
+   HÔM NAY VỪA 1 MÀN HÌNH (người dùng 2026-11-26: "hiện gọn đẹp vào 1 trang không cần lăn xuống"). Kiểu gọn áp dụng mọi
+   cỡ; khung cố định chiều cao (không cuộn trang, các khối tự co / cuộn bên trong) chỉ bật khi cửa sổ đủ to — nhỏ hơn
+   thì trang cuộn như cũ. Video chờ duyệt = 1 dải ngang, mỗi video cao theo khung (đơn vị cqh của .rq-row)
+   ===================================================================================================== */
+.today-hero { align-items: center; margin-bottom: 16px; gap: 10px 20px; }
+.today-hero > div:first-child { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; min-width: 0; }
+.today-hero h1 { order: -1; font-size: 24px; line-height: 30px; margin: 0; }
+.today-date { margin: 0; font-size: 13px; }
+.today-say { flex-basis: 100%; margin-top: 2px; font-size: 14px; line-height: 20px; }
+.lp-slot:empty { display: none; }
+.lp-slot { margin-bottom: 12px; }
+.today-kpis { gap: 12px; margin-bottom: 16px; }
+.kpi { padding: 12px 16px; gap: 2px; overflow: hidden; }
+.kpi::before { top: 12px; bottom: 12px; }
+.kpi-n { font-size: 24px; line-height: 30px; }
+.kpi-n small { font-size: 13.5px; }
+.kpi-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; margin: 0; }
+.today-main { gap: 18px; }
+.today-body { gap: 20px; }
+.sec-h { margin-bottom: 10px; }
+.sec-h h2 { font-size: 16px; line-height: 22px; }
+.rq-auto-note { margin-left: auto; }
+
+/* dải video chờ duyệt nằm ngang */
+.rq-row { --rq-meta: 84px; display: flex; gap: 12px; height: 380px; overflow-x: auto; overflow-y: hidden; padding: 2px 2px 8px;
+  container-type: size; scroll-snap-type: x proximity; }
+.rq-row .rq-item { flex: none; display: flex; flex-direction: column; min-width: 118px; scroll-snap-align: start;
+  width: min(232px, calc((100cqh - 10px - var(--rq-meta)) * 9 / 16)); }
+.rq-row .rq-item:hover { transform: none; }
+.rq-row .rq-item .rv-thumb { flex: none; width: 100%; height: min(412px, calc(100cqh - 10px - var(--rq-meta))); aspect-ratio: auto; max-height: none; }
+.rq-row .rv-meta { height: var(--rq-meta); box-sizing: border-box; overflow: hidden; }
+.rq-row .rv-plat { display: flex; align-items: center; gap: 4px; white-space: nowrap; overflow: hidden; }
+.rq-row .rv-auto { margin: 0; font-size: 10.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rq-more { flex: none; align-self: center; width: 150px; margin: 0; }
+
+/* dây chuyền: dải mảnh, số + tên bước nằm ngang */
+.pipe-sec .sec-h { margin-bottom: 8px; }
+.pipe-sec .sec-h h2 { font-size: 14px; }
+.pipe { display: flex; flex-wrap: nowrap; padding: 0; overflow: hidden; }
+.pipe::before { display: none; }
+.pipe-step { flex: 1 1 auto; flex-direction: row; justify-content: flex-start; gap: 6px; padding: 0; min-width: 0; }
+.pipe-step:last-child { flex: none; }
+.pipe-step:not(:last-child)::after { content: ""; flex: 1; min-width: 0; height: 1.5px; margin: 0 4px 0 0; background: var(--line-strong); }
+.pipe-n { min-width: 30px; height: 30px; padding: 0 6px; font-size: 13.5px; border-width: 1.5px; box-shadow: none; flex: none; }
+.pipe-l { font-size: 12px; white-space: nowrap; flex: none; }
+
+.side-card .card-h { margin-bottom: 6px; }
+.tl-row { padding: 9px 0; }
+
+/* hộp Nhật ký (dùng chung khung hộp Chạy tự động) */
+.logpop { width: min(760px, 94vw); }
+.logpop .rp-title { flex-wrap: wrap; column-gap: 12px; }
+.logpop .log { padding: 6px 22px 18px; max-height: none; }
+
+@media (min-width: 1181px) and (min-height: 700px) {
+  .content:has(> main > .today) { overflow: hidden; }
+  main:has(> .today) { display: flex; flex-direction: column; min-height: 0; padding: 20px 32px 20px; }
+  .today { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .today > * { flex: none; }
+  .today > .today-body { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) clamp(280px, 24vw, 340px); grid-template-rows: minmax(0, 1fr);
+    align-items: stretch; }
+  .today-main { min-height: 0; }
+  .today-main > * { flex: none; }
+  .today-alerts { max-height: 210px; overflow: auto; }
+  .today-main > .rq-sec { flex: 1; min-height: 160px; display: flex; flex-direction: column; }
+  .rq-sec > .rq-row { flex: 1; height: auto; min-height: 0; }
+  .rq-sec > .today-empty { flex: 1; display: grid; place-items: center; }
+  .today-side { position: static; min-height: 0; }
+  .today-side > .side-card { flex: 0 1 auto; min-height: 96px; overflow: auto; }
+}

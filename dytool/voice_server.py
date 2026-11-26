@@ -822,6 +822,8 @@ def build_app():
             instruct="" if prof else str(b.get("instructions") or ""),
             seed=_num(b.get("seed"), True) if b.get("seed") is not None else (prof or {}).get("seed"),
             duration=_num(b.get("duration")), speed=_num(b.get("speed")), gen=gen)
+        # nhật ký tốc độ (trang Giọng nói › Nhật ký): biết máy đọc CPU chậm cỡ nào khi người dùng báo hết giờ chờ
+        print(f"Đọc {len(audio) / SR:.1f} s giọng ({len(text)} chữ) mất {gt:.0f} s trên {ENGINE.device}", flush=True)
         return Response(wav_bytes(audio), media_type="audio/wav",
                         headers={"x-seed": str(seed), "x-gen-time": f"{gt:.2f}"})
 

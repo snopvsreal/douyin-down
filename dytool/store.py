@@ -104,6 +104,7 @@ DEFAULT_PAGE_SETTINGS = {
     "dub_enabled": True,
     "text_source": "auto",          # auto | ocr (phụ đề trên video) | asr (giọng nói)
     "dub_text_only": False,         # lồng tiếng cả video chỉ có chữ, không có lời
+    "dub_keep_sfx": True,           # giữ tiếng gốc không phải lời nói (mèo kêu, cười…) — chỉ tắt giọng Trung lúc có người nói
     "gender": "auto",
     "voice_male": "male, young adult, moderate pitch",
     "voice_female": "female, young adult, high pitch",

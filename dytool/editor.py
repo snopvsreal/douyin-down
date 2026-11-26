@@ -146,7 +146,8 @@ def _ai_cfg(sub_cfg: dict) -> dict:
 
 
 def pick_source(src: Path, band, src_size, work: Path, sub_cfg: dict, mode: str = "auto", steps=None):
-    """Chọn nguồn chữ để dịch. Trả về (các câu [{start,end,text,asr?}], "ocr"|"asr", có_giọng_nói).
+    """Chọn nguồn chữ để dịch. Trả về (các câu [{start,end,text,asr?}], "ocr"|"asr", có_giọng_nói, các đoạn
+    Whisper nghe được tiếng người [(start, end)] — lồng tiếng chỉ tắt tiếng gốc ở các đoạn này, giữ tiếng mèo…).
     - Có phụ đề in cứng (OCR đọc được): dùng chữ OCR làm chính, đính kèm lời Whisper nghe được cùng
       khoảng thời gian để Claude đối chiếu (OCR đúng chữ hơn nhưng đôi khi đọc lỗi).
     - Không có phụ đề: dùng giọng nói (Whisper).
@@ -157,6 +158,7 @@ def pick_source(src: Path, band, src_size, work: Path, sub_cfg: dict, mode: str 
     speech = steps.run("whisper", [model, lang],
                        lambda: subtitles.transcribe(src, work, model, lang, split=False),
                        label="Nghe giọng nói (Whisper)")
+    spans = [(x["start"], x["end"]) for x in speech]
     speech_secs = sum(x["end"] - x["start"] for x in speech)
     has_speech = speech_secs >= 1.0
     cues = []
@@ -171,8 +173,8 @@ def pick_source(src: Path, band, src_size, work: Path, sub_cfg: dict, mode: str 
         for c in cues:
             c["asr"] = "".join(x["text"] for x in speech
                                if min(c["end"], x["end"]) - max(c["start"], x["start"]) > 0.2)
-        return cues, "ocr", has_speech
-    return speech, "asr", has_speech
+        return cues, "ocr", has_speech, spans
+    return speech, "asr", has_speech, spans
 
 
 def edit(src: Path, dst: Path, work: Path, cfg: dict) -> dict:
@@ -205,13 +207,13 @@ def edit(src: Path, dst: Path, work: Path, cfg: dict) -> dict:
     dub_track = None
     source = "none"
     if sub_cfg.get("enabled") or dub_cfg.get("enabled"):
-        segs, source, has_speech = pick_source(src, band, src_size, work, sub_cfg, cfg.get("text_source", "auto"),
+        segs, source, has_speech, spans = pick_source(src, band, src_size, work, sub_cfg, cfg.get("text_source", "auto"),
                                                steps)
         # 3 trường hợp: có sub -> chữ OCR (+ giọng để đối chiếu) | không sub -> giọng nói | chỉ có chữ -> OCR
         want_dub = dub_cfg.get("enabled") and segs and (has_speech or dub_cfg.get("text_only", False))
         if want_dub:
             from .dub import dub_audio
-            dub_track, sub_lines = dub_audio(src, segs, work, dub_cfg, sub_cfg, steps)
+            dub_track, sub_lines = dub_audio(src, segs, work, dub_cfg, sub_cfg, steps, speech_spans=spans)
             n_lines = len(sub_lines)
             if sub_cfg.get("enabled") and sub_lines:
                 ass_name = subtitles.write_ass(sub_lines, [x["text"] for x in sub_lines],

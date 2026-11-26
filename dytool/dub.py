@@ -13,6 +13,9 @@ class DubError(RuntimeError):
     pass
 
 
+SPEAK_TIMEOUT = 1800       # giây chờ máy chủ đọc 1 lượt nói (CPU laptop có thể vài phút / câu)
+
+
 def separate(video: Path, work: Path) -> tuple[Path, Path]:
     """Tách thành (giọng nói, nhạc nền) bằng Demucs htdemucs — cùng model VoiceStudio dùng nội bộ."""
     out_dir = work / "sep"
@@ -66,7 +69,9 @@ class VoiceStudio:
         self.cfg = cfg
         from .services import vs_api
         self.api = vs_api(cfg)
-        self.http = httpx.Client(timeout=300)
+        # máy chủ ở ngay máy này: chết thật thì kết nối đứt ngay (ReadError), không đứng chờ -> chờ đọc rất lâu được.
+        # Đọc bằng CPU trên laptop 1 câu có thể quá 5 phút (người dùng 2026-11-27: "không trả lời: timed out")
+        self.http = httpx.Client(timeout=httpx.Timeout(SPEAK_TIMEOUT, connect=10.0, write=60.0, pool=60.0))
         self.voice = cfg.get("voice", "dytool-vi")
 
     def check(self) -> None:
@@ -75,12 +80,45 @@ class VoiceStudio:
         except httpx.HTTPError as e:
             raise DubError(f"Không kết nối được máy chủ giọng nói tại {self.api}. Bật ở chip Giọng nói trên cùng rồi thử lại.") from e
 
+    def _post_waiting(self, body: dict) -> httpx.Response:
+        """Gửi yêu cầu đọc ở luồng phụ, luồng này chờ từng giây: bấm Dừng có tác dụng ngay (không phải đợi máy chủ
+        đọc xong), bảng tiến trình hiện đã chờ bao lâu. Bị Dừng thì bỏ mặc yêu cầu — máy chủ đọc nốt rồi thôi."""
+        import threading
+        import time
+        from . import progress
+        box: dict = {}
+
+        def go():
+            try:
+                box["r"] = self.http.post(self.api + "/v1/audio/speech", json=body)
+            except BaseException as e:       # noqa: BLE001 — chuyển sang luồng chính
+                box["e"] = e
+        th = threading.Thread(target=go, daemon=True, name="vs-speak")
+        t0 = time.time()
+        th.start()
+        base = progress.STATE.get("task", {}) or {}
+        base = base.get("detail", "") if isinstance(base, dict) else ""
+        while th.is_alive():
+            th.join(1.0)
+            progress.check()
+            waited = time.time() - t0
+            if waited >= 20 and int(waited) % 5 == 0:
+                progress.detail(f"{base} · đang đọc {int(waited)} s" if base else f"đang đọc {int(waited)} s")
+        if "e" in box:
+            raise box["e"]
+        return box["r"]
+
     def _speech(self, body: dict) -> httpx.Response:
         """POST /v1/audio/speech. Card đồ hoạ lỗi -> máy chủ trả 503 + x-restart rồi tự thoát để chạy lại bằng CPU
-        (hoặc chết ngang lúc đọc): bật lại máy chủ, chờ nạp model, gửi lại 1 lần — video không hỏng vì lỗi card."""
+        (hoặc chết ngang lúc đọc — kết nối đứt): bật lại máy chủ, chờ nạp model, gửi lại 1 lần.
+        Hết giờ chờ (SPEAK_TIMEOUT) KHÔNG phải máy chủ chết mà là đang bận đọc: không gửi lại — câu gửi lại phải xếp
+        hàng sau câu cũ vẫn đang đọc (bản 0.5.2 làm vậy -> lỗi "không trả lời: timed out" lần 2)."""
         for attempt in (0, 1):
             try:
-                r = self.http.post(self.api + "/v1/audio/speech", json=body)
+                r = self._post_waiting(body)
+            except httpx.TimeoutException as e:
+                raise DubError(f"Máy chủ giọng nói đọc 1 câu quá {SPEAK_TIMEOUT // 60:.0f} phút — máy đọc bằng CPU "
+                               "quá chậm. Xem thời gian đọc từng câu ở Nhật ký trang Giọng nói") from e
             except httpx.TransportError as e:
                 if attempt:
                     raise DubError(f"Máy chủ giọng nói không trả lời: {e}") from e
@@ -281,8 +319,28 @@ def align_subtitles(clip: Path, offset: float, text: str) -> list[dict]:
     return out
 
 
+def mute_expr(spans, pad_before: float = 0.15, pad_after: float = 0.3, fade: float = 0.12,
+              floor: float = 0.0) -> str:
+    """Biểu thức FFmpeg `volume` (eval=frame): 1 ngoài các đoạn có người nói, `floor` trong đoạn, mép chuyển dần
+    trong `fade` giây. Các đoạn (đã nới pad) chồng / sát nhau thì gộp — biểu thức ngắn lại."""
+    iv = sorted((max(0.0, float(a) - pad_before), float(b) + pad_after) for a, b in spans if float(b) > float(a))
+    merged: list[list[float]] = []
+    for a, b in iv:
+        if merged and a <= merged[-1][1] + 2 * fade:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    if not merged:
+        return "1"
+    f = max(0.01, fade)
+    # w = 1 trong [a, b], giảm dần về 0 trong f giây ngoài mép; gain = tích (1 - w)
+    terms = [f"(1-clip((t-{a - f:.3f})/{f:.3f},0,1)*clip(({b + f:.3f}-t)/{f:.3f},0,1))" for a, b in merged]
+    g = "*".join(terms)
+    return f"max({floor:.3f},{g})" if floor > 0 else g
+
+
 def dub_audio(video: Path, segments: list[dict], work: Path, cfg: dict,
-              sub_cfg: dict | None = None, steps=None) -> tuple[Path, list[dict]]:
+              sub_cfg: dict | None = None, steps=None, speech_spans=None) -> tuple[Path, list[dict]]:
     """Lồng tiếng Việt. Trả về (file .m4a gồm nhạc nền + giọng Việt, các dòng phụ đề khớp giọng đọc).
     1. Gom đoạn Whisper thành lượt nói (đọc liền), nhận giọng nam/nữ từng lượt.
     2. Claude dịch từng lượt, có giới hạn âm tiết và quy tắc ngắt nghỉ học từ giọng đọc thật.
@@ -368,12 +426,25 @@ def dub_audio(video: Path, segments: list[dict], work: Path, cfg: dict,
     bg_vol = cfg.get("background_volume", 0.9)
     voice_vol = cfg.get("voice_volume", 1.0)
     keep = float(cfg.get("original_voice_volume", 0.0))
-    if keep > 0:   # giữ lại chút giọng gốc nếu muốn
+    sfx = cfg.get("keep_sfx", True)
+    parts = list(filters)
+    if sfx:
+        # Demucs xếp tiếng mèo kêu, tiếng cười, tiếng hát… vào phần "giọng" -> trước đây bỏ cả phần giọng thì mất
+        # luôn tiếng mèo (người dùng 2026-11-27). Giờ trả phần giọng gốc lại, CHỈ tắt ở các đoạn có người nói
+        # (Whisper nghe được) — mép mờ dần, không nghe "bụp". keep > 0 = vẫn để lọt chút giọng Trung khi đang nói.
+        spans = speech_spans if speech_spans is not None else [(s["start"], s["end"]) for s in segments]
         inputs += ["-i", str(vocals)]
         k = len(inputs) // 2 - 1
-        filters.append(f"[{k}:a]volume={keep}[orig]")
-        labels.append("[orig]")
-    parts = filters + [f"[0:a]volume={bg_vol}[bg]"]
+        gain = mute_expr(spans, floor=keep)
+        parts += [f"[{k}:a]volume='{gain}':eval=frame,volume={float(cfg.get('sfx_volume', 1.0))}[sfx]",
+                  f"[0:a]volume={bg_vol}[bg0]", "[bg0][sfx]amix=inputs=2:normalize=0:duration=first[bg]"]
+    else:
+        if keep > 0:   # giữ lại chút giọng gốc nếu muốn
+            inputs += ["-i", str(vocals)]
+            k = len(inputs) // 2 - 1
+            parts.append(f"[{k}:a]volume={keep}[orig]")
+            labels.append("[orig]")
+        parts.append(f"[0:a]volume={bg_vol}[bg]")
     if labels:
         parts += [f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0,volume={voice_vol}[voice]",
                   "[bg][voice]amix=inputs=2:normalize=0:duration=first[out]"]

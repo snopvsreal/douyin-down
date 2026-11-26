@@ -217,7 +217,7 @@ def design_preview(cfg: dict, instruct: str, seed: int, text: str = "", language
     """Đọc 1 câu bằng giọng thiết kế theo mô tả (chưa lưu). Cùng mô tả + seed -> cùng giọng."""
     body = {"model": "omnivoice", "voice": "default", "input": (text or REF_TEXT)[:400], "language": language,
             "seed": int(seed), "response_format": "wav", "instructions": instruct}
-    return _call(cfg, "POST", "/v1/audio/speech", timeout=300, json=body).content
+    return _call(cfg, "POST", "/v1/audio/speech", timeout=1800, json=body).content   # CPU: chậm
 
 
 def design_save(cfg: dict, name: str, instruct: str, seed: int, language: str = "vi") -> dict:

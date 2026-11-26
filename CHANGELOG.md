@@ -8,6 +8,13 @@ Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh h�
 
 ---
 
+## [0.5.3] — 2026-11-27
+
+**Edit lỗi bấm Thử lại thì chạy tiếp từ chỗ lỗi, không làm lại từ đầu**
+
+- ⚡ **Lưu kết quả từng bước edit**: dò vị trí phụ đề Trung, nghe giọng (Whisper), đọc phụ đề trên video (OCR), tách giọng, nhận giọng nam / nữ, dịch, và từng câu lồng tiếng. Edit lỗi (hoặc bấm Dừng) rồi Thử lại → bước nào xong rồi thì dùng lại, chỉ làm tiếp phần còn thiếu — ví dụ lỗi ở câu lồng tiếng thứ 6 thì lần sau đọc tiếp từ câu 6. Bảng tiến trình ghi "dùng lại kết quả lần trước".
+- Đổi cài đặt ảnh hưởng tới kết quả (giọng, cách dịch…) hoặc tải lại video thì bước đó tự làm lại; đổi kiểu chữ phụ đề (font, cỡ, vị trí) không mất bản dịch. Edit xong thì xoá kết quả đã lưu — bấm Edit lại vẫn dịch / đọc mới.
+
 ## [0.5.2] — 2026-11-27
 
 **Lồng tiếng chạy được trên máy có card đồ hoạ hay lỗi + chọn chạy bằng CPU hoặc card đồ hoạ**

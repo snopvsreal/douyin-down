@@ -8,6 +8,15 @@ Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh h�
 
 ---
 
+## [0.5.6] — 2026-11-27
+
+**Giọng lồng tiếng đọc thong thả, nghỉ rõ giữa câu + giữ tiếng mèo cả lúc đang đọc + tự giảm nhạc nền**
+
+- 🛠️ **Giọng đọc không còn dồn**: trước đây dytool tính theo tốc độ người đọc TikTok nhanh và ép đọc nhanh thêm cho vừa khung, nên chỗ nghỉ bị nén mất. Giờ có **Tốc độ đọc** ở Cài đặt kênh › Edit & lồng tiếng: Chậm rãi / **Vừa** (mặc định) / Nhanh (như cũ). Bản dịch được viết gọn cho vừa tốc độ đó thay vì đọc ép, và giữa các câu có chỗ nghỉ thật (~0,6 giây).
+- 🛠️ **Tiếng mèo còn cả lúc đang lồng tiếng**: dytool dò từng khúc có tiếng người và chỉ tắt đúng khúc đó — tiếng mèo xen giữa các câu nói, hay lúc giọng Việt đang đọc, vẫn nghe được.
+- ✨ **Tự giảm nhạc nền** (bật sẵn, tắt ở Cài đặt kênh): nhạc nền to hơn giọng đọc thì hạ xuống, và nhỏ đi lúc giọng Việt đang đọc, hết câu thì lên lại.
+- Video đã edit trước đây: mở video › **Edit lại** để có cách đọc / trộn âm mới.
+
 ## [0.5.5] — 2026-11-27
 
 **Nút "Edit lại" cho video đã edit nhưng chưa đăng**

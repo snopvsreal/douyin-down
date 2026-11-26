@@ -1,6 +1,6 @@
 [project]
 name = "dytool"
-version = "0.5.5"
+version = "0.5.6"
 description = "Douyin → edit → lồng tiếng Việt bằng AI → đăng theo lịch lên Facebook Page / TikTok"
 requires-python = ">=3.12,<3.13"
 dependencies = [

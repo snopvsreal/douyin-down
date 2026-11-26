@@ -95,7 +95,8 @@ class Worker:
         import ctypes
         k32 = ctypes.windll.kernel32
         k32.CreateMutexW.restype = ctypes.c_void_p
-        h = k32.CreateMutexW(None, True, "Local\\dytool-worker")
+        from .instance import mutex
+        h = k32.CreateMutexW(None, True, mutex("Local\\dytool-worker"))
         if not h:
             return True                     # không tạo được khoá -> không chặn
         if k32.GetLastError() == 183:       # ERROR_ALREADY_EXISTS: tiến trình dytool khác đang giữ
@@ -391,6 +392,9 @@ class Worker:
         dub["gender"] = s["gender"]
         from .dub import page_voices
         dub["voices"] = page_voices(s)
+        from . import vtemplate
+        if not vtemplate.is_noop(s.get("tpl")):
+            e["template"] = vtemplate.normalize(s["tpl"])     # editor.edit áp sau cùng (intro / outro, hiệu ứng…)
         return e
 
     def _douyin(self):

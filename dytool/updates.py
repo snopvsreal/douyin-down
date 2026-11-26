@@ -117,6 +117,9 @@ def check(force: bool = False) -> None:
 
 
 def start_background_checks() -> None:
+    from .instance import IS_BETA
+    if IS_BETA:
+        return          # app beta: không tự cập nhật (trình cài bản chính cài vào C:/dytool và đóng app)
     if _checked.get("loop"):
         return
     _checked["loop"] = True
@@ -246,6 +249,9 @@ def _install_dytool(exe: Path) -> None:
 
 def start(app: str) -> str | None:
     """Bắt đầu cập nhật ở thread nền. Trả về lý do từ chối (hoặc None nếu đã bắt đầu)."""
+    from .instance import IS_BETA
+    if IS_BETA:
+        return "App beta không tự cập nhật — cập nhật bằng scripts\\beta.ps1"
     if app not in APPS:
         return "không rõ app"
     info = _latest.get(app)

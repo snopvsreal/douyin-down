@@ -1844,3 +1844,12 @@ nav.side > .nav-chans > * { flex-shrink: 0; }
 .g-keys td:nth-child(3) { padding-left: 24px; }
 @media (max-width: 1100px) { .guide { grid-template-columns: minmax(0, 1fr); } .g-toc { display: none; } }
 @media (prefers-reduced-motion: reduce) { .g-bar span, .g-chev { transition: none; } }
+
+/* Cài đặt kênh › Edit: thẻ mở cửa sổ Mẫu edit (editor.html, thử nghiệm) */
+.tpl-card { display: flex; align-items: center; gap: 14px; padding: 14px; border: 1px solid var(--tile-line); background: var(--sunken); }
+.tpl-ico { width: 44px; height: 44px; display: grid; place-items: center; background: var(--primary-tint); color: var(--primary-text); flex: none; }
+.tpl-ico svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
+.tpl-txt { flex: 1; min-width: 0; }
+
+/* app beta (instance.json): nhãn cạnh tên app */
+.brand-beta { margin-left: 6px; padding: 1px 6px; background: #c2620a; color: #fff; font-size: 10.5px; font-weight: 700; letter-spacing: .02em; vertical-align: 2px; }

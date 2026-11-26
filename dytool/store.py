@@ -110,6 +110,7 @@ DEFAULT_PAGE_SETTINGS = {
     "voice_seed": 7,
     "voice_male_profile": "",       # tên giọng có sẵn trong thư viện VoiceStudio ("" = thiết kế theo mô tả + seed)
     "voice_female_profile": "",
+    "tpl": {},                      # Mẫu edit kiểu CapCut (vtemplate) — sửa ở cửa sổ Mẫu edit, áp sau bước edit chính
 }
 
 

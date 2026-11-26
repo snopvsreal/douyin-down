@@ -221,6 +221,10 @@ def edit(src: Path, dst: Path, work: Path, cfg: dict) -> dict:
         mask_args = ["-loop", "1", "-framerate", "30", "-t", f"{duration(src) + 1:.2f}",
                      "-i", str(feather_mask(work, w, h, band, feather).resolve())]
     out = cfg.get("output", {})
+    tpl = cfg.get("template")
+    final = dst
+    if tpl:
+        dst = work / f"{src.stem}_base.mp4"      # bản edit chính -> áp mẫu (vtemplate) ra file cuối
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error", "-i", str(src.resolve()),
         *(["-i", str(dub_track.resolve())] if dub_track else []),
@@ -235,4 +239,12 @@ def edit(src: Path, dst: Path, work: Path, cfg: dict) -> dict:
     progress.step("Xuất video (FFmpeg)")
     # chạy trong thư mục work để filter subtitles đọc file .ass bằng tên ngắn (tránh lỗi escape đường dẫn)
     subprocess.run(cmd, cwd=work, check=True)
+    if tpl:
+        from . import vtemplate
+        progress.step("Áp mẫu edit (intro / outro, hiệu ứng)")
+        try:
+            vtemplate.apply(dst, final, work, tpl, work.parent, crf=int(out.get("crf", 20)),
+                            preset=out.get("preset", "medium"))
+        finally:
+            dst.unlink(missing_ok=True)
     return {"sub_lines": n_lines, "band": band, "dubbed": bool(dub_track), "text_source": source}

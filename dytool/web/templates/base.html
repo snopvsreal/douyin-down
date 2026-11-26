@@ -22,7 +22,7 @@
 <a class="skip" href="#main">Bỏ qua menu, tới nội dung chính</a>
 <div class="app" data-css="{{ css_v() }}" data-rev="{{ data_rev }}">
   <nav class="side" aria-label="Menu chính">
-    <div class="brand" translate="no"><img src="/static/icon.png" alt=""><span>dytool{% if app_ver() %}<small class="brand-ver">{{ app_ver() }}</small>{% endif %}</span></div>
+    <div class="brand" translate="no"><img src="/static/icon.png" alt=""><span>dytool{% if instance_name %}<small class="brand-beta">{{ instance_name }}</small>{% endif %}{% if app_ver() %}<small class="brand-ver">{{ app_ver() }}</small>{% endif %}</span></div>
     <button type="button" class="search-btn" data-palette-open aria-label="Tìm hoặc ra lệnh">
       <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
       <span>Tìm hoặc ra lệnh…</span></button>

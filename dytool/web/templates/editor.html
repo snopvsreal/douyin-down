@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>try { const t = localStorage.getItem('dy-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <title>Mẫu edit · {{ page.name }} · dytool</title>
+  <link rel="icon" type="image/png" href="/static/favicon.png">
+  <link rel="stylesheet" href="/static/app.css?v={{ css_v() }}">
+  <link rel="stylesheet" href="/static/editor.css?v={{ static_v('editor.css') }}">
+</head>
+{# Cửa sổ Mẫu edit của kênh (thử nghiệm, kiểu CapCut) — mở từ Cài đặt kênh › Edit & lồng tiếng.
+   Xem trước = CSS gần đúng; Render thử = FFmpeg thật (vtemplate.apply). Tự lưu (POST /pages/<id>/tpl). #}
+<body class="ed">
+{% macro ico(d) %}<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">{{ d|safe }}</svg>{% endmacro %}
+{% macro rng(k, label, lo, hi, step, fmt='') %}
+<div class="ed-rng"><label for="r-{{ k }}">{{ label }}</label><output data-o="{{ k }}" data-fmt="{{ fmt }}"></output>
+  <input id="r-{{ k }}" type="range" min="{{ lo }}" max="{{ hi }}" step="{{ step }}" data-k="{{ k }}"></div>
+{% endmacro %}
+{% macro seg_panel(key, label) %}
+<section class="ed-panel" data-panel="{{ key }}" hidden>
+  <div class="ed-ph"><h2>{{ label }}</h2>
+    <label class="ed-sw"><input type="checkbox" data-k="{{ key }}.enabled"><span></span> Bật</label></div>
+  <div class="ed-off-hint" data-show-off="{{ key }}">Bật để thêm {{ 'đoạn mở đầu' if key == 'intro' else 'đoạn kết' }} vào mọi video của kênh.</div>
+  <div data-show-on="{{ key }}">
+    {{ rng(key ~ '.duration', 'Độ dài', 0.5, 15, 0.5, 's') }}
+    <h3>Nền</h3>
+    <div class="ed-row">
+      <label class="ed-col"><span>Màu nền</span><input type="color" data-k="{{ key }}.bg"></label>
+      <div class="ed-file" data-file="{{ key }}.file" data-accept="image/*,video/*">
+        <button type="button" class="btn sm" data-pick>Ảnh / video nền…</button>
+        <span class="ed-fname" data-fname></span>
+        <button type="button" class="btn sm ghost" data-clear title="Bỏ file nền, dùng màu">Bỏ</button>
+      </div>
+    </div>
+    <h3>Chữ</h3>
+    <label for="{{ key }}-title">Tiêu đề</label>
+    <textarea id="{{ key }}-title" rows="2" data-k="{{ key }}.title" placeholder="Để trống = không có chữ"></textarea>
+    <label for="{{ key }}-sub">Dòng phụ (có nền màu nhấn)</label>
+    <input id="{{ key }}-sub" type="text" data-k="{{ key }}.sub" autocomplete="off">
+    <div class="ed-row">
+      <label class="ed-col"><span>Màu chữ</span><input type="color" data-k="{{ key }}.color"></label>
+      <label class="ed-col"><span>Màu nhấn</span><input type="color" data-k="{{ key }}.accent"></label>
+      <label class="ed-col grow"><span>Hiệu ứng chữ</span><select data-k="{{ key }}.anim">
+        {% for k, v in anims.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+    </div>
+    {{ rng(key ~ '.size', 'Cỡ tiêu đề', 0.02, 0.15, 0.005, 'pct') }}
+    <h3>Chuyển cảnh {{ 'vào video' if key == 'intro' else 'từ video sang' }}</h3>
+    <div class="ed-trans" data-trans="{{ key }}">
+      {% for k, v in transitions.items() %}<button type="button" data-v="{{ k }}"><i class="tr-{{ k }}"></i><span>{{ v }}</span></button>{% endfor %}
+    </div>
+    {{ rng(key ~ '.trans_dur', 'Thời lượng chuyển cảnh', 0.1, 2, 0.1, 's') }}
+  </div>
+</section>
+{% endmacro %}
+
+<div class="ed-app" id="ed" data-pid="{{ page.id }}">
+  <header class="ed-top">
+    <div class="ed-title"><b>Mẫu edit</b><span class="muted">· {{ page.name }}</span>
+      <span class="ed-save" id="ed-save" aria-live="polite">Đã lưu</span></div>
+    <div class="ed-actions">
+      <label class="sr-only" for="ed-sample">Video mẫu</label>
+      <select id="ed-sample" class="sm" title="Video dùng để xem trước">
+        {% for v in samples %}<option value="{{ v.key }}" data-url="{{ v.url }}">{{ v.label }}</option>{% endfor %}
+        <option value="__upload">Tải video mẫu lên…</option>
+      </select>
+      <button type="button" class="btn sm" id="ed-reset" title="Đưa mẫu về mặc định (không có intro / outro, không hiệu ứng)">Đặt lại</button>
+      {% if others %}
+      <details class="ed-copy"><summary class="btn sm">Chép sang kênh</summary>
+        <form class="ed-pop" id="ed-copy-f"><label for="cp-to">Chép mẫu này sang</label>
+          <select id="cp-to" name="to">{% for o in others %}<option value="{{ o.id }}">{{ o.name }}{{ ' · TikTok' if o.platform == 'tiktok' }}</option>{% endfor %}</select>
+          <button class="btn sm">Chép</button><p class="small muted">Mẫu của kênh kia bị thay.</p></form></details>
+      {% endif %}
+      <button type="button" class="btn sm primary" id="ed-render">Render thử</button>
+    </div>
+  </header>
+
+  <nav class="ed-rail" aria-label="Công cụ" role="tablist">
+    {% for key, label, d in [
+      ('canvas', 'Khung hình', '<rect x="5" y="3" width="14" height="18" rx="1"/><path d="M9 7h6"/>'),
+      ('filter', 'Bộ lọc', '<circle cx="9" cy="10" r="5"/><circle cx="15" cy="10" r="5"/><circle cx="12" cy="15" r="5"/>'),
+      ('adjust', 'Điều chỉnh', '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>'),
+      ('text', 'Chữ & logo', '<path d="M5 6V4h14v2M12 4v16M9 20h6"/>'),
+      ('intro', 'Intro', '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="m10 9 5 3-5 3z"/>'),
+      ('outro', 'Outro', '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M9 9v6M14 9l-3 3 3 3"/>'),
+      ('music', 'Nhạc', '<path d="M9 18V6l10-2v12"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="16" r="2"/>')] %}
+    <button type="button" role="tab" data-tab="{{ key }}" aria-selected="{{ 'true' if loop.first else 'false' }}">{{ ico(d) }}<span>{{ label }}</span></button>
+    {% endfor %}
+  </nav>
+
+  <aside class="ed-side">
+    {# ---------- Khung hình ---------- #}
+    <section class="ed-panel" data-panel="canvas">
+      <div class="ed-ph"><h2>Khung hình</h2></div>
+      <h3>Tỉ lệ</h3>
+      <div class="ed-chips" data-choice="canvas.ratio">
+        {% for k, v in ratios.items() %}<button type="button" data-v="{{ k }}">{{ v }}</button>{% endfor %}</div>
+      <h3>Video không vừa khung</h3>
+      <div class="ed-chips" data-choice="canvas.fit">
+        {% for k, v in fits.items() %}<button type="button" data-v="{{ k }}">{{ v }}</button>{% endfor %}</div>
+      <h3>Cắt & tốc độ</h3>
+      {{ rng('main.trim_start', 'Cắt bỏ đầu video', 0, 10, 0.1, 's') }}
+      {{ rng('main.trim_end', 'Cắt bỏ cuối video', 0, 10, 0.1, 's') }}
+      {{ rng('main.speed', 'Tốc độ', 0.5, 2, 0.05, 'x') }}
+      <h3>Chỉnh cũ của kênh</h3>
+      <label class="ed-sw"><input type="checkbox" data-k="base.hflip"><span></span> Lật ngang</label>
+      {{ rng('base.rotate_deg', 'Nghiêng', -5, 5, 0.5, 'deg') }}
+      <div class="ed-row">
+        <label class="ed-col"><span>Màu phủ</span><input type="color" data-k="base.tint_color"></label>
+        <div class="grow">{{ rng('base.tint_opacity', 'Độ đậm phủ', 0, 0.4, 0.01, 'pct') }}</div>
+      </div>
+      <p class="hint">3 chỉnh này làm ở bước edit chính (trước phụ đề) — đổi ở đây là đổi cho kênh. Video mẫu đã edit có
+        sẵn chúng nên khung xem chỉ thể hiện khi bạn chọn <b>Tải video mẫu lên…</b> (video gốc).</p>
+      <h3>Thanh tiến độ</h3>
+      <label class="ed-sw"><input type="checkbox" data-k="progress.enabled"><span></span> Hiện thanh chạy theo video</label>
+      <div class="ed-row" data-show-on="progress">
+        <label class="ed-col"><span>Màu</span><input type="color" data-k="progress.color"></label>
+        <div class="ed-chips grow" data-choice="progress.pos"><button type="button" data-v="top">Trên</button><button type="button" data-v="bottom">Dưới</button></div>
+      </div>
+    </section>
+
+    {# ---------- Bộ lọc ---------- #}
+    <section class="ed-panel" data-panel="filter" hidden>
+      <div class="ed-ph"><h2>Bộ lọc</h2></div>
+      <div class="ed-filters" id="ed-filters"></div>
+      <p class="hint">Bộ lọc đặt sẵn các giá trị ở tab Điều chỉnh — chỉnh tiếp ở đó.</p>
+    </section>
+
+    {# ---------- Điều chỉnh ---------- #}
+    <section class="ed-panel" data-panel="adjust" hidden>
+      <div class="ed-ph"><h2>Điều chỉnh</h2></div>
+      {{ rng('main.brightness', 'Độ sáng', -0.3, 0.3, 0.01, 'signed') }}
+      {{ rng('main.contrast', 'Tương phản', 0.5, 1.8, 0.01, 'x') }}
+      {{ rng('main.saturation', 'Bão hoà màu', 0, 2.5, 0.01, 'x') }}
+      {{ rng('main.temperature', 'Nhiệt độ màu (thấp = ấm)', 3000, 10000, 100, 'K') }}
+      {{ rng('main.hue', 'Đổi sắc', -180, 180, 1, 'deg') }}
+      {{ rng('main.sharpen', 'Làm nét', 0, 1.5, 0.05, '') }}
+      {{ rng('main.grain', 'Hạt phim', 0, 40, 1, '') }}
+      <label class="ed-sw"><input type="checkbox" data-k="main.vignette"><span></span> Tối 4 góc (vignette)</label>
+      <h3>Chuyển động</h3>
+      {{ rng('main.zoom', 'Phóng to chậm dần', 0, 0.3, 0.01, 'pct') }}
+      {{ rng('main.fade_in', 'Hiện dần lúc đầu (khi không có intro)', 0, 3, 0.1, 's') }}
+      {{ rng('main.fade_out', 'Tối dần lúc cuối (khi không có outro)', 0, 3, 0.1, 's') }}
+      <button type="button" class="btn sm" id="ed-adj-reset">Về mặc định</button>
+    </section>
+
+    {# ---------- Chữ & logo ---------- #}
+    <section class="ed-panel" data-panel="text" hidden>
+      <div class="ed-ph"><h2>Chữ & logo</h2></div>
+      <div class="ed-presets">
+        <button type="button" data-add="title"><b class="pv-title">Tiêu đề</b><span>Chữ lớn viền đen</span></button>
+        <button type="button" data-add="boxed"><b class="pv-boxed">Chữ có nền</b><span>Hộp màu sau chữ</span></button>
+        <button type="button" data-add="watermark"><b class="pv-wm">@tenkenh</b><span>Watermark góc</span></button>
+        <button type="button" data-add="cta"><b class="pv-cta">Theo dõi ngay!</b><span>Kêu gọi, hiện cuối video</span></button>
+        <button type="button" data-add="logo"><b class="pv-logo">{{ ico('<rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m20 15-5-5L5 20"/>') }}</b><span>Logo / ảnh</span></button>
+      </div>
+      <div class="ed-layers" id="ed-layers"></div>
+      <div class="ed-layer-ed" id="ed-layer-ed" hidden>
+        <div class="ed-ph"><h3 id="le-title">Lớp đang chọn</h3>
+          <button type="button" class="btn sm ghost" id="le-del">Xoá lớp</button></div>
+        <div data-lt="text">
+          <label for="le-text">Nội dung</label>
+          <textarea id="le-text" rows="2" data-lk="text"></textarea>
+          <div class="ed-row">
+            <label class="ed-col"><span>Màu</span><input type="color" data-lk="color"></label>
+            <label class="ed-col"><span>Viền</span><input type="color" data-lk="stroke"></label>
+            <label class="ed-col grow"><span>Font</span><select data-lk="font"><option value="extrabold">Be Vietnam Pro ExtraBold</option><option value="bold">Be Vietnam Pro Bold</option></select></label>
+          </div>
+          <div class="ed-rng"><label>Độ dày viền</label><output data-lo="stroke_w" data-fmt="pct"></output><input type="range" min="0" max="0.2" step="0.01" data-lk="stroke_w"></div>
+          <label class="ed-sw"><input type="checkbox" data-lk="box"><span></span> Hộp nền sau chữ</label>
+          <div class="ed-row" data-lbox>
+            <label class="ed-col"><span>Màu hộp</span><input type="color" data-lk="box_color"></label>
+            <div class="ed-rng grow"><label>Độ đậm hộp</label><output data-lo="box_opacity" data-fmt="pct"></output><input type="range" min="0" max="1" step="0.05" data-lk="box_opacity"></div>
+          </div>
+        </div>
+        <div data-lt="image">
+          <div class="ed-file" data-lfile data-accept="image/*">
+            <button type="button" class="btn sm" data-pick>Đổi ảnh…</button><span class="ed-fname" data-fname></span></div>
+        </div>
+        <div class="ed-rng"><label>Cỡ</label><output data-lo="size" data-fmt="pct"></output><input type="range" min="0.01" max="0.6" step="0.005" data-lk="size"></div>
+        <div class="ed-rng"><label>Độ rõ</label><output data-lo="opacity" data-fmt="pct"></output><input type="range" min="0.1" max="1" step="0.05" data-lk="opacity"></div>
+        <label>Vị trí <span class="small muted">(kéo trực tiếp trên khung xem trước)</span></label>
+        <div class="ed-pos" id="le-pos">{% for y in (0.08, 0.5, 0.88) %}{% for x in (0.18, 0.5, 0.82) %}<button type="button" data-x="{{ x }}" data-y="{{ y }}" aria-label="Vị trí {{ loop.index }}"></button>{% endfor %}{% endfor %}</div>
+        <div class="ed-row">
+          <label class="ed-col"><span>Hiện từ (s)</span><input type="number" min="0" step="0.1" data-lk="start"></label>
+          <label class="ed-col"><span>Đến (s, trống = hết)</span><input type="number" min="0" step="0.1" data-lk="end" placeholder="hết video"></label>
+          <label class="ed-col grow"><span>Hiệu ứng</span><select data-lk="anim">{% for k, v in anims.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+        </div>
+        <p class="hint">Thời gian tính từ đầu video chính (sau intro). Kéo thanh của lớp ở dòng thời gian để đổi nhanh.</p>
+      </div>
+    </section>
+
+    {{ seg_panel('intro', 'Intro · đoạn mở đầu') }}
+    {{ seg_panel('outro', 'Outro · đoạn kết') }}
+
+    {# ---------- Nhạc ---------- #}
+    <section class="ed-panel" data-panel="music" hidden>
+      <div class="ed-ph"><h2>Âm thanh</h2></div>
+      <h3>Nhạc nền</h3>
+      <div class="ed-file" data-file="music.file" data-accept="audio/*,video/mp4">
+        <button type="button" class="btn sm" data-pick>Chọn file nhạc…</button>
+        <span class="ed-fname" data-fname></span>
+        <button type="button" class="btn sm ghost" data-clear>Bỏ</button>
+      </div>
+      {{ rng('music.volume', 'Âm lượng nhạc', 0, 1.5, 0.05, 'pct') }}
+      {{ rng('music.fade_out', 'Nhỏ dần lúc cuối', 0, 5, 0.5, 's') }}
+      <h3>Tiếng video</h3>
+      {{ rng('main.volume', 'Âm lượng giọng / tiếng gốc', 0, 2, 0.05, 'pct') }}
+      <p class="hint">Nhạc lặp lại cho đủ độ dài, trộn dưới giọng lồng tiếng. Dùng nhạc bạn có quyền dùng — Facebook / TikTok có thể tắt tiếng video dùng nhạc bản quyền.</p>
+    </section>
+  </aside>
+
+  {# ---------- khung xem trước ---------- #}
+  <div class="ed-stage" id="ed-stage">
+    <div class="ed-frame" id="ed-frame">
+      <video class="ed-bgv" id="ed-bgv" muted playsinline preload="auto"></video>
+      <div class="ed-mainwrap" id="ed-mainwrap"><video id="ed-v" playsinline preload="auto"></video></div>
+      <div class="ed-tint" id="ed-tint"></div>
+      <div class="ed-temp" id="ed-temp"></div>
+      <div class="ed-vig" id="ed-vig"></div>
+      <div class="ed-grain" id="ed-grain"></div>
+      <div class="ed-layerbox" id="ed-lbox"></div>
+      <div class="ed-bar" id="ed-bar"></div>
+      <div class="ed-seg" id="ed-seg-intro"><video muted playsinline loop></video><b class="sg-t"></b><span class="sg-s"></span></div>
+      <div class="ed-seg" id="ed-seg-outro"><video muted playsinline loop></video><b class="sg-t"></b><span class="sg-s"></span></div>
+      <div class="ed-guide-v" id="ed-gv" hidden></div><div class="ed-guide-h" id="ed-gh" hidden></div>
+      <div class="ed-empty" id="ed-empty" hidden>Chưa có video đã edit để xem thử.<br>
+        <button type="button" class="btn sm" id="ed-up-sample">Tải 1 video mẫu lên</button></div>
+    </div>
+    <div class="ed-ctl">
+      <button type="button" class="ed-play" id="ed-play" aria-label="Phát / dừng (phím cách)">
+        <svg viewBox="0 0 24 24" width="18" height="18" class="i-play"><path d="M7 4.5v15l13-7.5z"/></svg>
+        <svg viewBox="0 0 24 24" width="18" height="18" class="i-pause"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg></button>
+      <span class="ed-time num" id="ed-time">0:00.0 / 0:00.0</span>
+      <span class="ed-note small muted">Xem trước gần đúng · Render thử để xem bản thật</span>
+    </div>
+  </div>
+
+  {# ---------- dòng thời gian ---------- #}
+  <section class="ed-tl" aria-label="Dòng thời gian">
+    <div class="ed-tl-heads"><div class="h-ruler"></div><div>Video</div><div id="tl-h-layers">Chữ & logo</div><div>Nhạc</div></div>
+    <div class="ed-tl-body" id="ed-tl">
+      <div class="ed-ruler" id="tl-ruler"></div>
+      <div class="ed-track" id="tl-video"></div>
+      <div class="ed-track ed-track-l" id="tl-layers"></div>
+      <div class="ed-track" id="tl-music"></div>
+      <div class="ed-ph-line" id="tl-ph"></div>
+    </div>
+  </section>
+
+  <dialog class="ed-render" id="ed-rdlg" aria-labelledby="rd-h">
+    <div class="ed-ph"><h2 id="rd-h">Render thử</h2><button type="button" class="btn sm ghost" id="rd-x">Đóng</button></div>
+    <div id="rd-body"></div>
+  </dialog>
+  <input type="file" id="ed-file" hidden>
+  <div class="ed-toast" id="ed-toast" role="status" hidden></div>
+</div>
+
+<script>window.__ED = {{ {"pid": page.id, "tpl": tpl, "base": base, "default": default, "trans": transitions}|tojson }};</script>
+<script src="/static/editor.js?v={{ static_v('editor.js') }}"></script>
+</body>
+</html>

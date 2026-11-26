@@ -99,6 +99,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     app.state.show_window = None       # desktop.py gán hàm đưa cửa sổ lên trước (khi mở dytool.exe lần 2)
     app.state.open_float = None        # desktop.py: mở / đưa lên cửa sổ nổi (luôn trên cùng) — hướng dẫn captcha Douyin
     app.state.close_float = None
+    app.state.open_window = None       # desktop.py: mở cửa sổ riêng (trình Mẫu edit của kênh)
     worker.on_captcha = lambda: _open_float()
     if autostart:
         worker.start()          # tự bật chạy tự động khi mở giao diện
@@ -118,6 +119,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     from ..store import vn_fmt
     from .. import updates as _updates
     tpl.env.globals.update(STATUS_VI=STATUS_VI, status_vi=status_vi, post_url=post_url, time=time, vnt=vn_fmt,     # vnt(ts, fmt): hiện giờ theo giờ VN
+                           instance_name=__import__("dytool.instance", fromlist=["x"]).NAME,   # app beta: nhãn ở đầu menu
                            css_v=lambda: int((HERE / "static" / "app.css").stat().st_mtime),
                            app_ver=lambda: _updates.installed("dytool"),   # cuối menu; đọc có nhớ 60 s
                            vs_cached_voices=lambda: __import__("dytool.vs_api", fromlist=["x"]).cached_profiles(),
@@ -2349,6 +2351,8 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         s = store.page_settings(page)
         bad = []
         for k, default in DEFAULT_PAGE_SETTINGS.items():
+            if k in ("hflip", "tpl"):
+                continue                      # sửa trong cửa sổ Mẫu edit (POST /pages/<id>/tpl), không có ô trong form
             if isinstance(default, bool):
                 s[k] = form.get(k) == "on"
             elif k in form:
@@ -2400,6 +2404,9 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         return render(request, "_ch_toggle.html", ch=next(c for c in plan.nav_pages(store) if c["id"] == pid),
                       on=path == f"/pages/{pid}", page=store.one("SELECT * FROM pages WHERE id=?", (pid,)),
                       row=rows[0] if rows else None, oob=True)
+
+    from .editor_routes import register as _reg_editor
+    _reg_editor(app, store, data, render)
 
     @app.get("/guide", response_class=HTMLResponse)
     def guide(request: Request):

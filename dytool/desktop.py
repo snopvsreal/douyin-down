@@ -17,10 +17,11 @@ import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PORT = int(os.environ.get("DYTOOL_PORT", "8000"))
+from . import instance as _instance
+PORT = int(os.environ.get("DYTOOL_PORT", _instance.PORT))     # app beta (instance.json): cổng riêng
 URL = f"http://127.0.0.1:{PORT}"
 ICON = ROOT / "installer" / "dytool.ico"
-TITLE = "dytool"
+TITLE = _instance.TITLE
 
 
 def _prepare_env() -> None:
@@ -64,7 +65,7 @@ def _first_instance() -> bool:
     import ctypes
     k32 = ctypes.windll.kernel32
     k32.CreateMutexW.restype = ctypes.c_void_p
-    _app_mutex = k32.CreateMutexW(None, True, "Local\\dytool-desktop")
+    _app_mutex = k32.CreateMutexW(None, True, _instance.mutex("Local\\dytool-desktop"))
     return not (_app_mutex and k32.GetLastError() == 183)     # 183 = ERROR_ALREADY_EXISTS
 
 
@@ -155,7 +156,7 @@ def _browser_mode(app, server, pystray, Image) -> None:
     with Image.open(ICON) if ICON.exists() else Image.new("RGB", (64, 64), "#172030") as im:
         im.load()
         img = im.copy()
-    pystray.Icon("dytool", img, TITLE, menu=pystray.Menu(
+    pystray.Icon(TITLE, img, TITLE, menu=pystray.Menu(
         pystray.MenuItem("Mở dytool (trình duyệt)", open_ui, default=True),
         pystray.Menu.SEPARATOR, pystray.MenuItem("Thoát dytool", quit_app))).run()
 
@@ -361,6 +362,11 @@ def main() -> None:
             w.stop()
         tray.stop()
         close_float()
+        for ew in list(extra.values()):
+            try:
+                ew.destroy()
+            except Exception:
+                pass
         window.destroy()            # webview.start() trả về -> cuối main() tắt hết dịch vụ rồi mới tắt server
 
     def on_closing():
@@ -391,6 +397,7 @@ def main() -> None:
             own["app"].state.show_window = show
             own["app"].state.open_float = open_float
             own["app"].state.close_float = close_float
+            own["app"].state.open_window = open_window
         _frameless(window, url)
 
     # Cửa sổ nổi (luôn trên cùng, có thanh tiêu đề Windows để kéo / đóng): hướng dẫn captcha Douyin đặt sát mép phải
@@ -425,6 +432,37 @@ def main() -> None:
             fw.events.closed += gone
             fw.events.shown += lambda: _style_window(fw)
             floating["w"] = fw
+
+    # Cửa sổ thường riêng (có thanh tiêu đề Windows, đổi cỡ / phóng to được): trình Mẫu edit của kênh.
+    # Mỗi `key` 1 cửa sổ: mở lại = đưa cửa sổ cũ lên + tải lại trang.
+    extra: dict = {}
+
+    def open_window(key: str, path: str, title: str, size: tuple[int, int] = (1360, 860)):
+        with float_lock:
+            ew = extra.get(key)
+            if ew is not None:
+                try:
+                    ew.load_url(URL + path)
+                    ew.restore()
+                    ew.show()
+                    return
+                except Exception:
+                    extra.pop(key, None)
+            w_, h_ = size
+            try:
+                scr = webview.screens[0]
+                w_, h_ = min(w_, int(scr.width * 0.94)), min(h_, int(scr.height * 0.9))
+            except Exception:
+                pass
+            ew = webview.create_window(title, URL + path, width=w_, height=h_, min_size=(960, 620),
+                                       background_color=bg, text_select=True)
+
+            def gone():
+                if extra.get(key) is ew:
+                    extra.pop(key, None)
+            ew.events.closed += gone
+            ew.events.shown += lambda: _style_window(ew)
+            extra[key] = ew
 
     def close_float():
         fw = floating["w"]

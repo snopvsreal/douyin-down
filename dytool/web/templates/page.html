@@ -313,15 +313,35 @@
     </section>
 
     <section class="card tabpanel" data-panel="edit" role="tabpanel" hidden>
-      <h2>Mẫu edit</h2>
-      <div class="grid g3" style="gap:0 12px; align-items:end">
-        <div><label for="f-tint_color">Màu phủ</label><input id="f-tint_color" type="color" name="tint_color" value="{{ s.tint_color }}"></div>
-        <div><label for="f-tint_opacity">Độ đậm phủ: <output id="op">{{ (s.tint_opacity * 100)|round|int }}%</output></label>
-          <input id="f-tint_opacity" type="range" name="tint_opacity" min="0" max="0.4" step="0.01" value="{{ s.tint_opacity }}"
-                 oninput="op.value=Math.round(this.value*100)+'%'"></div>
-        <div><label for="f-rotate_deg">Nghiêng (độ)</label><input id="f-rotate_deg" type="number" name="rotate_deg" value="{{ s.rotate_deg }}" step="0.5"></div>
+      {# Mẫu edit kiểu CapCut (thử nghiệm): sửa trong cửa sổ riêng /pages/<id>/editor — lật / màu phủ / nghiêng cũng ở đó #}
+      {% set t = s.tpl or {} %}
+      {% set bits = [] %}
+      {% if t.intro and t.intro.enabled %}{% set _ = bits.append('Intro') %}{% endif %}
+      {% if t.outro and t.outro.enabled %}{% set _ = bits.append('Outro') %}{% endif %}
+      {% if t.layers %}{% set _ = bits.append(t.layers|length ~ ' chữ / logo') %}{% endif %}
+      {% if t.music and t.music.file %}{% set _ = bits.append('Nhạc nền') %}{% endif %}
+      {% if t.canvas and t.canvas.ratio and t.canvas.ratio != 'keep' %}{% set _ = bits.append('Khung ' ~ t.canvas.ratio) %}{% endif %}
+      {% if s.hflip %}{% set _ = bits.append('Lật ngang') %}{% endif %}
+      {% if s.tint_opacity %}{% set _ = bits.append('Phủ màu ' ~ (s.tint_opacity * 100)|round|int ~ '%') %}{% endif %}
+      <div class="tpl-card">
+        <div class="tpl-ico" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22"><rect x="3" y="5" width="18" height="14" rx="1"/><path d="M3 15h18M7 5v4M12 5v4M17 5v4"/></svg></div>
+        <div class="tpl-txt"><h2 style="margin:0">Mẫu edit</h2>
+          <p class="small muted" style="margin:2px 0 0">{{ bits|join(' · ') if bits else 'Chưa có intro, outro hay hiệu ứng' }}</p></div>
+        <button type="button" class="btn primary" data-open-editor="{{ page.id }}">Mở trình Mẫu edit</button>
       </div>
-      <label class="check"><input type="checkbox" name="hflip" {{ 'checked' if s.hflip }}> Lật ngang</label>
+      <p class="hint">Intro / outro, bộ lọc màu, chữ, logo, nhạc nền, khung hình — áp cho mọi video kênh này edit sau đó
+        (thêm 1 lần xuất FFmpeg). Đang thử nghiệm.</p>
+      <script>
+        if (!window.__dyOpenEd) {
+          window.__dyOpenEd = true;
+          document.addEventListener('click', async (e) => {
+            const b = e.target.closest('[data-open-editor]'); if (!b) return;
+            const id = b.dataset.openEditor;
+            const r = await fetch(`/pages/${id}/editor/open`, { method: 'POST' }).catch(() => null);
+            if (!r || r.status !== 204) window.open(`/pages/${id}/editor`, 'dy-editor-' + id, 'width=1360,height=860');
+          });
+        }
+      </script>
       <label class="check"><input type="checkbox" name="subs_enabled" {{ 'checked' if s.subs_enabled }}> Phụ đề tiếng Việt</label>
       <label class="check"><input type="checkbox" name="dub_enabled" {{ 'checked' if s.dub_enabled }}> Lồng tiếng Việt</label>
       <label class="check"><input type="checkbox" name="dub_text_only" {{ 'checked' if s.dub_text_only }}>

@@ -202,7 +202,7 @@
         : H.file(p + '.file', 'image/*', 'Ảnh')) + `
         ${H.rng(p + '.size', 'Cỡ', 0.01, L.type === 'text' ? 0.15 : 0.8, 0.005, 'pct')}
         ${H.rng(p + '.opacity', 'Độ rõ', 0.1, 1, 0.05, 'pct')}
-        <div class="ed-f"><span class="lb">Vị trí nhanh <span class="muted">(hoặc kéo trên khung xem; ô trắng ở góc = đổi cỡ)</span></span>
+        <div class="ed-f"><span class="lb">Vị trí nhanh <span class="ed-dim">(hoặc kéo trên khung xem; ô trắng ở góc = đổi cỡ)</span></span>
           <div class="ed-pos">${[0.08, 0.5, 0.9].map((y) => [0.18, 0.5, 0.82].map((x) => `<button type="button" data-act="pos:${x}:${y}" aria-label="Vị trí"></button>`).join('')).join('')}</div></div>
         <h4>Thời gian & hoạt ảnh</h4>
         <div class="ed-row">${H.num(p + '.start', 'Hiện từ (s)')}${H.num(p + '.end', 'Đến (s)', 'hết')}</div>
@@ -361,9 +361,9 @@
     let h = '';
     if (k === 'media') {
       const media = assets.filter((a) => a.kind !== 'audio');
-      h = `<button type="button" class="ed-upload" data-act="upload" data-accept="video/*,image/*,audio/*"><b>＋ Nhập file</b>Hoặc kéo video, ảnh, nhạc từ máy thả vào cửa sổ</button>
+      h = `<button type="button" class="ed-upload" data-act="upload" data-accept="video/*,image/*,audio/*"><b>＋ Nhập file</b>hoặc kéo thả video, ảnh, nhạc từ máy</button>
         <h3>Thẻ màu <span class="ed-note">kéo vào ô Intro / Outro</span></h3>
-        <div class="ed-grid">${CARDS.map((c) => `<div class="ed-tile card" ${drag({ type: 'card', bg: c.bg, color: c.color || '#ffffff' })}>
+        <div class="ed-grid">${CARDS.map((c) => `<div class="ed-tile ed-ctile" ${drag({ type: 'card', bg: c.bg, color: c.color || '#ffffff' })}>
           <span class="th" style="background:${c.bg}"><b style="color:${c.color || '#fff'}">Tiêu đề</b><span class="add" data-act="add" title="Thêm làm intro">+</span></span><span class="nm">${c.name}</span></div>`).join('')}</div>
         <h3>Của bạn <span class="ed-note">${media.length} file</span></h3>
         ${media.length ? `<div class="ed-grid">${media.map((a) => `<div class="ed-tile" ${drag({ type: 'asset', name: a.name, kind: a.kind, dur: a.dur })} title="${esc(a.label)}">
@@ -372,24 +372,24 @@
             <button type="button" class="x" data-act="hide:${a.name}" title="Bỏ khỏi thư viện">×</button></span>
           <span class="nm">${esc(a.label)}</span></div>`).join('')}</div>`
         : '<p class="ed-libempty">Chưa có file. Nhập video intro / outro, logo (ảnh PNG nền trong) rồi kéo vào dòng thời gian hoặc khung xem.</p>'}
-        <p class="ed-note" style="margin-top:12px;line-height:1.5">Video → kéo vào ô Intro / Outro. Ảnh → kéo lên khung xem (logo) hoặc ô Intro / Outro (ảnh nền).</p>`;
+        <p class="ed-note ed-libhint">Video → kéo vào ô Intro / Outro. Ảnh → kéo lên khung xem (logo) hoặc ô Intro / Outro (ảnh nền).</p>`;
     } else if (k === 'audio') {
       const au = assets.filter((a) => a.kind === 'audio');
       h = `<button type="button" class="ed-upload" data-act="upload" data-accept="audio/*"><b>＋ Nhập nhạc</b>mp3, m4a, wav, aac, ogg</button>
         <h3>Nhạc của bạn</h3>
         ${au.length ? `<div class="ed-alist">${au.map((a) => `<div class="ed-arow" ${drag({ type: 'asset', name: a.name, kind: 'audio' })} aria-pressed="${S.music.file === a.name}" title="Kéo xuống dòng Nhạc, hoặc bấm +">
-          <i>♪</i><span>${esc(a.label)}</span><small>${fmt(a.dur, 's')} <button type="button" class="ed-b" data-act="add" style="height:24px;padding:0 8px">+</button></small></div>`).join('')}</div>`
+          <i>♪</i><span>${esc(a.label)}</span><small>${fmt(a.dur, 's')} </small><button type="button" class="ed-b" data-act="add" title="Dùng làm nhạc nền">+</button></div>`).join('')}</div>`
         : '<p class="ed-libempty">Chưa có nhạc. Nhập file nhạc rồi kéo xuống dòng "Nhạc" ở dòng thời gian.</p>'}`;
     } else if (k === 'text') {
       h = `<h3>Kiểu chữ <span class="ed-note">kéo lên khung xem hoặc bấm +</span></h3>
         <div class="ed-grid">${Object.entries(TEXTS).map(([id, o]) => `<div class="ed-tile text" ${drag({ type: 'text', preset: id })}>
           <span class="th"><b style="${textStyle(o)}">${esc(o.text.length > 14 ? o.name : o.text)}</b><span class="add" data-act="add">+</span></span><span class="nm">${o.name}</span></div>`).join('')}</div>
         <h3>Logo</h3>
-        <div ${drag({ type: 'logo' })}><button type="button" class="ed-upload" data-act="add"><b>＋ Logo / ảnh</b>Chọn ảnh PNG từ máy (hoặc kéo ô này lên khung xem)</button></div>`;
+        <div class="ed-tile" ${drag({ type: 'logo' })}><button type="button" class="ed-upload" data-act="add"><b>＋ Logo / ảnh</b>Chọn ảnh PNG từ máy (hoặc kéo ô này lên khung xem)</button></div>`;
     } else if (k === 'trans') {
       h = `<h3>Chuyển cảnh <span class="ed-note">kéo lên hình thoi ở dòng thời gian</span></h3>
-        <div class="ed-grid">${Object.entries(ED.trans).map(([v, lb]) => `<div class="ed-tile" ${drag({ type: 'trans', v })}>
-          <span class="th" style="aspect-ratio:16/10"><i class="tr-ico tr-${v}"></i><span class="add" data-act="add">+</span></span><span class="nm">${esc(lb)}</span></div>`).join('')}</div>`;
+        <div class="ed-grid">${Object.entries(ED.trans).map(([v, lb]) => `<div class="ed-tile tr" ${drag({ type: 'trans', v })}>
+          <span class="th"><i class="tr-ico tr-${v}"></i><span class="add" data-act="add">+</span></span><span class="nm">${esc(lb)}</span></div>`).join('')}</div>`;
     } else if (k === 'filter') {
       h = `<h3>Bộ lọc <span class="ed-note">bấm + hoặc kéo lên video</span></h3>
         <div class="ed-grid">${FILTERS.map((f, i) => {
@@ -826,9 +826,11 @@
           L.x = clamp(x, 0, 1); L.y = clamp(y, 0, 1); draw();
         };
       }
+      let moved = false;
+      const mv0 = mv; mv = (ev) => { moved = true; mv0(ev); };
       const up = () => {
         el.removeEventListener('pointermove', mv);
-        $('#ed-gv').hidden = true; $('#ed-gh').hidden = true; changed();
+        $('#ed-gv').hidden = true; $('#ed-gh').hidden = true; if (moved) changed();
       };
       el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up, { once: true });
     });
@@ -837,8 +839,8 @@
   Object.entries(segEls).forEach(([k, el]) => el.addEventListener('pointerdown', () => { if (sel.k !== k) select(k); }));
 
   // ---------- dòng thời gian ----------
-  const scroller = $('#tl-scroll'), inner = $('#tl-inner'), heads = $('#tl-heads');
-  const ORIGIN = 96, TAIL = 110;
+  const scroller = $('#tl-scroll'), inner = $('#tl-inner');
+  const HEADW = 96, ORIGIN = HEADW + 100, TAIL = 110;     // cột nhãn (dính trái) + chỗ cho ô "+ Intro"
   let zoom = 1, pxPerS = 40;
   const xOf = (s) => ORIGIN + s * pxPerS;
   const secOf = (x) => (x - ORIGIN) / pxPerS;
@@ -846,36 +848,37 @@
     text: '<svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>',
     video: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14"/><path d="m10 9 5 3-5 3z"/></svg>',
     music: '<svg viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="16" r="2"/></svg>',
+    image: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16"/><circle cx="9" cy="9" r="2"/><path d="m20 15-5-5L5 20"/></svg>',
   };
   function renderTimeline() {
     const tl = timeline();
     const fitPx = Math.max(10, (scroller.clientWidth - ORIGIN - TAIL) / Math.max(1, tl.total));
     pxPerS = fitPx * zoom;
     const W = Math.max(scroller.clientWidth, xOf(tl.total) + TAIL);
-    let h = '', hh = '<div style="height:25px"></div>';
+    // mỗi hàng: ô nhãn dính trái (.tl-hd) + các khối — nhãn luôn thẳng hàng với hàng của nó
+    const hd = (ico, txt) => `<div class="tl-hd">${ico}<span>${txt}</span></div>`;
+    let h = '';
     const step = pxPerS > 90 ? 1 : pxPerS > 40 ? 2 : pxPerS > 18 ? 5 : 10;
-    h += `<div class="tl-ruler" style="width:${W}px">`;
+    h += `<div class="tl-ruler">${hd('', '')}`;
     for (let s = 0; s <= tl.total + 0.001; s += step) h += `<span style="left:${xOf(s)}px">${clock(s).replace(/\.\d$/, '')}</span>`;
     for (let s = 0; s <= tl.total; s += step / 5) h += `<i style="left:${xOf(s)}px"></i>`;
     h += '</div>';
     // lớp chữ / logo — trên cùng = lớp sau cùng (như CapCut)
-    h += `<div class="tl-row" data-drop="layers" style="height:30px;width:${W}px">
+    h += `<div class="tl-row r-new" data-drop="layers">${hd(ICO.text, 'Lớp mới')}
       <div class="tl-empty" style="left:${xOf(tl.mainStart)}px" data-act="lib:text">＋ Kéo chữ / logo vào đây</div></div>`;
-    hh += `<div style="height:31px">${ICO.text} Lớp mới</div>`;
     [...S.layers].reverse().forEach((L) => {
       const end = L.end == null ? tl.D : Math.min(tl.D, L.end);
       const isSel = sel.k === 'layer' && sel.id === L.id;
-      h += `<div class="tl-row" data-drop="layers" style="height:32px;width:${W}px">
+      h += `<div class="tl-row r-layer" data-drop="layers">${hd(L.type === 'text' ? ICO.text : ICO.image, L.type === 'text' ? 'Chữ' : 'Logo')}
         <div class="tl-b ${L.type === 'text' ? 'b-text' : 'b-image'}${isSel ? ' sel' : ''}" data-tl="layer" data-id="${L.id}"
           style="left:${xOf(tl.mainStart + L.start)}px;width:${Math.max(6, (end - L.start) * pxPerS)}px">
           <i class="h l" data-h="l"></i><span>${esc(L.type === 'text' ? L.text.split('\n')[0] || '(trống)' : label(L.file))}</span><i class="h r" data-h="r"></i></div></div>`;
-      hh += `<div style="height:33px">${L.type === 'text' ? ICO.text + ' Chữ' : ICO.video + ' Ảnh'}</div>`;
     });
     // video chính + intro / outro
-    h += `<div class="tl-row main" style="height:52px;width:${W}px">`;
+    h += `<div class="tl-row r-main">${hd(ICO.video, 'Video')}`;
     const mA = tl.mainStart + tl.tdIn / 2, mB = tl.mainEnd - tl.tdOut / 2;
     if (S.intro.enabled) h += segBlock('intro', 0, mA);
-    else h += `<div class="tl-b b-slot" data-drop="intro" data-act="enable:intro" style="left:${ORIGIN - 88}px;width:84px" title="Bấm để thêm thẻ intro, hoặc kéo video / ảnh vào"><span>＋ Intro</span></div>`;
+    else h += `<div class="tl-b b-slot" data-drop="intro" data-act="enable:intro" style="left:${HEADW + 8}px;width:84px" title="Bấm để thêm thẻ intro, hoặc kéo video / ảnh vào"><span>＋ Intro</span></div>`;
     h += `<div class="tl-b b-main${sel.k === 'main' ? ' sel' : ''}" data-tl="main" data-drop="main" style="left:${xOf(mA)}px;width:${(mB - mA) * pxPerS}px;${thumbURL ? `background-image:url(${thumbURL})` : ''}">
       <i class="h l" data-h="l" title="Kéo để cắt bỏ đầu video"></i><span>Video chính · ${fmt(tl.D, 's')}${S.main.trim_start || S.main.trim_end ? ' (đã cắt)' : ''}</span><i class="h r" data-h="r" title="Kéo để cắt bỏ cuối video"></i></div>`;
     if (S.outro.enabled) h += segBlock('outro', mB, tl.total);
@@ -886,14 +889,12 @@
       h += `<button type="button" class="tl-x${td ? '' : ' cut'}${sel.k === sk ? ' sel' : ''}" data-tl="${sk}" data-drop="${sk}" style="left:${xOf(at + td / 2)}px" title="Chuyển cảnh: ${esc(ED.trans[S[k].transition] || '')} — bấm để đổi, hoặc kéo chuyển cảnh từ thư viện vào"></button>`;
     }
     h += '</div>';
-    hh += `<div style="height:53px">${ICO.video} Video</div>`;
-    h += `<div class="tl-row" data-drop="music" style="height:36px;width:${W}px">` + (S.music.file
+    h += `<div class="tl-row r-music" data-drop="music">${hd(ICO.music, 'Nhạc')}` + (S.music.file
       ? `<div class="tl-b b-music${sel.k === 'music' ? ' sel' : ''}" data-tl="music" style="left:${ORIGIN}px;width:${tl.total * pxPerS}px"><span>♪ ${esc(label(S.music.file))} · ${fmt(S.music.volume, 'pct')}</span></div>`
       : `<div class="tl-empty" style="left:${ORIGIN}px" data-act="lib:audio">♪ Kéo nhạc nền vào đây</div>`) + '</div>';
-    hh += `<div style="height:37px">${ICO.music} Nhạc</div>`;
     h += `<div class="tl-ph" id="tl-ph" style="left:${xOf(t)}px"></div>`;
     inner.style.width = W + 'px';
-    inner.innerHTML = h; heads.innerHTML = hh;
+    inner.innerHTML = h;
   }
   function segBlock(k, a, b) {
     const s = S[k], f = s.file;
@@ -903,10 +904,10 @@
   }
   function followPlayhead() {
     const x = xOf(t);
-    if (x > scroller.scrollLeft + scroller.clientWidth - 40) scroller.scrollLeft = x - 80;
+    if (x > scroller.scrollLeft + scroller.clientWidth - 40 || x < scroller.scrollLeft + HEADW) scroller.scrollLeft = Math.max(0, x - HEADW - 80);
   }
   inner.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('[data-act]')) return;           // ô "+ Intro", "Kéo nhạc…" -> nút bấm
+    if (e.target.closest('[data-act], .tl-hd')) return;           // ô "+ Intro", "Kéo nhạc…" -> nút bấm
     const blk = e.target.closest('[data-tl]');
     const r = inner.getBoundingClientRect();
     if (!blk) {                                          // thước / chỗ trống -> tua
@@ -929,7 +930,10 @@
     const snapPts = [0, tl.D, t - tl.mainStart, ...S.layers.filter((x) => x !== L).flatMap((x) => [x.start, x.end ?? tl.D])];
     const snap = (v) => { for (const p of snapPts) if (Math.abs(v - p) * pxPerS < 7) return p; return v; };
     inner.setPointerCapture(e.pointerId);
+    let moved = false;
     const mv = (ev) => {
+      if (!moved && Math.abs(ev.clientX - x0) < 3) return;      // bấm để chọn, không phải kéo
+      moved = true;
       const ds = (ev.clientX - x0) / pxPerS;
       if (kind === 'main') {
         if (hdl === 'l') { m.trim_start = clamp(Math.round((st.ts + ds * m.speed) * 10) / 10, 0, Math.max(0, srcDur - st.te - 1)); seek(timeline().mainStart); }
@@ -946,7 +950,7 @@
       }
       renderTimeline(); draw(); refreshOutputs();
     };
-    const up = () => { inner.removeEventListener('pointermove', mv); changed(); };
+    const up = () => { inner.removeEventListener('pointermove', mv); if (moved) changed(); };
     inner.addEventListener('pointermove', mv); inner.addEventListener('pointerup', up, { once: true });
   });
   const setZoom = (z) => { zoom = clamp(z, 1, 8); $('#tl-zoom').value = zoom; renderTimeline(); followPlayhead(); };
@@ -992,7 +996,7 @@
   async function renderTest(full) {
     const sample = sampleSel.value;
     play(false); dlg.showModal();
-    rbody.innerHTML = '<p class="rd-wait"><i class="spin"></i><span>Đang render bằng FFmpeg… (video ngắn khoảng 10–60 giây)</span></p>';
+    rbody.innerHTML = '<p class="rd-wait"><i class="ed-spin"></i><span>Đang render bằng FFmpeg… (video ngắn khoảng 10–60 giây)</span></p>';
     const { base, ...tpl } = S;
     try {
       const r = await fetch('/tpl/render', { method: 'POST', headers: { 'Content-Type': 'application/json' },

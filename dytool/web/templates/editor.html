@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mẫu edit · {{ page.name }} · dytool</title>
   <link rel="icon" type="image/png" href="/static/favicon.png">
-  <link rel="stylesheet" href="/static/app.css?v={{ css_v() }}">
+  {# KHÔNG nạp app.css: kiểu chung của app (.card, nút, ô nhập, tiêu đề…) đè lên bố cục editor làm lệch #}
+  <link rel="stylesheet" href="/static/ui-fonts.css?v={{ static_v('ui-fonts.css') }}">
   <link rel="stylesheet" href="/static/editor.css?v={{ static_v('editor.css') }}">
 </head>
 {# Cửa sổ Mẫu edit của kênh — bố cục kiểu CapCut (luôn nền tối):
@@ -46,13 +47,13 @@
   <section class="ed-lib" aria-label="Thư viện">
     <nav class="ed-libtabs" role="tablist">
       {% for key, label, d in [
-        ('media', 'Phương tiện', '<rect x="3" y="5" width="18" height="14"/><path d="m10 9 5 3-5 3z"/>'),
-        ('audio', 'Âm thanh', '<path d="M9 18V6l10-2v12"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="16" r="2"/>'),
-        ('text', 'Văn bản', '<path d="M5 6V4h14v2M12 4v16M9 20h6"/>'),
-        ('trans', 'Chuyển cảnh', '<path d="M4 6h7v12H4zM13 6h7v12h-7z"/>'),
+        ('media', 'Tư liệu', '<rect x="3" y="5" width="18" height="14"/><path d="m10 9 5 3-5 3z"/>'),
+        ('audio', 'Nhạc', '<path d="M9 18V6l10-2v12"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="16" r="2"/>'),
+        ('text', 'Chữ', '<path d="M5 6V4h14v2M12 4v16M9 20h6"/>'),
+        ('trans', 'Chuyển', '<path d="M4 6h7v12H4zM13 6h7v12h-7z"/>'),
         ('filter', 'Bộ lọc', '<circle cx="9" cy="10" r="5"/><circle cx="15" cy="10" r="5"/><circle cx="12" cy="15" r="5"/>'),
-        ('adjust', 'Điều chỉnh', '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>')] %}
-      <button type="button" role="tab" data-lib="{{ key }}" aria-selected="{{ 'true' if loop.first else 'false' }}">{{ ico(d, 20) }}<span>{{ label }}</span></button>
+        ('adjust', 'Chỉnh', '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>')] %}
+      <button type="button" role="tab" data-lib="{{ key }}" title="{{ label }}" aria-selected="{{ 'true' if loop.first else 'false' }}">{{ ico(d, 20) }}<span>{{ label }}</span></button>
       {% endfor %}
     </nav>
     <div class="ed-libbody" id="ed-libbody"></div>
@@ -80,13 +81,12 @@
       </div>
     </div>
     <div class="ed-ctl">
-      <span class="ed-time num" id="ed-time">0:00.0</span>
+      <div class="ed-ctl-l"><span class="ed-time cur" id="ed-time">0:00.0</span><span class="ed-time">/</span><span class="ed-time" id="ed-total">0:00.0</span></div>
       <button type="button" class="ed-play" id="ed-play" aria-label="Phát / dừng (phím cách)">
         <svg viewBox="0 0 24 24" width="16" height="16" class="i-play"><path d="M7 4.5v15l13-7.5z"/></svg>
         <svg viewBox="0 0 24 24" width="16" height="16" class="i-pause"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg></button>
-      <span class="ed-time num muted" id="ed-total">0:00.0</span>
-      <label class="ed-ratio">Tỉ lệ <select id="ed-ratio">
-        {% for k, v in ratios.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+      <div class="ed-ctl-r"><label class="ed-lbl" for="ed-ratio">Tỉ lệ</label><select id="ed-ratio">
+        {% for k, v in ratios.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
     </div>
   </section>
 
@@ -109,10 +109,7 @@
       <button type="button" class="ed-ib" id="tl-zin" title="Phóng to" aria-label="Phóng to">{{ ico('<circle cx="11" cy="11" r="7"/><path d="M8 11h6M11 8v6M20 20l-4-4"/>') }}</button>
       <button type="button" class="ed-b" id="tl-fit" title="Vừa khung">Vừa</button>
     </div>
-    <div class="ed-tlwrap">
-      <div class="ed-tlheads" id="tl-heads"></div>
-      <div class="ed-tlscroll" id="tl-scroll"><div class="ed-tlinner" id="tl-inner"></div></div>
-    </div>
+    <div class="ed-tlscroll" id="tl-scroll"><div class="ed-tlinner" id="tl-inner"></div></div>
   </section>
 
   <dialog class="ed-render" id="ed-rdlg" aria-labelledby="rd-h">

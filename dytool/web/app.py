@@ -1250,14 +1250,16 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                 worker.stop()
             store.log(f"Bấm Dừng: {t['title']}{' · ' + t['page'] if t.get('page') else ''} — chạy tự động đã tạm dừng, "
                       "bật lại thì việc này làm lại từ đầu")
-        if where == "progress":
+        if where == "pop":
             return progress_partial(request)
         return runcard(request)
 
     @app.post("/worker/toggle", response_class=HTMLResponse)
-    def worker_toggle(request: Request):
+    def worker_toggle(request: Request, where: str = ""):
         worker.stop() if worker.running else worker.start()
         store.log("Đã bật chạy tự động" if worker.running else "Đã tạm dừng chạy tự động")
+        if where == "pop":
+            return progress_partial(request)
         return runcard(request)
 
     # ---------------- Ctrl+K: tìm / lệnh nhanh ----------------
@@ -1329,9 +1331,13 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
 
     @app.get("/partials/progress", response_class=HTMLResponse)
     def progress_partial(request: Request):
+        """Hộp Chạy tự động (bấm thẻ ở cuối menu): việc đang làm + việc tiếp theo. Tạm dừng vẫn liệt kê việc sẽ làm
+        khi bật lại (trước: trống)."""
         from .. import progress
-        return render(request, "_progress.html", task=progress.snapshot(),
-                      upcoming=worker.upcoming() if worker.running else [], backlog=worker.backlog(), now=time.time())
+        from . import plan
+        colors = {p["name"]: p["color"] for p in plan.nav_pages(store)}
+        return render(request, "_progress.html", task=progress.snapshot(), upcoming=worker.upcoming(limit=8),
+                      backlog=worker.backlog(), now=time.time(), colors=colors)
 
     @app.post("/worker/{action}")
     def worker_ctl(action: str):

@@ -118,6 +118,12 @@
   <div id="pal-list" class="pal-list" role="listbox"></div>
 </dialog>
 
+{# Chạy tự động: bấm thẻ cuối menu -> việc đang làm + tiếp theo (_progress.html), hỏi lại 2 s / lần khi hộp mở #}
+<dialog class="runpop" id="runpop" aria-labelledby="rp-title">
+  <div id="runpop-body" hx-get="/partials/progress" hx-swap="innerHTML"
+       hx-trigger="runpop-open, every 2s [!document.hidden && document.getElementById('runpop').open]"></div>
+</dialog>
+
 {# Xem lại 1 video ở mọi trạng thái: phần tử có data-vview="<page_id>:<video_id>" (trang Video, Lịch đăng…) #}
 <dialog class="vview" id="vview" aria-labelledby="vv-title" tabindex="-1"></dialog>
 
@@ -266,6 +272,22 @@
     });
     document.addEventListener('click', (e) => { if (e.target.closest('[data-theme-set]')) syncBg(); });
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncBg);
+  }
+  // Hộp Chạy tự động: bấm thẻ Chạy tự động (trừ công tắc) -> mở <dialog id="runpop">, nạp ngay rồi tự hỏi lại 2 s / lần.
+  // Bấm ra ngoài hộp (nền mờ) = đóng.
+  if (!window.__dyRunpop) {
+    window.__dyRunpop = true;
+    document.addEventListener('click', (e) => {
+      const card = e.target.closest('.run-card');
+      if (card && (e.target.closest('[data-runpop]') || !e.target.closest('button, a, input'))) {
+        const d = document.getElementById('runpop'), b = document.getElementById('runpop-body');
+        if (!d || d.open) return;
+        if (!b.innerHTML.trim()) b.innerHTML = '<p class="muted" style="padding:20px 22px">Đang tải…</p>';
+        d.showModal(); htmx.trigger(b, 'runpop-open');
+        return;
+      }
+      if (e.target.id === 'runpop') e.target.close();
+    });
   }
   // Phím tắt: Ctrl+1..6 chuyển trang, Ctrl+K tìm / lệnh nhanh. Chỉ gắn 1 lần (boost chạy lại script này).
   // Hộp xem lại video: bấm phần tử có data-vview -> lấy /videos/<page>/<id>/view, mở <dialog>. Đóng = dừng phát.

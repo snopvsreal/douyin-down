@@ -1,51 +1,72 @@
+{# Nội dung hộp "Chạy tự động" (bấm thẻ Chạy tự động cuối menu trái, <dialog id="runpop"> ở base.html; hỏi lại 2 s / lần
+   khi hộp mở): trạng thái + việc đang làm (các bước) + danh sách việc tiếp theo đúng thứ tự worker sẽ làm #}
 {% from "_macros.html" import empty %}
 {% macro dur(s) %}{% if s >= 60 %}{{ (s // 60)|int }} phút {{ (s % 60)|int }}s{% else %}{{ s|int }}s{% endif %}{% endmacro %}
-<div class="card-h">
-  <h2>Đang làm</h2><div class="spacer"></div>
-  {% if task %}<span class="pill info num">{{ dur(task.elapsed) }}</span>
+<header class="rp-head">
+  <div class="rp-title">
+    <h2 id="rp-title">Chạy tự động</h2>
+    {% if worker.running %}<span class="pill ok">Đang chạy</span>{% else %}<span class="pill">Tạm dừng</span>{% endif %}
+  </div>
+  <button type="button" class="btn sm {{ '' if worker.running else 'primary' }}" hx-post="/worker/toggle?where=pop" hx-target="#runpop-body"
+          hx-swap="innerHTML" hx-disabled-elt="this"
+          {% if worker.running %}hx-confirm="Tạm dừng chạy tự động? Tool ngừng quét, edit và đăng (việc đang làm dở sẽ làm lại sau)." data-confirm-ok="Tạm dừng"{% endif %}>
+    {{ 'Tạm dừng' if worker.running else 'Bật chạy tự động' }}</button>
+  <button type="button" class="rp-x" aria-label="Đóng" title="Đóng (Esc)" onclick="this.closest('dialog').close()">
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m3.5 3.5 9 9m0-9-9 9"/></svg></button>
+</header>
+
+<section class="rp-sec" aria-labelledby="rp-now">
+  <div class="rp-sec-h"><h3 id="rp-now">Đang làm</h3>
+    {% if task %}<span class="small muted num">{{ dur(task.elapsed) }}</span>{% endif %}</div>
+  {% if task %}
+  <div class="rp-now">
+    <div class="rp-now-main">
+      <div class="rp-now-title"><span class="spin" aria-hidden="true"></span><b>{{ task.title }}</b>
+        {% if task.page %}<span class="rp-chan"><span class="chan-dot" style="background:{{ colors.get(task.page, 'var(--t3)') }}" aria-hidden="true"></span>{{ task.page }}</span>{% endif %}</div>
+      {% if task.video %}<p class="small muted trunc rp-cap">{% if task.caption %}{{ task.caption[:120] }}{% else %}Video {{ task.video }}{% endif %}</p>{% endif %}
+    </div>
     {% if task.stopping %}<span class="pill warn">Đang dừng…</span>
     {% elif task.no_return %}<span class="pill" title="Đã bấm đăng trên nền tảng — chờ biết bài đã lên chưa rồi mới dừng được">Đang bấm đăng</span>
-    {% else %}<button type="button" class="btn sm" hx-post="/worker/cancel?where=progress" hx-target="closest section" data-confirm-ok="Dừng"
+    {% else %}<button type="button" class="btn sm run-stop" hx-post="/worker/cancel?where=pop" hx-target="#runpop-body" data-confirm-ok="Dừng"
         hx-swap="innerHTML" hx-disabled-elt="this" title="Dừng việc đang làm và tạm dừng chạy tự động"
         hx-confirm="Dừng {{ task.title|lower }}{% if task.page %} ({{ task.page }}){% endif %}? Chạy tự động sẽ tạm dừng; bật lại thì việc này làm lại từ đầu.">
-        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" style="fill:currentColor"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/></svg> Dừng</button>
-    {% endif %}{% endif %}
-</div>
-{% if task %}
-  <p style="margin-bottom:8px"><b>{{ task.title }}</b>{% if task.page %} <span class="pill">{{ task.page }}</span>{% endif %}</p>
-  {% if task.video %}<p class="small muted trunc" style="max-width:100%; margin-bottom:8px">
-    <a href="https://www.douyin.com/video/{{ task.video }}" target="_blank">{{ task.video }}</a>
-    {% if task.caption %} {{ task.caption[:90] }}{% endif %}</p>{% endif %}
-  <table class="steps">
+        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9"/></svg>Dừng</button>
+    {% endif %}
+  </div>
+  <ol class="rp-steps">
     {% for s in task.steps %}
-    <tr class="{{ 'run' if s.running }}">
-      <td class="st">{% if s.running %}<span class="spin" aria-label="Đang chạy"></span>{% else %}<svg viewBox="0 0 16 16" width="14" height="14" aria-label="Xong"><path d="m3.5 8.5 3 3 6-7"/></svg>{% endif %}</td>
-      <td>{% if s.running %}<b>{{ s.name }}</b>{% if task.detail %}<div class="small muted">{{ task.detail }}</div>{% endif %}
-          {% else %}<span class="muted">{{ s.name }}</span>{% endif %}</td>
-      <td class="small muted num cell-end">{{ dur(s.secs) }}</td>
-    </tr>
+    <li class="{{ 'rp-run' if s.running else 'rp-done' }}">
+      <span class="rp-st">{% if s.running %}<span class="spin" aria-label="Đang chạy"></span>{% else %}<svg viewBox="0 0 16 16" width="14" height="14" aria-label="Xong"><path d="m3.5 8.5 3 3 6-7"/></svg>{% endif %}</span>
+      <span class="rp-step-name">{{ s.name }}{% if s.running and task.detail %}<span class="small muted">{{ task.detail }}</span>{% endif %}</span>
+      <span class="small muted num">{{ dur(s.secs) }}</span>
+    </li>
     {% endfor %}
-  </table>
-{% elif worker.running %}
-  {% call empty("clock", "Đang chờ việc mới", sm=true) %}Tool quét lại nguồn theo chu kỳ của từng kênh.{% endcall %}
-{% else %}
-  {% call empty("clock", "Chạy tự động đang tắt", sm=true) %}Bật công tắc Chạy tự động ở cuối menu trái để tool tự làm việc.{% endcall %}
-{% endif %}
+  </ol>
+  {% elif worker.running %}
+    {% call empty("clock", "Đang chờ việc mới", sm=true) %}Tool quét lại nguồn theo chu kỳ của từng kênh.{% endcall %}
+  {% else %}
+    {% call empty("clock", "Chạy tự động đang tạm dừng", sm=true) %}Bấm <b>Bật chạy tự động</b> để tool tự quét, edit và đăng.{% endcall %}
+  {% endif %}
+</section>
 
-<div class="card-h" style="margin-top:18px">
-  <h2>Tiếp theo</h2><div class="spacer"></div>
-  <span class="small muted num">{{ backlog.new }} chờ tải, {{ backlog.downloaded }} chờ edit</span>
-</div>
-{% if upcoming %}
-<table>
-  {% for u in upcoming %}
-  <tr>
-    <td><b>{{ u.act }}</b> <span class="small muted">{{ u.page }}</span>
-      {% if u.desc %}<div class="small muted trunc">{{ u.desc }}</div>{% endif %}</td>
-    <td class="small muted num cell-end">
-      {% if u.act == 'Quét nguồn' %}{% if u.when <= now %}đến hạn{% else %}sau {{ ((u.when - now) // 60)|int }} phút{% endif %}
-      {% elif u.when %}{{ vnt(u.when, '%H:%M %d/%m') }}{% endif %}</td>
-  </tr>
-  {% endfor %}
-</table>
-{% else %}{% call empty("ok", "Không có việc nào đang chờ", tone="ok", sm=true) %}{% endcall %}{% endif %}
+<section class="rp-sec" aria-labelledby="rp-next">
+  <div class="rp-sec-h"><h3 id="rp-next">{{ 'Tiếp theo' if worker.running else 'Khi bật sẽ làm' }}</h3>
+    <span class="small muted num">{{ backlog.new }} chờ tải · {{ backlog.downloaded }} chờ edit</span></div>
+  {% if upcoming %}
+  <ol class="rp-next">
+    {% for u in upcoming %}
+    <li>
+      <span class="rp-n num">{{ loop.index }}</span>
+      <span class="rp-next-main">
+        <span><b>{{ u.act }}</b>
+          <span class="rp-chan"><span class="chan-dot" style="background:{{ colors.get(u.page, 'var(--t3)') }}" aria-hidden="true"></span>{{ u.page }}</span></span>
+        {% if u.desc %}<span class="small muted trunc">{{ u.desc }}</span>{% endif %}
+      </span>
+      <span class="small muted num rp-when">
+        {% if u.act == 'Quét nguồn' %}{% if u.when <= now %}đến hạn{% else %}sau {{ ((u.when - now) // 60)|int }} phút{% endif %}
+        {% elif u.when %}{{ vnt(u.when, '%H:%M %d/%m') }}{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}{% call empty("ok", "Không có việc nào đang chờ", tone="ok", sm=true) %}{% endcall %}{% endif %}
+</section>

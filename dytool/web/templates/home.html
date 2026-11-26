@@ -7,7 +7,8 @@
   Trang Hôm nay (thiết kế lại 2026-11): trả lời đúng thứ tự 3 câu người dùng hỏi mỗi lần mở app —
   1. Việc gì chờ mình?  2. Hôm nay đang chạy thế nào?  3. Có gì hỏng không?
   Đầu trang: lời chào + 1 câu tóm tắt + nút chính. Dưới: 4 ô tổng quan. Thân 2 cột: trái = hàng chờ duyệt (lưới video 9:16)
-  + việc cần xử lý; phải (dính khi cuộn) = Đang làm, Lịch hôm nay, Kênh. Cuối: dây chuyền video dạng các bước nối nhau.
+  + việc cần xử lý; phải (dính khi cuộn) = Lịch hôm nay, Kênh (Đang làm / Tiếp theo: hộp mở từ thẻ Chạy tự động
+  cuối menu — người dùng 2026-11-26 muốn trang chủ gọn hơn). Cuối: dây chuyền video dạng các bước nối nhau.
 #}
 {% set t = totals %}
 {% set n_today = today|selectattr('cls', 'equalto', 'ok')|list|length %}
@@ -162,9 +163,6 @@
   </div>
 
   <aside class="today-side" aria-label="Đang chạy hôm nay">
-    <section class="card side-card" hx-get="/partials/progress" hx-trigger="load, every 2s [!document.hidden]" hx-swap="innerHTML"
-             aria-label="Việc đang làm"><p class="muted">Đang tải…</p></section>
-
     <section class="card side-card" aria-labelledby="h-today">
       <div class="card-h"><h2 id="h-today">Lịch hôm nay</h2><div class="spacer"></div><a class="small" href="/calendar">Mở lịch</a></div>
       {% if today %}

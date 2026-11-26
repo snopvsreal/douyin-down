@@ -148,7 +148,11 @@ def register(app, store, data: Path, render) -> None:
             return PlainTextResponse(str(e), 400)
         ext = name.rsplit(".", 1)[1]
         kind = "image" if ext in vt.IMAGE_EXT else "video" if ext in vt.VIDEO_EXT else "audio"
-        return JSONResponse({"name": name, "kind": kind, "label": (f.filename or name)[:80]})
+        dur = 0.0
+        if kind != "image":        # video / nhạc: độ dài để intro / outro tự khớp
+            from fastapi.concurrency import run_in_threadpool
+            dur = (await run_in_threadpool(vt._probe, vt.asset_path(data, name)))["dur"]
+        return JSONResponse({"name": name, "kind": kind, "label": (f.filename or name)[:80], "dur": round(dur, 2)})
 
     @app.get("/tpl/asset/{name}")
     def tpl_asset_get(name: str):

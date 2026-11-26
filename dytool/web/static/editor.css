@@ -98,6 +98,14 @@ html, body.ed { height: 100%; margin: 0; overflow: hidden; background: var(--can
 .tr-radial::after { clip-path: polygon(50% 50%, 50% 0, 100% 0, 100% 100%, 50% 100%); }
 @keyframes tr-demo { 0% { opacity: 0; } 60%, 100% { opacity: 1; } }
 
+/* Intro & Outro: 1 mục, nút chuyển ở đầu bảng */
+.ed-segsw { display: grid; grid-template-columns: 1fr 1fr; margin: 0 0 14px; border: 1px solid var(--btn-line); }
+.ed-segsw button { position: relative; height: 32px; border: 0; background: var(--btn); color: var(--t2); font: inherit; font-weight: 600; cursor: pointer; }
+.ed-segsw button + button { border-left: 1px solid var(--btn-line); }
+.ed-segsw button[aria-selected="true"] { background: var(--strong); color: var(--on-strong); }
+.ed-segsw i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); margin-left: 6px; vertical-align: 2px; }
+.ed-segsw button[aria-selected="true"] i { background: var(--on-strong); }
+
 /* chữ & logo */
 .ed-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
 .ed-presets button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px; border: 1px solid var(--tile-line);
@@ -148,6 +156,8 @@ html, body.ed { height: 100%; margin: 0; overflow: hidden; background: var(--can
 .ed-bar { position: absolute; left: 0; z-index: 2; }
 .ed-seg { position: absolute; inset: 0; z-index: 4; background: center / cover no-repeat; overflow: hidden; }
 .ed-seg video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.ed-seg .sg-bg { position: absolute; inset: -40px; background: #222 center / cover no-repeat; filter: blur(22px) brightness(.85); }
+.ed-seg .sg-t, .ed-seg .sg-s { z-index: 1; }
 .ed-seg .sg-t, .ed-seg .sg-s { position: absolute; left: 50%; transform: translate(-50%, -50%); white-space: pre; text-align: center;
   line-height: 1.22; paint-order: stroke fill; font-weight: 400; max-width: none; }
 .ed-guide-v, .ed-guide-h { position: absolute; background: #ff3d7f; z-index: 5; pointer-events: none; }

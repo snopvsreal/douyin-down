@@ -19,22 +19,35 @@
 {% endmacro %}
 {% macro seg_panel(key, label) %}
 <section class="ed-panel" data-panel="{{ key }}" hidden>
+  <div class="ed-segsw" role="tablist" aria-label="Intro hoặc Outro">
+    <button type="button" role="tab" data-seg="intro" aria-selected="{{ 'true' if key == 'intro' else 'false' }}">Intro<i data-segdot="intro"></i></button>
+    <button type="button" role="tab" data-seg="outro" aria-selected="{{ 'true' if key == 'outro' else 'false' }}">Outro<i data-segdot="outro"></i></button>
+  </div>
   <div class="ed-ph"><h2>{{ label }}</h2>
     <label class="ed-sw"><input type="checkbox" data-k="{{ key }}.enabled"><span></span> Bật</label></div>
   <div class="ed-off-hint" data-show-off="{{ key }}">Bật để thêm {{ 'đoạn mở đầu' if key == 'intro' else 'đoạn kết' }} vào mọi video của kênh.</div>
   <div data-show-on="{{ key }}">
-    {{ rng(key ~ '.duration', 'Độ dài', 0.5, 15, 0.5, 's') }}
-    <h3>Nền</h3>
-    <div class="ed-row">
-      <label class="ed-col"><span>Màu nền</span><input type="color" data-k="{{ key }}.bg"></label>
-      <div class="ed-file" data-file="{{ key }}.file" data-accept="image/*,video/*">
-        <button type="button" class="btn sm" data-pick>Ảnh / video nền…</button>
-        <span class="ed-fname" data-fname></span>
-        <button type="button" class="btn sm ghost" data-clear title="Bỏ file nền, dùng màu">Bỏ</button>
-      </div>
+    {{ rng(key ~ '.duration', 'Độ dài', 0.5, 30, 0.1, 's') }}
+    <h3>Video / ảnh</h3>
+    <div class="ed-file" data-file="{{ key }}.file" data-accept="video/*,image/*">
+      <button type="button" class="btn sm" data-pick>Chọn video hoặc ảnh…</button>
+      <span class="ed-fname" data-fname></span>
+      <button type="button" class="btn sm ghost" data-clear title="Bỏ video / ảnh, dùng màu nền">Bỏ</button>
     </div>
+    <p class="hint" data-show-novid="{{ key }}">Chọn video: độ dài {{ 'intro' if key == 'intro' else 'outro' }} tự khớp theo video (tối đa 30 s). Không chọn = nền màu.</p>
+    <div data-show-vid="{{ key }}">
+      <label class="ed-sw"><input type="checkbox" data-k="{{ key }}.audio"><span></span> Giữ tiếng của video</label>
+      <div data-show-aud="{{ key }}">{{ rng(key ~ '.volume', 'Âm lượng video', 0, 2, 0.05, 'pct') }}</div>
+      <button type="button" class="btn sm" data-fitdur="{{ key }}" style="margin-top:8px">Độ dài = hết video</button>
+    </div>
+    <div data-show-file="{{ key }}">
+      <label>Video / ảnh không vừa khung</label>
+      <div class="ed-chips" data-choice="{{ key }}.fit">
+        <button type="button" data-v="crop">Cắt cho đầy</button><button type="button" data-v="blur">Vừa khung, nền mờ</button><button type="button" data-v="pad">Vừa khung, nền màu</button></div>
+    </div>
+    <div class="ed-row"><label class="ed-col"><span>Màu nền</span><input type="color" data-k="{{ key }}.bg"></label></div>
     <h3>Chữ</h3>
-    <label for="{{ key }}-title">Tiêu đề</label>
+    <label for="{{ key }}-title">Tiêu đề <span class="small muted">(để trống nếu video đã có chữ)</span></label>
     <textarea id="{{ key }}-title" rows="2" data-k="{{ key }}.title" placeholder="Để trống = không có chữ"></textarea>
     <label for="{{ key }}-sub">Dòng phụ (có nền màu nhấn)</label>
     <input id="{{ key }}-sub" type="text" data-k="{{ key }}.sub" autocomplete="off">
@@ -81,8 +94,7 @@
       ('filter', 'Bộ lọc', '<circle cx="9" cy="10" r="5"/><circle cx="15" cy="10" r="5"/><circle cx="12" cy="15" r="5"/>'),
       ('adjust', 'Điều chỉnh', '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>'),
       ('text', 'Chữ & logo', '<path d="M5 6V4h14v2M12 4v16M9 20h6"/>'),
-      ('intro', 'Intro', '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="m10 9 5 3-5 3z"/>'),
-      ('outro', 'Outro', '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M9 9v6M14 9l-3 3 3 3"/>'),
+      ('intro', 'Intro & Outro', '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="m10 9 5 3-5 3z"/>'),
       ('music', 'Nhạc', '<path d="M9 18V6l10-2v12"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="16" r="2"/>')] %}
     <button type="button" role="tab" data-tab="{{ key }}" aria-selected="{{ 'true' if loop.first else 'false' }}">{{ ico(d) }}<span>{{ label }}</span></button>
     {% endfor %}
@@ -221,8 +233,8 @@
       <div class="ed-grain" id="ed-grain"></div>
       <div class="ed-layerbox" id="ed-lbox"></div>
       <div class="ed-bar" id="ed-bar"></div>
-      <div class="ed-seg" id="ed-seg-intro"><video muted playsinline loop></video><b class="sg-t"></b><span class="sg-s"></span></div>
-      <div class="ed-seg" id="ed-seg-outro"><video muted playsinline loop></video><b class="sg-t"></b><span class="sg-s"></span></div>
+      <div class="ed-seg" id="ed-seg-intro"><i class="sg-bg"></i><video playsinline preload="auto"></video><b class="sg-t"></b><span class="sg-s"></span></div>
+      <div class="ed-seg" id="ed-seg-outro"><i class="sg-bg"></i><video playsinline preload="auto"></video><b class="sg-t"></b><span class="sg-s"></span></div>
       <div class="ed-guide-v" id="ed-gv" hidden></div><div class="ed-guide-h" id="ed-gh" hidden></div>
       <div class="ed-empty" id="ed-empty" hidden>Chưa có video đã edit để xem thử.<br>
         <button type="button" class="btn sm" id="ed-up-sample">Tải 1 video mẫu lên</button></div>

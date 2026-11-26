@@ -96,23 +96,35 @@
       $$(`[data-show-on="${k}"]`).forEach((e) => { e.hidden = !S[k].enabled; });
       $$(`[data-show-off="${k}"]`).forEach((e) => { e.hidden = !!S[k].enabled; });
     }
+    for (const k of ['intro', 'outro']) {
+      const vid = isVidFile(S[k].file);
+      $$(`[data-show-vid="${k}"]`).forEach((e) => { e.hidden = !vid; });
+      $$(`[data-show-novid="${k}"]`).forEach((e) => { e.hidden = vid; });
+      $$(`[data-show-aud="${k}"]`).forEach((e) => { e.hidden = !S[k].audio; });
+      $$(`[data-show-file="${k}"]`).forEach((e) => { e.hidden = !S[k].file; });
+    }
     $$('[data-file]').forEach((w) => {
       const v = get(w.dataset.file);
       $('[data-fname]', w).textContent = v ? (fileLabels[v] || 'Đã chọn file') : 'Chưa chọn';
       const c = $('[data-clear]', w); if (c) c.hidden = !v;
     });
     $$('.ed-rail [data-tab]').forEach((b) => {
-      const k = b.dataset.tab; b.classList.toggle('ed-on', (k === 'intro' || k === 'outro') ? S[k].enabled :
+      const k = b.dataset.tab; b.classList.toggle('ed-on', k === 'intro' ? S.intro.enabled || S.outro.enabled :
         k === 'music' ? !!S.music.file : k === 'text' ? S.layers.length > 0 : false);
     });
+    $$('[data-segdot]').forEach((i) => { i.hidden = !S[i.dataset.segdot].enabled; });
     renderLayers();
   }
   const fileLabels = JSON.parse(localStorage.getItem('dy-ed-files') || '{}');
+  const fileDur = {};
+  const isVidFile = (f) => !!f && /\.(mp4|mov|webm)$/.test(f), isImgFile = (f) => !!f && /\.(png|jpe?g|webp)$/.test(f);
 
   // ---------- tab ----------
   $$('.ed-rail [data-tab]').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.tab)));
+  $$('[data-seg]').forEach((b) => b.addEventListener('click', () => openTab(b.dataset.seg)));
   function openTab(k) {
-    $$('.ed-rail [data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === k)));
+    const rail = k === 'outro' ? 'intro' : k;        // Intro & Outro chung 1 mục, chuyển bằng nút trong bảng
+    $$('.ed-rail [data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === rail)));
     $$('.ed-panel').forEach((p) => { p.hidden = p.dataset.panel !== k; });
     if (k === 'intro' && S.intro.enabled && t >= S.intro.duration) seek(Math.min(1.2, S.intro.duration * 0.6));
     if (k === 'outro' && S.outro.enabled && t < timeline().outStart) seek(timeline().outStart + Math.min(1.2, S.outro.duration * 0.6));
@@ -141,7 +153,13 @@
   $$('[data-file]').forEach((w) => {
     $('[data-pick]', w).addEventListener('click', async () => {
       const j = await pickFile(w.dataset.accept); if (!j) return;
-      set(w.dataset.file, j.name); changed(); loadSegMedia();
+      set(w.dataset.file, j.name);
+      const seg = w.dataset.file.split('.')[0];
+      if ((seg === 'intro' || seg === 'outro') && j.kind === 'video' && j.dur > 0) {
+        fileDur[j.name] = j.dur; S[seg].duration = Math.min(30, Math.max(0.5, Math.round(j.dur * 10) / 10));
+        toast(`Độ dài ${seg} = ${S[seg].duration.toFixed(1).replace('.', ',')} s theo video` + (j.dur > 30 ? ' (tối đa 30 s)' : ''));
+      }
+      changed(); loadSegMedia();
       if (w.dataset.file === 'music.file') loadMusic();
     });
     $('[data-clear]', w)?.addEventListener('click', () => {
@@ -272,9 +290,24 @@
       }
     }
     el.hidden = !show;
-    if (!show) return;
+    if (!show) { const v = $('video', el); if (!v.paused) v.pause(); return; }
     if (p >= 0) transStyle(el, s.transition, p, incoming); else { el.style.opacity = ''; el.style.clipPath = ''; el.style.transform = ''; el.style.filter = ''; }
-    el.style.background = s.bg;
+    const f = s.file, img = isImgFile(f), vid = isVidFile(f);
+    el.style.backgroundColor = s.bg;
+    el.style.backgroundImage = img ? `url(/tpl/asset/${f})` : '';
+    el.style.backgroundSize = s.fit === 'crop' ? 'cover' : 'contain';
+    const sbg = $('.sg-bg', el);            // nền mờ (vừa khung, nền mờ) — ảnh: chính ảnh đó; video: khung đầu
+    sbg.hidden = !(f && s.fit === 'blur');
+    if (!sbg.hidden && img) sbg.style.backgroundImage = `url(/tpl/asset/${f})`;
+    const v = $('video', el);
+    if (vid && v.readyState >= 1) {
+      v.style.objectFit = s.fit === 'crop' ? 'cover' : 'contain';
+      const want = Math.min(local, Math.max(0, v.duration - 0.05));     // ngắn hơn đoạn: giữ khung cuối
+      const run = playing && local < v.duration - 0.05;
+      if (!run || Math.abs(v.currentTime - want) > 0.3) { if (Math.abs(v.currentTime - want) > 0.04) v.currentTime = want; }
+      v.muted = !s.audio; v.volume = Math.min(1, s.volume);
+      if (run) { if (v.paused) v.play().catch(() => {}); } else if (!v.paused) v.pause();
+    }
     const tt = $('.sg-t', el), ss = $('.sg-s', el);
     const hasT = !!s.title.trim(), hasS = !!s.sub.trim();
     tt.textContent = s.title; ss.textContent = s.sub;
@@ -364,7 +397,7 @@
     playing = on ?? !playing;
     if (playing && t >= timeline().total - 0.05) t = 0;
     root.classList.toggle('playing', playing); lastTs = 0;
-    $$('.ed-seg video').forEach((v) => { if (v.src) playing ? v.play().catch(() => {}) : v.pause(); });
+    if (!playing) $$('.ed-seg video').forEach((v) => v.pause());
     if (playing) requestAnimationFrame(loop); else draw(false);
   }
   function seek(x) { t = Math.max(0, Math.min(timeline().total, x)); draw(false); }
@@ -382,13 +415,21 @@
   function loadSegMedia() {
     for (const k of ['intro', 'outro']) {
       const el = segEls[k], v = $('video', el), f = S[k].file;
-      const isImg = f && /\.(png|jpe?g|webp)$/.test(f), isVid = f && /\.(mp4|mov|webm)$/.test(f);
-      el.style.backgroundImage = isImg ? `url(/tpl/asset/${f})` : '';
-      const url = isVid ? `/tpl/asset/${f}` : '';
-      if (v.getAttribute('src') !== url) { if (url) v.src = url; else v.removeAttribute('src'); v.load?.(); }
-      v.hidden = !isVid;
+      const url = isVidFile(f) ? `/tpl/asset/${f}` : '';
+      if (v.getAttribute('src') !== url) {
+        if (url) {
+          v.src = url;
+          v.addEventListener('loadedmetadata', () => { fileDur[f] = v.duration; refreshUI(); }, { once: true });
+        } else { v.removeAttribute('src'); v.load?.(); }
+      }
+      v.hidden = !url;
     }
   }
+  $$('[data-fitdur]').forEach((b) => b.addEventListener('click', () => {
+    const k = b.dataset.fitdur, d = fileDur[S[k].file] || $('video', segEls[k]).duration;
+    if (!(d > 0)) { toast('Chưa đọc được độ dài video — thử lại sau vài giây', true); return; }
+    S[k].duration = Math.min(30, Math.max(0.5, Math.round(d * 10) / 10)); changed();
+  }));
   function loadMusic() {
     music.pause();
     if (S.music.file) { music.src = '/tpl/asset/' + S.music.file; music.loop = true; } else music.removeAttribute('src');

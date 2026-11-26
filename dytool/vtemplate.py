@@ -56,7 +56,7 @@ def asset_path(data: Path, name: str) -> Path | None:
 def _section(kind: str) -> dict:
     return {"enabled": False, "duration": 2.0, "bg": "#101418", "file": "", "title": "", "sub": "",
             "color": "#ffffff", "accent": "#0f766e", "size": 0.045, "anim": "fade", "transition": "fade",
-            "trans_dur": 0.5}
+            "trans_dur": 0.5, "audio": True, "volume": 1.0, "fit": "crop"}
 
 
 def default_template(name: str = "Mẫu mới") -> dict:
@@ -125,7 +125,9 @@ def normalize(t: dict) -> dict:
     for k in ("intro", "outro"):
         s, ds = t.get(k) or {}, d[k]
         out[k] = {
-            "enabled": bool(s.get("enabled")), "duration": _num(s.get("duration"), 0.5, 15, 2.0),
+            "enabled": bool(s.get("enabled")), "duration": _num(s.get("duration"), 0.5, 30, 2.0),
+            "audio": bool(s.get("audio", True)), "volume": _num(s.get("volume"), 0, 2, 1.0),
+            "fit": _pick(s.get("fit"), ("crop", "pad", "blur"), "crop"),
             "bg": _col(s.get("bg"), ds["bg"]), "file": _file(s.get("file")),
             "title": _txt(s.get("title", ds["title"]), 120), "sub": _txt(s.get("sub", ds["sub"]), 160),
             "color": _col(s.get("color"), "#ffffff"), "accent": _col(s.get("accent"), ds["accent"]),
@@ -322,15 +324,30 @@ def _segment(g: _G, sec: dict, data: Path, W: int, H: int, fps: str, label: str)
     ext = f.suffix[1:].lower() if f else ""
     v, a = g.lab(label + "v"), g.lab(label + "a")
     has_audio = False
+    def fitted(i: int, extra: str = "") -> str:
+        """Ảnh / video nền -> đúng W×H: cắt cho đầy | vừa khung + nền màu | vừa khung + nền mờ của chính nó."""
+        if sec["fit"] == "pad":
+            return (f"[{i}:v]{extra}scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                    f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color={_ff(sec['bg'])},")
+        if sec["fit"] == "blur":
+            b1, b2, o = g.lab("sb"), g.lab("sf"), g.lab("so")
+            g.add(f"[{i}:v]{extra}split[{b1}][{b2}]")
+            g.add(f"[{b1}]scale={W // 4 * 2}:{H // 4 * 2}:force_original_aspect_ratio=increase,"
+                  f"crop={W // 4 * 2}:{H // 4 * 2},boxblur=12:2,eq=brightness=-0.08,scale={W}:{H}[{b1}b];"
+                  f"[{b2}]scale={W}:{H}:force_original_aspect_ratio=decrease[{b2}s];"
+                  f"[{b1}b][{b2}s]overlay=(W-w)/2:(H-h)/2[{o}]")
+            return f"[{o}]null,"
+        return f"[{i}:v]{extra}scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
+
     if f and ext in IMAGE_EXT:
         i = g.input("-loop", "1", "-t", _q(dur + 0.5), "-i", str(f.resolve()))
-        src = f"[{i}:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
+        src = fitted(i)
     elif f and ext in VIDEO_EXT:
         info = _probe(f)
         i = g.input("-i", str(f.resolve()))
-        src = (f"[{i}:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
-               f"tpad=stop_mode=clone:stop_duration={_q(dur)},")
-        has_audio = info["audio"]
+        # video ngắn hơn độ dài đoạn: giữ khung cuối; dài hơn: cắt
+        src = fitted(i) + f"tpad=stop_mode=clone:stop_duration={_q(dur)},"
+        has_audio = info["audio"] and sec["audio"] and sec["volume"] > 0
     else:
         src = f"color=c={_ff(sec['bg'])}:s={W}x{H}:r={fps}:d={_q(dur + 0.5)},"
     chain = src + f"fps={fps},setsar=1,format=yuv420p"
@@ -346,7 +363,7 @@ def _segment(g: _G, sec: dict, data: Path, W: int, H: int, fps: str, label: str)
                                  box_opacity=0.9, a=0.4, b=dur, anim=sec["anim"])
     g.add(f"{chain},trim=duration={_q(dur)},setpts=PTS-STARTPTS,settb=AVTB[{v}]")
     if has_audio:
-        g.add(f"[{i}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,"
+        g.add(f"[{i}:a]volume={_q(sec['volume'])},aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,"
               f"atrim=duration={_q(dur)},asetpts=PTS-STARTPTS[{a}]")
     else:
         g.add(f"anullsrc=r=44100:cl=stereo,atrim=duration={_q(dur)},aformat=sample_fmts=fltp:channel_layouts=stereo[{a}]")

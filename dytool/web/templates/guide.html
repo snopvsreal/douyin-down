@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Hướng dẫn{% endblock %}
+{% block crumb %}Hệ thống › <b>Hướng dẫn</b>{% endblock %}
+{% block body %}
+{# Trang Hướng dẫn (người dùng 2026-11-26: "thêm 1 mục tutorial vào trong app"):
+   Bắt đầu = các bước thiết lập lần đầu, tự đánh dấu theo trạng thái thật (app.guide) + hướng dẫn theo chủ đề.
+   Sửa tính năng thì sửa luôn chữ ở đây cho khớp. #}
+{% macro topic(id, title, sub) %}
+<details class="g-topic card" id="{{ id }}">
+  <summary><span class="g-t-title">{{ title }}</span><span class="small muted">{{ sub }}</span>
+    <svg class="g-chev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary>
+  <div class="g-body">{{ caller() }}</div>
+</details>
+{% endmacro %}
+
+<div class="head">
+  <div><h1>Hướng dẫn</h1>
+    <p class="sub">Làm theo các bước dưới đây để dytool tự tìm, edit, lồng tiếng và đăng video. Mỗi bước tự đánh dấu khi bạn
+      làm xong.</p></div>
+</div>
+
+<div class="guide">
+<div class="g-main">
+  <section class="card g-start" id="bat-dau" aria-labelledby="h-start">
+    <div class="g-start-h">
+      <h2 id="h-start">Bắt đầu</h2>
+      <span class="small muted">{% if done_n == total %}Đã thiết lập xong — dytool sẵn sàng chạy{% else %}Đã xong {{ done_n }} / {{ total }} bước{% endif %}</span>
+    </div>
+    <div class="g-bar" role="progressbar" aria-valuemin="0" aria-valuemax="{{ total }}" aria-valuenow="{{ done_n }}"
+         aria-label="Tiến độ thiết lập"><span style="width:{{ (100 * done_n / total)|round|int }}%"></span></div>
+    <ol class="g-steps">
+      {% set first_open = steps|rejectattr('done')|rejectattr('optional')|first %}
+      {% for s in steps %}
+      <li class="g-step {{ 'is-done' if s.done }} {{ 'is-next' if first_open and s.key == first_open.key }}">
+        <span class="g-num" aria-hidden="true">{% if s.done %}<svg viewBox="0 0 16 16" width="14" height="14"><path d="m3.5 8.5 3 3 6-7"/></svg>{% else %}{{ loop.index }}{% endif %}</span>
+        <div class="g-step-main">
+          <b>{{ s.title }}</b>{% if s.optional %} <span class="pill">tuỳ chọn</span>{% endif %}
+          {% if s.done %}<span class="sr-only">— đã xong</span>{% endif %}
+          <p class="small muted">{{ s.sub }}</p>
+        </div>
+        {% if s.href and not s.done %}<a class="btn sm {{ 'primary' if first_open and s.key == first_open.key }}" href="{{ s.href }}">{{ s.btn }}</a>
+        {% elif s.done %}<span class="pill ok">Đã xong</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </section>
+
+  <h2 class="g-sec">Hướng dẫn theo chủ đề</h2>
+
+  {% call topic('quy-trinh', 'Một video đi qua những bước nào', 'từ lúc tìm thấy tới lúc lên Facebook / TikTok') %}
+  <ol class="g-flow">
+    <li><b>Tìm thấy</b> — Chạy tự động quét nguồn của kênh, lọc theo like / độ dài.</li>
+    <li><b>Đã tải</b> — tải bản nét nhất từ Douyin.</li>
+    <li><b>Chờ duyệt</b> — đã edit, dịch, lồng tiếng xong; chờ bạn xem.</li>
+    <li><b>Chờ đăng / Chờ gửi lịch</b> — bạn đã duyệt, dytool sẽ đăng hoặc hẹn giờ trên nền tảng.</li>
+    <li><b>Đã lên lịch</b> → <b>Đã đăng</b> — tới giờ bài tự lên; dytool tự lấy link bài.</li>
+  </ol>
+  <p>Video <b>Lỗi</b> có lý do ngay trong hộp xem — sửa xong bấm <b>Thử lại</b>. Bài đăng lỗi giữa chừng không bao giờ
+    tự đăng lại (tránh trùng bài): nó về <b>Chờ duyệt</b> kèm lời nhắc kiểm tra trên nền tảng.</p>
+  <p>Xem mọi video và lọc theo trạng thái ở <a href="/queue">Video</a> hoặc trang của từng kênh.</p>
+  {% endcall %}
+
+  {% call topic('nguon', 'Thêm nguồn và lọc video', 'từ khoá tiếng Việt, kênh Douyin, video hot') %}
+  <ul>
+    <li>Mở kênh → <b>Cài đặt kênh › Nguồn</b>. Ô thêm nguồn nhận <b>nhiều dòng</b>, mỗi dòng 1 nguồn.</li>
+    <li><b>Từ khoá tiếng Việt</b> được AI dịch thành cụm người Trung hay tìm — xem trước bản dịch, bấm cụm khác để đổi.
+      Gõ sẵn tiếng Trung thì giữ nguyên.</li>
+    <li><b>Link kênh Douyin</b> (<code>douyin.com/user/…</code>): lấy mọi video của kênh đó.</li>
+    <li>Tab <b>Lọc</b>: số like tối thiểu (video "hot"), độ dài ngắn / dài nhất. Video bị lọc ghi rõ lý do.</li>
+    <li><b>Quét nguồn ngay</b> ở đầu trang kênh — chạy được cả khi đang tắt Chạy tự động.</li>
+    <li>Bấm 1 video <b>Tìm thấy</b> để xem bản gốc trên Douyin trước khi tải; ưng thì bấm <b>Edit ngay</b>.</li>
+  </ul>
+  {% endcall %}
+
+  {% call topic('duyet', 'Duyệt video', 'hộp duyệt, chọn giờ đăng, phím tắt') %}
+  <ul>
+    <li>Trang <a href="/">Hôm nay</a> → bấm 1 video trong <b>Chờ duyệt</b>. Duyệt / bỏ xong hộp tự mở video kế.</li>
+    <li><b>Đăng lúc</b>: khung giờ trống tiếp theo, theo cài đặt kênh, đăng ngay, hoặc tự chọn giờ.</li>
+    <li><b>Để sau</b> — chưa quyết, xem video kế. <b>Bỏ</b> — không đăng; bấm nhầm thì <b>Hoàn tác</b>.</li>
+    <li>Kênh bật <i>Tự đăng, không duyệt</i>: video có nhãn <b>Tự duyệt</b> — vẫn đổi giờ / <b>Giữ lại</b> / bỏ được
+      trước khi gửi lên nền tảng.</li>
+  </ul>
+  <table class="g-keys">
+    <tr><td><kbd>A</kbd></td><td>Duyệt</td><td><kbd>J</kbd> / <kbd>K</kbd></td><td>Video sau / trước</td></tr>
+    <tr><td><kbd>X</kbd></td><td>Bỏ</td><td><kbd>E</kbd></td><td>Sửa caption</td></tr>
+    <tr><td><kbd>S</kbd></td><td>Để sau</td><td><kbd>Space</kbd></td><td>Phát / dừng video</td></tr>
+    <tr><td><kbd>Z</kbd></td><td>Hoàn tác</td><td><kbd>Esc</kbd></td><td>Đóng hộp</td></tr>
+  </table>
+  {% endcall %}
+
+  {% call topic('lich', 'Lịch đăng', 'khung giờ, kéo thả, giới hạn mỗi ngày') %}
+  <ul>
+    <li>Mỗi kênh có <b>khung giờ đăng</b> và <b>giới hạn bài / ngày</b> ở <b>Cài đặt kênh › Đăng &amp; lịch</b>.
+      Mọi giờ tính theo <b>giờ Việt Nam</b>.</li>
+    <li><a href="/calendar">Lịch đăng</a> hiện 7 ngày × khung giờ của mọi kênh. <b>Kéo</b> bài sang ô khác để đổi giờ;
+      <b>Tự xếp</b> đưa video đã duyệt vào các ô trống.</li>
+    <li>Bật <i>tự xếp lịch</i>: video vừa duyệt tự vào khung trống kế tiếp và được hẹn giờ sẵn trên Facebook / TikTok.</li>
+    <li>TikTok chỉ hẹn giờ được từ 20 phút tới 10 ngày tới — bài xa hơn nằm chờ trong dytool tới lúc vào khoảng đó.</li>
+    <li>Lịch đã quá giờ (máy tắt lúc đó) thì <b>không tự đăng</b> — video về Chờ duyệt để bạn chọn lại.</li>
+  </ul>
+  {% endcall %}
+
+  {% call topic('edit', 'Edit, phụ đề và lồng tiếng', 'mẫu edit, giọng đọc, trang Giọng nói') %}
+  <ul>
+    <li><b>Cài đặt kênh › Edit &amp; lồng tiếng</b>: che phụ đề Trung, lật, nghiêng, phủ màu; phụ đề Việt; bật / tắt lồng tiếng.</li>
+    <li>dytool tự nhận ra lượt nói <b>nam / nữ</b> và đọc bằng giọng tương ứng. Chọn giọng có sẵn cho kênh ở cùng tab.</li>
+    <li>Trang <a href="/voicestudio">Giọng nói</a>: đọc thử, tạo giọng mới (nhân bản từ file mẫu hoặc mô tả giọng), từ
+      điển phát âm, đọc hàng loạt, lồng tiếng 1 video bất kỳ trên máy, chuyển giọng → chữ (.srt).</li>
+    <li>Viết <code>[pause 500ms]</code> để nghỉ, <code>[[từ|cách đọc]]</code> để sửa cách đọc 1 từ.</li>
+    <li>Máy chủ giọng nói tự bật khi cần và tự tắt khi rảnh để trả bộ nhớ card đồ hoạ.</li>
+  </ul>
+  {% endcall %}
+
+  {% call topic('tiktok', 'Đăng lên TikTok', 'kênh riêng hoặc đăng kèm Page Facebook') %}
+  <ul>
+    <li><b>Kênh riêng</b>: thêm tài khoản TikTok ở <a href="/accounts">Tài khoản</a> → Đăng nhập. Kênh TikTok có nguồn,
+      edit, duyệt riêng như 1 Page.</li>
+    <li><b>Đăng kèm</b>: Cài đặt của Page Facebook › <b>Đăng kèm · nhóm</b> → chọn kênh TikTok. Mỗi video đăng / hẹn giờ
+      lên Facebook thành công sẽ được đăng lên TikTok cùng giờ.</li>
+  </ul>
+  {% endcall %}
+
+  {% call topic('captcha', 'Khi Douyin đòi xác minh (captcha)', 'tìm dồn dập là Douyin bắt giải') %}
+  <ul>
+    <li>dytool tự nhận ra, <b>tạm ngừng tìm kiếm</b> (tải / edit vẫn chạy) và mở cửa sổ douyin.com cùng một cửa sổ nhỏ
+      hướng dẫn — câu hỏi captcha đã dịch sang tiếng Việt và cách làm cho đúng dạng đó.</li>
+    <li>Giải xong bấm <b>Đã giải xong</b>; hoặc cứ để đó, Chạy tự động thử lại mỗi 5 phút.</li>
+    <li>dytool không tự giải captcha. Đỡ bị hỏi: đừng thêm quá nhiều nguồn quét cùng lúc.</li>
+    <li>Xem trước cửa sổ hướng dẫn: <a href="/settings#douyin">Cài đặt › Douyin</a> › Xem thử cửa sổ hướng dẫn.</li>
+  </ul>
+  {% endcall %}
+
+  {% call topic('trinh-duyet', 'Tài khoản, trình duyệt và proxy', 'mỗi tài khoản 1 hồ sơ riêng') %}
+  <ul>
+    <li>Mỗi tài khoản Facebook / TikTok có <b>1 hồ sơ trình duyệt riêng</b> (dấu vân tay riêng). Bạn tự đăng nhập trong
+      cửa sổ mở ra — dytool không giữ mật khẩu.</li>
+    <li><a href="/browsers/proxies">Trình duyệt › Proxy</a>: dán nhiều proxy 1 lần; tài khoản mới tự được gắn 1 proxy
+      tĩnh còn trống. Proxy xoay có nút <b>Đổi IP</b>.</li>
+    <li>Trang hồ sơ: đổi proxy, ngôn ngữ, dấu vân tay, cookie, tiện ích. Hồ sơ xoá vào thùng rác 30 ngày.</li>
+  </ul>
+  {% endcall %}
+
+  {% call topic('chay-tu-dong', 'Chạy tự động và nút Dừng', 'dytool làm gì khi bạn không ngồi máy') %}
+  <ul>
+    <li>Công tắc <b>Chạy tự động</b> ở cuối menu trái. Mở app không tự bật — bạn bật khi sẵn sàng.</li>
+    <li>Bấm thẻ đó để xem <b>việc đang làm</b> (từng bước) và <b>việc tiếp theo</b>. Nút <b>Dừng</b> dừng việc đang
+      làm và tạm dừng chạy tự động; video về bước trước, không thành lỗi.</li>
+    <li>Đóng cửa sổ = thu xuống khay cạnh đồng hồ, dytool vẫn chạy. Thoát hẳn: chuột phải icon ở khay → Thoát dytool.</li>
+    <li>Bài đã hẹn giờ trên Facebook / TikTok vẫn tự lên dù tắt máy.</li>
+  </ul>
+  {% endcall %}
+
+  {% call topic('cap-nhat', 'Cập nhật, sao lưu và sửa lỗi', 'giữ dữ liệu an toàn') %}
+  <ul>
+    <li>Có bản mới, thanh trên cùng hiện chip cập nhật — hoặc vào <a href="/settings#cap-nhat">Cài đặt › Cập nhật</a>.</li>
+    <li>Sao lưu: chép thư mục <code>C:\dytool\data</code> và file <code>config.yaml</code>. Cài đè / gỡ cài đều giữ 2 mục này.</li>
+    <li>Thư viện hỏng: Start Menu → <b>dytool - Cài đặt lại thư viện</b>.</li>
+    <li>Thanh dưới đáy cửa sổ cho biết Douyin, bộ tải và giọng nói có đang chạy; mục <b>Cần bạn xử lý</b> ở trang Hôm
+      nay gom mọi việc cần bạn làm.</li>
+  </ul>
+  {% endcall %}
+</div>
+
+<aside class="g-toc" aria-label="Mục lục hướng dẫn">
+  <p class="small muted">Mục lục</p>
+  <a href="#bat-dau">Bắt đầu</a>
+  <a href="#quy-trinh">Quy trình 1 video</a>
+  <a href="#nguon">Nguồn và lọc video</a>
+  <a href="#duyet">Duyệt video</a>
+  <a href="#lich">Lịch đăng</a>
+  <a href="#edit">Edit và lồng tiếng</a>
+  <a href="#tiktok">Đăng lên TikTok</a>
+  <a href="#captcha">Captcha Douyin</a>
+  <a href="#trinh-duyet">Trình duyệt và proxy</a>
+  <a href="#chay-tu-dong">Chạy tự động</a>
+  <a href="#cap-nhat">Cập nhật và sao lưu</a>
+</aside>
+</div>
+
+<script>
+/* mở đúng chủ đề khi vào bằng #id hoặc bấm mục lục (chạy lại mỗi lần vẽ trang — chịu được chạy lặp) */
+(function () {
+  const open = (h) => { const d = h && document.querySelector('details.g-topic' + h); if (d) { d.open = true; d.scrollIntoView({ block: 'start' }); } };
+  open(location.hash);
+  if (!window.__dyGuide) {
+    window.__dyGuide = true;
+    document.addEventListener('click', (e) => {
+      const a = e.target.closest && e.target.closest('.g-toc a');
+      if (a) { const d = document.querySelector('details.g-topic' + a.getAttribute('href')); if (d) d.open = true; }
+    });
+  }
+})();
+</script>
+{% endblock %}

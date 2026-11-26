@@ -1282,6 +1282,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                 ("Video", "/queue", "Trang"), ("Video lỗi", "/queue?status=failed", "Trang"),
                 ("Tài khoản", "/accounts", "Trang"), ("Trình duyệt · hồ sơ", "/browsers", "Trang"),
                 ("Proxy", "/browsers/proxies", "Trang"), ("Cài đặt", "/settings", "Trang"),
+                ("Hướng dẫn sử dụng", "/guide", "Trang"), ("Bắt đầu · thiết lập lần đầu", "/guide#bat-dau", "Trang"),
                 ("Đăng nhập Douyin", "/settings#douyin", "Lệnh"), ("Thêm tài khoản / kênh", "/accounts", "Lệnh"),
                 ("Cài / đăng nhập AI (Claude, Codex, Gemini)", "/settings#ai", "Lệnh"), ("Cập nhật dytool", "/settings#cap-nhat", "Lệnh")]
         items = [{"label": l, "href": h, "kind": k} for l, h, k in cmds if not ql or ql in l.lower()]
@@ -2398,6 +2399,43 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         return render(request, "_ch_toggle.html", ch=next(c for c in plan.nav_pages(store) if c["id"] == pid),
                       on=path == f"/pages/{pid}", page=store.one("SELECT * FROM pages WHERE id=?", (pid,)),
                       row=rows[0] if rows else None, oob=True)
+
+    @app.get("/guide", response_class=HTMLResponse)
+    def guide(request: Request):
+        """Trang Hướng dẫn: các bước thiết lập lần đầu (tự đánh dấu theo trạng thái thật) + hướng dẫn theo chủ đề.
+        Chỉ đọc nhanh: ai.ready() / voice_model.ready() dùng kết quả nhớ / chỉ xem file — không đứng chờ tiến trình ngoài."""
+        from .. import ai, voice_model
+        from ..cookies import cookie_status
+        n = lambda sql: store.one(sql)["n"]
+        steps = [
+            {"key": "ai", "done": ai.ready(), "title": "Cài và đăng nhập AI",
+             "sub": "Claude, Codex hoặc Gemini CLI — đăng nhập bằng tài khoản, không cần API key. AI dịch phụ đề, "
+                    "lồng tiếng và từ khoá.", "href": "/settings#ai", "btn": "Mở Cài đặt › AI"},
+            {"key": "douyin", "done": cookie_status(cfg["douyin"].get("cookie", ""))["logged_in"],
+             "title": "Đăng nhập Douyin", "sub": "Quét mã QR bằng app Douyin trong cửa sổ mở ra — cần để tìm và tải video.",
+             "href": "/settings#douyin", "btn": "Đăng nhập Douyin"},
+            {"key": "acc", "done": n("SELECT COUNT(*) n FROM accounts WHERE status='da_dang_nhap'") > 0,
+             "title": "Thêm tài khoản Facebook / TikTok",
+             "sub": "Bấm Đăng nhập, tự đăng nhập trong cửa sổ trình duyệt riêng — dytool tự tìm các Page của bạn.",
+             "href": "/accounts", "btn": "Mở Tài khoản"},
+            {"key": "src", "done": n("SELECT COUNT(*) n FROM sources") > 0, "title": "Thêm nguồn video cho kênh",
+             "sub": "Từ khoá tiếng Việt (tự dịch sang tiếng Trung) hoặc link kênh Douyin — mỗi dòng 1 nguồn.",
+             "href": "/channels", "btn": "Chọn kênh"},
+            {"key": "on", "done": n("SELECT COUNT(*) n FROM pages WHERE enabled=1") > 0, "title": "Bật kênh",
+             "sub": "Chỉnh mẫu edit, giọng đọc, khung giờ đăng trong Cài đặt kênh rồi bật kênh (bấm ảnh đại diện ở menu).",
+             "href": "/channels", "btn": "Tất cả kênh"},
+            {"key": "voice", "done": voice_model.ready(), "title": "Tải model giọng nói", "optional": True,
+             "sub": "Chỉ cần nếu kênh bật lồng tiếng — 3,3 GB, tải 1 lần.", "href": "/voicestudio", "btn": "Mở Giọng nói"},
+            {"key": "run", "done": bool(worker.running), "title": "Bật Chạy tự động",
+             "sub": "Công tắc ở cuối menu trái: dytool tự quét, tải, edit, lồng tiếng rồi đưa video vào Chờ duyệt.",
+             "href": None, "btn": None},
+            {"key": "review", "done": n("SELECT COUNT(*) n FROM videos WHERE status IN "
+                                        "('approved','publish_now','schedule_pending','scheduled','uploaded')") > 0,
+             "title": "Duyệt video đầu tiên", "sub": "Trang Hôm nay → bấm 1 video chờ duyệt → sửa caption → Duyệt.",
+             "href": "/#cho-duyet", "btn": "Mở Hôm nay"},
+        ]
+        need = [s for s in steps if not s.get("optional")]
+        return render(request, "guide.html", steps=steps, done_n=sum(s["done"] for s in need), total=len(need))
 
     @app.get("/channels", response_class=HTMLResponse)
     def channels(request: Request):

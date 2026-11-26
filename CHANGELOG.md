@@ -8,6 +8,11 @@ Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh h�
 
 ---
 
+## Chưa phát hành
+
+- ✨ **Trang Hướng dẫn** (menu Hệ thống): mục **Bắt đầu** liệt kê các bước thiết lập lần đầu — AI, Douyin, tài khoản, nguồn, bật kênh, model giọng nói, Chạy tự động, duyệt video đầu tiên — tự đánh dấu bước đã xong, nút đi thẳng tới chỗ cần làm. Bên dưới là hướng dẫn theo chủ đề (quy trình 1 video, nguồn & lọc, duyệt + phím tắt, lịch đăng, lồng tiếng, TikTok, captcha, proxy, chạy tự động, cập nhật & sao lưu) kèm mục lục.
+- 🛠️ Trang kênh: nhãn trạng thái dài ("Đã lên lịch trên Facebook") không còn đè lên cột Thời điểm.
+
 ## [0.4.0] — 2026-11-26
 
 **Thanh trạng thái dưới đáy, menu kênh bật / tắt nhanh, trang Hôm nay gọn hơn**

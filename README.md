@@ -175,6 +175,8 @@ dữ liệu (`data\`, `config.yaml`). Lỗi thư viện: Start Menu › **dytool
    mẫu edit, giọng đọc, khung giờ đăng, rồi bật kênh.
 5. Bật **Chạy tự động** ở cuối menu. Video edit xong hiện ở trang **Hôm nay** — duyệt là xong.
 
+Trong app có trang **Hướng dẫn** (menu Hệ thống): các bước trên tự đánh dấu khi bạn làm xong, kèm hướng dẫn chi tiết từng tính năng.
+
 > [!TIP]
 > Đóng cửa sổ = thu xuống khay (cạnh đồng hồ), dytool vẫn edit và đăng theo lịch. Thoát hẳn: chuột phải icon ở khay →
 > **Thoát dytool**.

@@ -63,7 +63,8 @@
         <div class="small muted num">♥ {{ '{:,}'.format(v.likes or 0) }} · {{ (v.duration or 0)|round|int }}s ·
           <a href="https://www.douyin.com/video/{{ v.id }}" target="_blank" rel="noopener">xem gốc</a>
           {% if v.source %}<span title="{{ v.source }}"> · {{ v.source.split(':', 1)[-1][:24] }}</span>{% endif %}</div></td>
-      <td><span class="pill {{ cls }}">{{ status_vi(v.status, page.platform) }}</span>
+      {# nhãn ngắn (trang kênh đã ghi nền tảng ở đầu trang) — "Đã lên lịch trên Facebook" tràn cột 170px #}
+      <td><span class="pill {{ cls }}" title="{{ status_vi(v.status, page.platform) }}">{{ status_vi(v.status) }}</span>
         {% if v.error %}<div class="small err-text" style="margin-top:3px">{{ v.error[:140] }}</div>{% endif %}
         {% if v.status in ('new', 'downloaded') %}<div style="margin-top:6px">{% with pid=page.id, vid=v.id %}{% include "_edit_btn.html" %}{% endwith %}</div>{% endif %}</td>
       <td class="small num nowrap">

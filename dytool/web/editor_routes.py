@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from .. import vtemplate as vt
 
 EDITED_RE = re.compile(r"p\d+_\d{6,30}\.mp4")
+RAW_RE = re.compile(r"\d{6,30}")
 MEDIA_TYPES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp",
                "mp4": "video/mp4", "mov": "video/quicktime", "webm": "video/webm", "mp3": "audio/mpeg",
                "m4a": "audio/mp4", "wav": "audio/wav", "aac": "audio/aac", "ogg": "audio/ogg"}
@@ -25,15 +26,33 @@ MAX_UPLOAD = 200 * 1024 * 1024
 
 
 def samples(store, data: Path, pid: int) -> list[dict]:
-    """Video mẫu để xem trước: bản đã edit của kênh này trước, rồi của kênh khác (mới nhất)."""
-    files = [p for p in (data / "edited").glob("p*_*.mp4") if EDITED_RE.fullmatch(p.name)]
-    files.sort(key=lambda p: (not p.name.startswith(f"p{pid}_"), -p.stat().st_mtime))
+    """Video để xem trước, theo thứ tự: đã edit của kênh này · đã tải (chưa edit) của kênh này · đã edit của kênh khác ·
+    video mẫu dựng sẵn (vtemplate.demo_video — luôn có, kể cả app vừa cài). Bản đã tải là H.265 thì bỏ qua (WebView2 chỉ
+    phát tiếng, không hình). `raw` = chưa qua bước edit chính -> xem trước / Render thử áp thêm lật / màu phủ / nghiêng."""
+    from ..editor import video_codec
     names = {r["id"]: r["name"] for r in store.q("SELECT id, name FROM pages")}
-    out = []
-    for p in files[:16]:
+    files = [p for p in (data / "edited").glob("p*_*.mp4") if EDITED_RE.fullmatch(p.name)]
+    files.sort(key=lambda p: -p.stat().st_mtime)
+    mine = [p for p in files if p.name.startswith(f"p{pid}_")][:10]
+    others = [p for p in files if not p.name.startswith(f"p{pid}_")][:6]
+    out = [{"key": "e:" + p.name, "url": f"/media/edited/{p.name}", "raw": False,
+            "label": "Đã edit · " + p.stem.split("_", 1)[1][-6:]} for p in mine]
+    n_raw = 0
+    for r in store.q("SELECT id FROM videos WHERE page_id=? AND status NOT IN ('new','failed') ORDER BY rowid DESC LIMIT 40", (pid,)):
+        p = data / "raw" / f"{r['id']}.mp4"
+        if n_raw >= 8 or not RAW_RE.fullmatch(r["id"] or "") or not p.is_file():
+            continue
+        if video_codec(p) not in ("h264", ""):
+            continue
+        out.append({"key": "r:" + r["id"], "url": f"/media/raw/{r['id']}", "raw": True,
+                    "label": "Chưa edit · " + r["id"][-6:]})
+        n_raw += 1
+    for p in others:
         ppid = int(p.name[1:p.name.index("_")])
-        out.append({"key": "e:" + p.name, "url": f"/media/edited/{p.name}",
-                    "label": ("Kênh này" if ppid == pid else names.get(ppid, "Kênh khác")) + " · " + p.stem.split("_", 1)[1][-6:]})
+        out.append({"key": "e:" + p.name, "url": f"/media/edited/{p.name}", "raw": False,
+                    "label": names.get(ppid, "Kênh khác") + " · " + p.stem.split("_", 1)[1][-6:]})
+    if True:         # tạo khi trình phát xin /tpl/demo.mp4 lần đầu (~5 s) — không làm chậm lúc mở cửa sổ
+        out.append({"key": "d:demo", "url": "/tpl/demo.mp4", "raw": True, "label": "Video mẫu dựng sẵn (9:16)"})
     return out
 
 
@@ -53,6 +72,11 @@ def register(app, store, data: Path, render) -> None:
             return p if p.is_file() else None
         if key.startswith("a:"):
             return vt.asset_path(data, key[2:])
+        if key.startswith("r:") and RAW_RE.fullmatch(key[2:]):
+            p = data / "raw" / f"{key[2:]}.mp4"
+            return p if p.is_file() else None
+        if key == "d:demo":
+            return vt.demo_video(data)
         return None
 
     def page_of(pid: int):
@@ -111,6 +135,13 @@ def register(app, store, data: Path, render) -> None:
             print("Không mở được cửa sổ Mẫu edit:", e, flush=True)
             return Response(status_code=404)
         return Response(status_code=204)
+
+    @app.get("/tpl/demo.mp4")
+    def tpl_demo():
+        p = vt.demo_video(data)
+        if not p:
+            return PlainTextResponse("Không tạo được video mẫu", 404)
+        return FileResponse(p, media_type="video/mp4")
 
     @app.get("/tpl/font/{name}")
     def tpl_font(name: str):
@@ -199,7 +230,8 @@ def register(app, store, data: Path, render) -> None:
                 jobs.pop(k, None)
         tpl, full = body.get("template") or {}, bool(body.get("full"))
         # video mẫu đã edit đã có sẵn lật / màu phủ / nghiêng; video tải lên (gốc) thì áp thêm để giống thật
-        base = body.get("base") if str(body.get("sample") or "").startswith("a:") and isinstance(body.get("base"), dict) else None
+        base = (body.get("base") if str(body.get("sample") or "")[:2] in ("a:", "r:", "d:")
+                and isinstance(body.get("base"), dict) else None)
 
         def run():
             out = data / "work" / f"tpl_render_{key}.mp4"

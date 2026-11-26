@@ -29,7 +29,7 @@
       <span class="ed-sep"></span>
       <label class="ed-lbl" for="ed-sample">Video xem thử</label>
       <select id="ed-sample" title="Video dùng để xem trước — không ảnh hưởng mẫu">
-        {% for v in samples %}<option value="{{ v.key }}" data-url="{{ v.url }}">{{ v.label }}</option>{% endfor %}
+        {% for v in samples %}<option value="{{ v.key }}" data-url="{{ v.url }}"{% if v.raw %} data-raw="1"{% endif %}>{{ v.label }}</option>{% endfor %}
         <option value="__upload">Tải video lên…</option>
       </select>
       <button type="button" class="ed-b" id="ed-reset" title="Xoá hết intro, outro, chữ, logo, nhạc, hiệu ứng">Làm lại từ đầu</button>
@@ -76,7 +76,7 @@
         <div class="ed-seg" id="ed-seg-outro" data-segsel="outro"><i class="sg-bg"></i><video playsinline preload="auto"></video><b class="sg-t"></b><span class="sg-s"></span></div>
         <div class="ed-guide-v" id="ed-gv" hidden></div><div class="ed-guide-h" id="ed-gh" hidden></div>
         <div class="ed-drophint" id="ed-fdrop">Thả vào khung để đặt chữ / logo đúng chỗ</div>
-        <div class="ed-empty" id="ed-empty" hidden>Kênh chưa có video đã edit để xem thử.<br>
+        <div class="ed-empty" id="ed-empty" hidden>Chưa có video để xem thử.<br>
           <button type="button" class="ed-b pri" id="ed-up-sample">Tải 1 video lên để xem thử</button></div>
       </div>
     </div>

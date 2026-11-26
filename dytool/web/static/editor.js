@@ -6,6 +6,8 @@
   'use strict';
   const ED = window.__ED, $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
   let S = structuredClone(ED.tpl); S.base = structuredClone(ED.base);
+  let stripped = false;
+  for (const k of ['intro', 'outro']) if (S[k].title || S[k].sub) { S[k].title = ''; S[k].sub = ''; stripped = true; }
   const root = $('#ed'), frame = $('#ed-frame'), stage = $('#ed-stage'), V = $('#ed-v'), BG = $('#ed-bgv');
   const ibody = $('#ed-ibody'), ihead = $('#ed-ihead'), libbody = $('#ed-libbody');
   let sel = { k: 'main' };             // main | intro | outro | tin | tout | layer (id) | music
@@ -161,7 +163,7 @@
         ${H.sw('base.hflip', 'Lật ngang')}
         ${H.rng('base.rotate_deg', 'Nghiêng', -5, 5, 0.5, 'deg')}
         <div class="ed-row">${H.color('base.tint_color', 'Màu phủ')}<div class="grow">${H.rng('base.tint_opacity', 'Độ đậm phủ', 0, 0.4, 0.01, 'pct')}</div></div>
-        <p class="ed-ihint">Video xem thử đã edit sẵn nên đã có 3 chỉnh này — khung xem chỉ thể hiện khi bạn chọn "Tải video lên…" (video gốc).
+        <p class="ed-ihint">Video "Đã edit" đã có sẵn 3 chỉnh này — khung xem chỉ thể hiện chúng khi chọn video "Chưa edit", video tải lên hoặc video mẫu dựng sẵn.
         Cắt đầu / cuối cũng kéo được ở mép khối "Video chính" dưới dòng thời gian.</p>`;
       else if (itab.main === 'adjust') b = adjustHTML();
       else b = `${H.chips('canvas.ratio', 'Tỉ lệ khung', ED.ratios)}
@@ -173,18 +175,14 @@
       h = `<b>${k === 'intro' ? 'Intro' : 'Outro'}</b>` + H.tabs(k, [['content', 'Nội dung'], ['trans', 'Chuyển cảnh']]);
       if (itab[k] === 'trans') b = transHTML(k);
       else b = `
-        <h4>Video / ảnh nền</h4>${H.file(k + '.file', 'video/*,image/*', 'Nền màu — kéo video / ảnh từ thư viện vào ô ' + (k === 'intro' ? 'Intro' : 'Outro'))}
-        ${isVidFile(s.file) ? `${H.sw(k + '.audio', 'Giữ tiếng của video')}${s.audio ? H.rng(k + '.volume', 'Âm lượng video', 0, 2, 0.05, 'pct') : ''}
-          <button type="button" class="ed-b" style="margin-top:10px" data-act="fitdur:${k}">Độ dài = hết video</button>` : ''}
-        ${s.file ? H.chips(k + '.fit', 'Không vừa khung', { crop: 'Cắt cho đầy', blur: 'Vừa, nền mờ', pad: 'Vừa, nền màu' }) : ''}
+        ${H.file(k + '.file', 'video/*', `Chưa có video ${k} — bấm Chọn… hoặc kéo video vào ô ${k === 'intro' ? 'Intro' : 'Outro'}`)}
+        ${isVidFile(s.file) ? `${H.sw(k + '.audio', 'Giữ tiếng của video')}${s.audio ? H.rng(k + '.volume', 'Âm lượng', 0, 2, 0.05, 'pct') : ''}` : ''}
         ${H.rng(k + '.duration', 'Độ dài', 0.5, 30, 0.1, 's')}
-        ${H.color(k + '.bg', 'Màu nền')}
-        <h4>Chữ</h4>
-        ${H.text(k + '.title', 'Tiêu đề', 2, 'Để trống nếu video đã có chữ')}
-        ${H.text(k + '.sub', 'Dòng phụ (có nền màu nhấn)', 0)}
-        <div class="ed-row">${H.color(k + '.color', 'Màu chữ')}${H.color(k + '.accent', 'Màu nhấn')}<div class="grow">${H.sel(k + '.anim', 'Hiệu ứng', ED.anims)}</div></div>
-        ${H.rng(k + '.size', 'Cỡ tiêu đề', 0.02, 0.15, 0.005, 'pct')}
-        <button type="button" class="ed-b danger ed-del" data-act="del">Xoá ${k === 'intro' ? 'intro' : 'outro'}</button>`;
+        ${isVidFile(s.file) ? `<button type="button" class="ed-b" style="margin-top:8px;width:100%" data-act="fitdur:${k}">Độ dài = hết video</button>` : ''}
+        ${H.chips(k + '.fit', 'Video không cùng tỉ lệ khung', { crop: 'Cắt cho đầy', blur: 'Vừa, nền mờ', pad: 'Vừa, nền màu' })}
+        ${s.fit === 'pad' ? H.color(k + '.bg', 'Màu nền') : ''}
+        <p class="ed-ihint">Video ${k} làm sẵn được ghép nguyên vào ${k === 'intro' ? 'đầu' : 'cuối'} mọi video của kênh. Đổi video: kéo video khác từ thư viện thả vào ô ${k === 'intro' ? 'Intro' : 'Outro'}.</p>
+        <button type="button" class="ed-b danger ed-del" data-act="del">Bỏ ${k}</button>`;
     } else if (sel.k === 'tin' || sel.k === 'tout') {
       const k = sel.k === 'tin' ? 'intro' : 'outro';
       h = `<b>Chuyển cảnh ${k === 'intro' ? 'Intro → Video' : 'Video → Outro'}</b>`;
@@ -236,7 +234,7 @@
       <button type="button" class="ed-b" style="margin-top:14px" data-act="adj-reset">Về mặc định</button>`;
   }
   function transHTML(k) {
-    if (!S[k].enabled) return `<p class="ed-iempty">Chưa có ${k}. Kéo video / ảnh / thẻ màu vào ô "+ ${k === 'intro' ? 'Intro' : 'Outro'}" ở dòng thời gian.</p>`;
+    if (!S[k].enabled) return `<p class="ed-iempty">Chưa có ${k}. Kéo video ${k} làm sẵn vào ô "+ ${k === 'intro' ? 'Intro' : 'Outro'}" ở dòng thời gian.</p>`;
     return `${H.trgrid(k)}${S[k].transition === 'none' ? '' : H.rng(k + '.trans_dur', 'Thời lượng', 0.1, 2, 0.1, 's')}
       <p class="ed-ihint">Có thể kéo 1 kiểu chuyển cảnh từ thư viện thả lên hình thoi ở dòng thời gian.</p>`;
   }
@@ -265,7 +263,7 @@
     if (cmd === 'dup') { dupLayer(); return; }
     if (cmd === 'hide') { await fetch(`/tpl/assets/${x}/hide`, { method: 'POST' }); await loadAssets(); return; }
     if (cmd === 'add') { quickAdd(JSON.parse(el.closest('[data-drag]').dataset.drag)); return; }
-    if (cmd === 'enable') { setSeg(x, { card: true }); return; }
+    if (cmd === 'enable') { const j = (await pickFiles('video/*', false))[0]; if (j) setSeg(x, j); return; }
     if (cmd === 'upload') { await pickFiles(el.dataset.accept || 'video/*,image/*,audio/*', true); }
   }
   function delSel() {
@@ -362,17 +360,14 @@
     if (k === 'media') {
       const media = assets.filter((a) => a.kind !== 'audio');
       h = `<button type="button" class="ed-upload" data-act="upload" data-accept="video/*,image/*,audio/*"><b>＋ Nhập file</b>hoặc kéo thả video, ảnh, nhạc từ máy</button>
-        <h3>Thẻ màu <span class="ed-note">kéo vào ô Intro / Outro</span></h3>
-        <div class="ed-grid">${CARDS.map((c) => `<div class="ed-tile ed-ctile" ${drag({ type: 'card', bg: c.bg, color: c.color || '#ffffff' })}>
-          <span class="th" style="background:${c.bg}"><b style="color:${c.color || '#fff'}">Tiêu đề</b><span class="add" data-act="add" title="Thêm làm intro">+</span></span><span class="nm">${c.name}</span></div>`).join('')}</div>
         <h3>Của bạn <span class="ed-note">${media.length} file</span></h3>
         ${media.length ? `<div class="ed-grid">${media.map((a) => `<div class="ed-tile" ${drag({ type: 'asset', name: a.name, kind: a.kind, dur: a.dur })} title="${esc(a.label)}">
           <span class="th" style="background-image:url(/tpl/thumb/${a.name})">${a.kind === 'video' ? `<span class="dur">${fmt(a.dur, 's')}</span>` : ''}
-            <span class="add" data-act="add" title="${a.kind === 'video' ? 'Thêm làm intro / outro' : 'Thêm làm logo'}">+</span>
+            <span class="add" data-act="add" title="${a.kind === 'video' ? (S.intro.enabled ? 'Dùng làm outro' : 'Dùng làm intro') : 'Thêm làm logo'}">+</span>
             <button type="button" class="x" data-act="hide:${a.name}" title="Bỏ khỏi thư viện">×</button></span>
           <span class="nm">${esc(a.label)}</span></div>`).join('')}</div>`
-        : '<p class="ed-libempty">Chưa có file. Nhập video intro / outro, logo (ảnh PNG nền trong) rồi kéo vào dòng thời gian hoặc khung xem.</p>'}
-        <p class="ed-note ed-libhint">Video → kéo vào ô Intro / Outro. Ảnh → kéo lên khung xem (logo) hoặc ô Intro / Outro (ảnh nền).</p>`;
+        : '<p class="ed-libempty">Chưa có file. Nhập video intro / outro bạn làm sẵn và logo (ảnh PNG nền trong).</p>'}
+        <p class="ed-note ed-libhint">Video intro / outro → kéo vào ô "+ Intro" / "+ Outro" ở dòng thời gian (thay video cũ: thả đè lên). Logo → kéo lên khung xem.</p>`;
     } else if (k === 'audio') {
       const au = assets.filter((a) => a.kind === 'audio');
       h = `<button type="button" class="ed-upload" data-act="upload" data-accept="audio/*"><b>＋ Nhập nhạc</b>mp3, m4a, wav, aac, ogg</button>
@@ -480,7 +475,7 @@
   function accepts(zone, p) {
     if (!p) return false;
     const a = p.type === 'asset' ? p.kind : p.type;
-    return !!({ frame: ['text', 'image', 'filter', 'logo'], main: ['filter'], intro: ['video', 'image', 'card', 'trans'], outro: ['video', 'image', 'card', 'trans'],
+    return !!({ frame: ['text', 'image', 'filter', 'logo'], main: ['filter'], intro: ['video', 'trans'], outro: ['video', 'trans'],
       tin: ['trans'], tout: ['trans'], layers: ['text', 'image', 'logo'], music: ['audio', 'video'] })[zone]?.includes(a);
   }
   const isFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
@@ -534,11 +529,12 @@
   // ---------- video xem thử ----------
   const sampleSel = $('#ed-sample');
   let lastSample = sampleSel.value;
+  const isRawSample = () => !!sampleSel.selectedOptions[0]?.dataset.raw;
   sampleSel.addEventListener('change', async () => {
     if (sampleSel.value === '__upload') {
       const j = (await pickFiles('video/*', false))[0];
       if (!j) { sampleSel.value = lastSample; return; }
-      const o = new Option('Video tải lên · ' + j.label.slice(0, 28), 'a:' + j.name); o.dataset.url = '/tpl/asset/' + j.name;
+      const o = new Option('Video tải lên · ' + j.label.slice(0, 28), 'a:' + j.name); o.dataset.url = '/tpl/asset/' + j.name; o.dataset.raw = '1';
       sampleSel.add(o, 0); sampleSel.value = o.value;
     }
     lastSample = sampleSel.value; loadSample();
@@ -707,8 +703,8 @@
       else { if (!V.paused) V.pause(); if (!BG.paused) BG.pause(); }
       V.volume = Math.min(1, m.volume);
     }
-    // video xem thử đã edit = đã có sẵn lật / màu phủ / nghiêng -> chỉ áp lại khi xem video tải lên (bản gốc)
-    const b = sampleSel.value.startsWith('a:') ? S.base : { hflip: false, rotate_deg: 0, tint_color: '#000000', tint_opacity: 0 };
+    // video xem thử đã edit = đã có sẵn lật / màu phủ / nghiêng -> chỉ áp khi xem video chưa edit (đã tải, tải lên, video mẫu)
+    const b = isRawSample() ? S.base : { hflip: false, rotate_deg: 0, tint_color: '#000000', tint_opacity: 0 };
     const z = 1 + m.zoom * clamp(local / tl.D, 0, 1);
     const rot = b.rotate_deg ? `rotate(${b.rotate_deg}deg) scale(${1 + Math.abs(b.rotate_deg) * 0.035})` : '';
     $('#ed-mainwrap').style.transform = `scale(${z}) ${b.hflip ? 'scaleX(-1)' : ''} ${rot}`;
@@ -878,11 +874,11 @@
     h += `<div class="tl-row r-main">${hd(ICO.video, 'Video')}`;
     const mA = tl.mainStart + tl.tdIn / 2, mB = tl.mainEnd - tl.tdOut / 2;
     if (S.intro.enabled) h += segBlock('intro', 0, mA);
-    else h += `<div class="tl-b b-slot" data-drop="intro" data-act="enable:intro" style="left:${HEADW + 8}px;width:84px" title="Bấm để thêm thẻ intro, hoặc kéo video / ảnh vào"><span>＋ Intro</span></div>`;
+    else h += `<div class="tl-b b-slot" data-drop="intro" data-act="enable:intro" style="left:${HEADW + 8}px;width:84px" title="Bấm để chọn video intro, hoặc kéo video vào đây"><span>＋ Intro</span></div>`;
     h += `<div class="tl-b b-main${sel.k === 'main' ? ' sel' : ''}" data-tl="main" data-drop="main" style="left:${xOf(mA)}px;width:${(mB - mA) * pxPerS}px;${thumbURL ? `background-image:url(${thumbURL})` : ''}">
       <i class="h l" data-h="l" title="Kéo để cắt bỏ đầu video"></i><span>Video chính · ${fmt(tl.D, 's')}${S.main.trim_start || S.main.trim_end ? ' (đã cắt)' : ''}</span><i class="h r" data-h="r" title="Kéo để cắt bỏ cuối video"></i></div>`;
     if (S.outro.enabled) h += segBlock('outro', mB, tl.total);
-    else h += `<div class="tl-b b-slot" data-drop="outro" data-act="enable:outro" style="left:${xOf(tl.mainEnd) + 4}px;width:84px" title="Bấm để thêm thẻ outro, hoặc kéo video / ảnh vào"><span>＋ Outro</span></div>`;
+    else h += `<div class="tl-b b-slot" data-drop="outro" data-act="enable:outro" style="left:${xOf(tl.mainEnd) + 4}px;width:84px" title="Bấm để chọn video outro, hoặc kéo video vào đây"><span>＋ Outro</span></div>`;
     for (const [k, at, td] of [['intro', tl.mainStart, tl.tdIn], ['outro', tl.outStart, tl.tdOut]]) {
       if (!S[k].enabled) continue;
       const sk = k === 'intro' ? 'tin' : 'tout';
@@ -1011,7 +1007,7 @@
         if (j.state === 'error') throw new Error(j.error);
         rbody.innerHTML = `<video src="${j.url}" controls autoplay playsinline></video>
           <p class="ed-note" style="margin-top:8px">Bản thật (${full ? 'đủ cỡ' : 'cỡ nhỏ'}) · dài ${j.dur.toFixed(1)} s · render mất ${Math.round(j.took)} s.
-          Video xem thử là bản đã edit sẵn của kênh (phụ đề / lồng tiếng cũ). ${full ? '' : '<button type="button" class="ed-b" id="rd-full">Render đủ cỡ</button>'}</p>`;
+          ${isRawSample() ? 'Video chưa qua bước edit chính nên chưa có phụ đề / lồng tiếng.' : 'Video xem thử là bản đã edit sẵn của kênh (phụ đề / lồng tiếng cũ).'} ${full ? '' : '<button type="button" class="ed-b" id="rd-full">Render đủ cỡ</button>'}</p>`;
         $('#rd-full')?.addEventListener('click', () => renderTest(true));
         return;
       }
@@ -1023,4 +1019,5 @@
   new ResizeObserver(() => { layout(); renderTimeline(); }).observe(stage);
   $('#ed-undo').disabled = true; $('#ed-redo').disabled = true;
   loadSegMedia(); loadMusic(); renderAll(); loadSample(); layout(); loadAssets();
+  if (stripped) changed();      // lưu bản đã bỏ chữ intro / outro
 })();

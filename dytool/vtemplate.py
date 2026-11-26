@@ -60,10 +60,8 @@ def _section(kind: str) -> dict:
 
 
 def default_template(name: str = "Mẫu mới") -> dict:
+    # intro / outro = video người dùng làm sẵn (người dùng 2026-11-26: "không cần tiêu đề") — mặc định không có chữ
     intro, outro = _section("intro"), _section("outro")
-    intro["title"] = "Tiêu đề video"
-    outro["title"] = "Cảm ơn đã xem"
-    outro["sub"] = "Theo dõi kênh để xem thêm"
     return {
         "id": "", "name": name, "updated": 0,
         "canvas": {"ratio": "keep", "fit": "blur"},
@@ -296,6 +294,57 @@ def asset_thumb(data: Path, name: str) -> Path | None:
             subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(p), "-frames:v", "1",
                             "-vf", "scale=240:-2", str(out)], capture_output=True, timeout=30)
     return out if out.exists() else None
+
+
+# ---------------- video mẫu dựng sẵn ----------------
+DEMO_NAME = "demo_9x16_v1.mp4"
+_demo_lock = __import__("threading").Lock()
+
+
+def demo_video(data: Path) -> Path | None:
+    """Video mẫu dọc 9:16, 10 giây (nền chuyển màu + chữ + đồng hồ + tiếng nhạc nhẹ) tạo bằng FFmpeg ngay trên máy —
+    để trình Mẫu edit luôn có hình xem trước / Render thử khi kênh (cả app) chưa có video nào. Tạo 1 lần, H.264 (WebView2
+    phát được). Lỗi -> None (trình Mẫu edit vẫn chạy với nền đen)."""
+    from .subtitles import ensure_fonts
+    d = tdir(data)
+    out = d / DEMO_NAME
+    if out.is_file() and out.stat().st_size > 10_000:
+        return out
+    with _demo_lock:
+        if out.is_file() and out.stat().st_size > 10_000:
+            return out
+        return _make_demo(d, out, ensure_fonts)
+
+
+def _make_demo(d: Path, out: Path, ensure_fonts) -> Path | None:
+    try:
+        ensure_fonts(d)
+        (d / "demo_t1.txt").write_text("VIDEO MẪU", "utf-8")
+        (d / "demo_t2.txt").write_text("Dùng để xem thử mẫu edit", "utf-8")
+        (d / "demo_t3.txt").write_text("%{pts:hms}", "utf-8")
+        vf = ("gradients=s=720x1280:r=30:d=10:c0=0x0f766e:c1=0x1e3a8a:c2=0x7c3aed:c3=0xdb2777:nb_colors=4:speed=0.012,"
+              "drawbox=x=0:y=ih*0.80:w=iw:h=ih*0.07:color=black@0.28:t=fill,"
+              "drawtext=fontfile=fonts/BeVietnamPro-ExtraBold.ttf:textfile=demo_t1.txt:expansion=none:fontsize=78:"
+              "fontcolor=white:borderw=4:bordercolor=black@0.35:x=(w-text_w)/2:y=h*0.40,"
+              "drawtext=fontfile=fonts/BeVietnamPro-Bold.ttf:textfile=demo_t2.txt:expansion=none:fontsize=30:"
+              "fontcolor=white@0.9:x=(w-text_w)/2:y=h*0.40+110,"
+              "drawtext=fontfile=fonts/BeVietnamPro-Bold.ttf:textfile=demo_t3.txt:fontsize=34:fontcolor=white:"
+              "x=(w-text_w)/2:y=h*0.80+(h*0.07-text_h)/2,format=yuv420p")
+        au = "aevalsrc='0.05*sin(2*PI*220*t)+0.035*sin(2*PI*277.2*t)+0.03*sin(2*PI*329.6*t)':s=44100:d=10"
+        tmp = d / ("tmp_" + DEMO_NAME)
+        r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "nullsrc=s=16x16:d=10",
+                            "-f", "lavfi", "-i", au, "-filter_complex", f"{vf}[v]", "-map", "[v]", "-map", "1:a",
+                            "-t", "10", "-c:v", "libx264", "-preset", "veryfast", "-crf", "24", "-c:a", "aac", "-b:a", "96k",
+                            "-movflags", "+faststart", tmp.name], cwd=d, capture_output=True, text=True, timeout=120)
+        if r.returncode or not tmp.is_file():
+            print("Không tạo được video mẫu:", (r.stderr or "")[-300:], flush=True)
+            tmp.unlink(missing_ok=True)
+            return None
+        tmp.replace(out)
+        return out
+    except (OSError, subprocess.SubprocessError) as e:
+        print("Không tạo được video mẫu:", e, flush=True)
+        return None
 
 
 # ---------------- render ----------------

@@ -14,8 +14,8 @@ uv run dytool fb-login                    # (cũ, 1 tài khoản) — giờ đă
 uv run dytool edit-file video.mp4         # edit thử 1 file theo config.yaml
 ```
 Tài liệu: `README.md` = giới thiệu cho người dùng (ảnh ở `docs/images/`, banner + sơ đồ vẽ bằng
-`scripts/make_readme_images.py`, ảnh trình cài = `/SNAPSHOT`, **không chụp app thật** — lộ tên kênh / video người
-dùng), `docs/DEVELOPMENT.md` = chạy từ mã nguồn / CLI / build, `CHANGELOG.md` = có gì mới — **mỗi bản phát hành thêm
+`scripts/make_readme_images.py`, ảnh trình cài = `/SNAPSHOT`, ảnh app `docs/images/app-*.png` chụp bằng **dữ liệu mẫu**
+`scripts/readme_demo.py` + `readme_shots.py` — **không chụp app thật**: lộ tên kênh / video người dùng), `docs/DEVELOPMENT.md` = chạy từ mã nguồn / CLI / build, `CHANGELOG.md` = có gì mới — **mỗi bản phát hành thêm
 1 mục ở đầu** (cùng nội dung ghi chú release GitHub).
 
 Windows: cách chính là **trình cài** `dist\dytool-Setup-<ver>.exe` (build: `installer\build.ps1`) → app desktop

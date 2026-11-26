@@ -8,7 +8,7 @@
 
 [![Phiên bản](https://img.shields.io/github/v/release/snopvsreal/dytool?label=phi%C3%AAn%20b%E1%BA%A3n&color=0f766e&style=flat-square)](https://github.com/snopvsreal/dytool/releases/latest) [![Lượt tải](https://img.shields.io/github/downloads/snopvsreal/dytool/total?label=l%C6%B0%E1%BB%A3t%20t%E1%BA%A3i&color=0f766e&style=flat-square)](https://github.com/snopvsreal/dytool/releases) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white)](#-cài-đặt) [![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](pyproject.toml) [![Cập nhật](https://img.shields.io/github/last-commit/snopvsreal/dytool?label=c%E1%BA%ADp%20nh%E1%BA%ADt&color=555&style=flat-square)](https://github.com/snopvsreal/dytool/commits/main)
 
-[**Tải bản mới nhất**](https://github.com/snopvsreal/dytool/releases/latest) · [Tính năng](#-tính-năng) · [Cài đặt](#-cài-đặt) · [Hướng dẫn nhanh](#-bắt-đầu-trong-5-phút) · [Có gì mới](CHANGELOG.md) · [Lập trình viên](docs/DEVELOPMENT.md)
+[**Tải bản mới nhất**](https://github.com/snopvsreal/dytool/releases/latest) · [Giao diện](#-giao-diện) · [Tính năng](#-tính-năng) · [Cài đặt](#-cài-đặt) · [Hướng dẫn nhanh](#-bắt-đầu-trong-5-phút) · [Có gì mới](CHANGELOG.md) · [Lập trình viên](docs/DEVELOPMENT.md)
 
 </div>
 
@@ -28,6 +28,34 @@ bạn chỉ còn là lướt qua và bấm **Duyệt**.
 - 🖥️ **App thật, không phải web** — cửa sổ riêng, thu xuống khay, chạy nền cả ngày.
 - 🔒 **Dữ liệu ở trên máy bạn** — model giọng nói, nhận dạng giọng, OCR đều chạy cục bộ; không cần API key.
 - 🇻🇳 **Làm cho người Việt** — giao diện, phụ đề, giọng đọc, hướng dẫn đều tiếng Việt; giờ đăng theo giờ Việt Nam.
+
+## 📸 Giao diện
+
+<p align="center">
+  <img src="docs/images/app-today.png" alt="Trang Hôm nay: video chờ duyệt, chờ edit, lịch hôm nay, kênh đang bật" width="100%">
+  <br><sub><b>Hôm nay</b> — video chờ duyệt, video chờ edit, lịch đăng hôm nay và các kênh, gọn trong 1 màn hình</sub>
+</p>
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/app-review.png" alt="Hộp duyệt video"></td>
+<td width="50%"><img src="docs/images/app-calendar.png" alt="Lịch đăng 7 ngày"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Duyệt</b> — xem video, sửa caption, chọn giờ đăng</sub></td>
+<td align="center"><sub><b>Lịch đăng</b> — 7 ngày × khung giờ mọi kênh, kéo thả để đổi giờ</sub></td>
+</tr>
+<tr>
+<td><img src="docs/images/app-channel.png" alt="Trang kênh"></td>
+<td><img src="docs/images/app-today-dark.png" alt="Chế độ tối"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Trang kênh</b> — video theo trạng thái, nhịp đăng, nguồn video</sub></td>
+<td align="center"><sub><b>Chế độ tối</b> — Sáng / Tối / Tự động theo Windows</sub></td>
+</tr>
+</table>
+
+<p align="center"><sub>Ảnh chụp với dữ liệu mẫu.</sub></p>
 
 ## 🚀 Tính năng
 

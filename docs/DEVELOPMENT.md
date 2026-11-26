@@ -70,7 +70,8 @@ powershell -ExecutionPolicy Bypass -File installer\build.ps1     # -> dist\dytoo
 ```
 
 Xem 4 màn hình trình cài mà không cần cài: `build\dytool-setup.exe /SNAPSHOT=<thư mục>` (chạy từ PowerShell).
-Ảnh README (`docs/images/banner.png`, `pipeline.png`): `uv run --no-sync python scripts/make_readme_images.py`.
+Ảnh README: banner + sơ đồ `uv run --no-sync python scripts/make_readme_images.py`; ảnh chụp app (dữ liệu mẫu, không lộ
+kênh thật) xem đầu file `scripts/readme_demo.py`.
 
 ## Phát hành bản mới
 

@@ -8,6 +8,17 @@ Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh h�
 
 ---
 
+## [0.5.0] — 2026-11-26
+
+**Mẫu edit kiểu CapCut cho từng kênh: intro / outro, chữ, logo, bộ lọc, nhạc — kéo thả**
+
+- ✨ **Mẫu edit của kênh** (Cài đặt kênh › Edit & lồng tiếng › **Mở trình Mẫu edit**): cửa sổ riêng bố cục kiểu CapCut — thư viện, trình phát, thuộc tính, dòng thời gian. Làm 1 lần, tự lưu vào kênh; mọi video kênh edit sau đó theo mẫu (áp sau bước che sub / phụ đề / lồng tiếng).
+- ✨ **Intro / outro bằng video bạn làm sẵn**: kéo video vào ô Intro / Outro (độ dài tự khớp, tối đa 30 s), giữ / tắt tiếng, vừa khung (cắt cho đầy, nền mờ, nền màu), 16 kiểu chuyển cảnh.
+- ✨ **Chữ & logo** kéo thả lên khung xem (8 kiểu chữ có sẵn, viền, hộp nền, hoạt ảnh, thời gian hiện), **bộ lọc** (9 kiểu) và **chỉnh màu** (sáng, tương phản, bão hoà, nhiệt độ màu, làm nét, hạt phim, tối 4 góc, phóng to chậm dần), **nhạc nền**, **thanh tiến độ**, **khung hình** 9:16 / 1:1 / 4:5 / 16:9, cắt đầu / cuối video bằng cách kéo mép trên dòng thời gian, tốc độ.
+- ✨ **Thả file từ máy** vào cửa sổ để thêm vào thư viện (video, ảnh, nhạc — dùng chung mọi kênh). Ctrl+Z / Ctrl+Y hoàn tác, Delete xoá, Ctrl+D nhân đôi lớp.
+- ✨ **Render thử** xuất bản thật bằng FFmpeg trên video xem thử: video đã edit / đã tải của kênh, video tải lên, hoặc **video mẫu dựng sẵn 9:16** (luôn có, kể cả khi app vừa cài). **Chép mẫu** sang kênh khác.
+- 🎨 Lật ngang / nghiêng / màu phủ của kênh chuyển vào trình Mẫu edit; trang Cài đặt kênh chỉ còn thẻ tóm tắt mẫu.
+
 ## [0.4.2] — 2026-11-26
 
 **App nhẹ hơn khi đang chạy tự động**

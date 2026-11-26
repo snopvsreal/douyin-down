@@ -8,6 +8,14 @@ Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh h�
 
 ---
 
+## [0.5.1] — 2026-11-27
+
+**Lồng tiếng không còn lỗi 500 khi card đồ hoạ trục trặc**
+
+- 🛠️ **Card đồ hoạ lỗi thì tự đọc bằng CPU**: driver NVIDIA cũ, card không hợp thư viện hay hết bộ nhớ card trước đây làm lồng tiếng báo "500 Internal Server Error". Giờ máy chủ giọng nói tự chuyển sang CPU và đọc lại đúng câu đó — video vẫn được lồng tiếng (chậm hơn). Hết bộ nhớ card thì dọn bộ nhớ, thử lại card 1 lần trước.
+- ✨ Trang **Giọng nói** báo khi đang chạy CPU vì card lỗi (kèm chi tiết kỹ thuật) và có nút **Thử lại card đồ hoạ** — bấm sau khi cập nhật driver.
+- 🛠️ Lỗi lồng tiếng chưa lường trước giờ hiện đúng tên lỗi thay cho chữ "Internal Server Error" chung chung.
+
 ## [0.5.0] — 2026-11-26
 
 **Mẫu edit kiểu CapCut cho từng kênh: intro / outro, chữ, logo, bộ lọc, nhạc — kéo thả**

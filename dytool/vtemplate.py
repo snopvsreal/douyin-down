@@ -220,7 +220,82 @@ def store_asset(data: Path, raw: bytes, filename: str) -> str:
     p = tdir(data) / "assets" / name
     if not p.exists():
         p.write_bytes(raw)
+    meta = _meta(data)
+    if name not in meta or filename:
+        meta[name] = {"label": (filename or name)[:80], "kind": asset_kind(name),
+                      "dur": round(_probe(p)["dur"], 2) if asset_kind(name) != "image" else 0.0,
+                      "added": int(time.time()), "hidden": False}
+        _meta_save(data, meta)
     return name
+
+
+def asset_kind(name: str) -> str:
+    ext = name.rsplit(".", 1)[-1].lower()
+    return "image" if ext in IMAGE_EXT else "video" if ext in VIDEO_EXT else "audio"
+
+
+def _meta(data: Path) -> dict:
+    try:
+        m = json.loads((tdir(data) / "assets.json").read_text("utf-8-sig"))
+        return m if isinstance(m, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _meta_save(data: Path, m: dict) -> None:
+    p = tdir(data) / "assets.json"
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(m, ensure_ascii=False, indent=1), "utf-8")
+    tmp.replace(p)
+
+
+def list_assets(data: Path) -> list[dict]:
+    """Thư viện file của trình Mẫu edit (mọi kênh dùng chung), mới nhất trước. File cũ chưa có tên thì bổ sung."""
+    meta, dirty = _meta(data), False
+    out = []
+    for p in (tdir(data) / "assets").iterdir():
+        if not ASSET_RE.fullmatch(p.name):
+            continue
+        m = meta.get(p.name)
+        if not m:
+            k = asset_kind(p.name)
+            m = meta[p.name] = {"label": p.name, "kind": k, "dur": round(_probe(p)["dur"], 2) if k != "image" else 0.0,
+                                "added": int(p.stat().st_mtime), "hidden": False}
+            dirty = True
+        if not m.get("hidden"):
+            out.append({"name": p.name, **{k: m.get(k) for k in ("label", "kind", "dur", "added")}})
+    if dirty:
+        _meta_save(data, meta)
+    return sorted(out, key=lambda x: -(x["added"] or 0))
+
+
+def hide_asset(data: Path, name: str) -> None:
+    """Xoá khỏi thư viện = chỉ ẩn (file vẫn giữ: mẫu của kênh khác có thể đang dùng)."""
+    meta = _meta(data)
+    if name in meta:
+        meta[name]["hidden"] = True
+        _meta_save(data, meta)
+
+
+def asset_thumb(data: Path, name: str) -> Path | None:
+    """Ảnh nhỏ cho thư viện: ảnh -> chính nó; video -> 1 khung JPG (tạo 1 lần ở templates/thumbs)."""
+    p = asset_path(data, name)
+    if not p:
+        return None
+    k = asset_kind(name)
+    if k == "image":
+        return p
+    if k != "video":
+        return None
+    out = tdir(data) / "thumbs" / (p.stem + ".jpg")
+    if not out.exists():
+        out.parent.mkdir(exist_ok=True)
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "0.5", "-i", str(p), "-frames:v", "1",
+                        "-vf", "scale=240:-2", str(out)], capture_output=True, timeout=30)
+        if not out.exists():
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(p), "-frames:v", "1",
+                            "-vf", "scale=240:-2", str(out)], capture_output=True, timeout=30)
+    return out if out.exists() else None
 
 
 # ---------------- render ----------------

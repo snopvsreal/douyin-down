@@ -143,16 +143,33 @@ def register(app, store, data: Path, render) -> None:
         if not raw or len(raw) > MAX_UPLOAD:
             return PlainTextResponse("File rỗng hoặc lớn hơn 200 MB", 400)
         try:
-            name = vt.store_asset(data, raw, f.filename or "")
+            from fastapi.concurrency import run_in_threadpool
+            name = await run_in_threadpool(vt.store_asset, data, raw, f.filename or "")
         except ValueError as e:
             return PlainTextResponse(str(e), 400)
-        ext = name.rsplit(".", 1)[1]
-        kind = "image" if ext in vt.IMAGE_EXT else "video" if ext in vt.VIDEO_EXT else "audio"
-        dur = 0.0
-        if kind != "image":        # video / nhạc: độ dài để intro / outro tự khớp
-            from fastapi.concurrency import run_in_threadpool
-            dur = (await run_in_threadpool(vt._probe, vt.asset_path(data, name)))["dur"]
-        return JSONResponse({"name": name, "kind": kind, "label": (f.filename or name)[:80], "dur": round(dur, 2)})
+        m = next((a for a in vt.list_assets(data) if a["name"] == name), None) or {}
+        return JSONResponse({"name": name, "kind": vt.asset_kind(name), "label": m.get("label") or name,
+                             "dur": m.get("dur") or 0.0})
+
+    @app.get("/tpl/assets")
+    def tpl_assets():
+        """Thư viện file (ảnh, video, nhạc đã tải lên) — dùng chung mọi kênh."""
+        return JSONResponse(vt.list_assets(data))
+
+    @app.post("/tpl/assets/{name}/hide")
+    def tpl_asset_hide(name: str):
+        if not vt.asset_path(data, name):
+            return PlainTextResponse("Không có file", 404)
+        vt.hide_asset(data, name)
+        return JSONResponse({"ok": True})
+
+    @app.get("/tpl/thumb/{name}")
+    def tpl_thumb(name: str):
+        p = vt.asset_thumb(data, name)
+        if not p:
+            return PlainTextResponse("", 404)
+        return FileResponse(p, media_type=MEDIA_TYPES.get(p.suffix[1:].lower(), "image/jpeg"),
+                            headers={"Cache-Control": "max-age=604800"})
 
     @app.get("/tpl/asset/{name}")
     def tpl_asset_get(name: str):

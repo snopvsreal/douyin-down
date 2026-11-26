@@ -12,3 +12,4 @@ dist/
 installer/build/
 instance.json
 tools/
+.playwright-mcp/

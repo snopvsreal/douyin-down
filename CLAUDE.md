@@ -13,6 +13,11 @@ uv run dytool douyin-login                # đăng nhập douyin.com -> lưu coo
 uv run dytool fb-login                    # (cũ, 1 tài khoản) — giờ đăng nhập FB qua giao diện, mỗi tài khoản 1 phiên
 uv run dytool edit-file video.mp4         # edit thử 1 file theo config.yaml
 ```
+Tài liệu: `README.md` = giới thiệu cho người dùng (ảnh ở `docs/images/`, banner + sơ đồ vẽ bằng
+`scripts/make_readme_images.py`, ảnh trình cài = `/SNAPSHOT`, **không chụp app thật** — lộ tên kênh / video người
+dùng), `docs/DEVELOPMENT.md` = chạy từ mã nguồn / CLI / build, `CHANGELOG.md` = có gì mới — **mỗi bản phát hành thêm
+1 mục ở đầu** (cùng nội dung ghi chú release GitHub).
+
 Windows: cách chính là **trình cài** `dist\dytool-Setup-<ver>.exe` (build: `installer\build.ps1`) → app desktop
 `C:\dytool\dytool.exe`. `install_windows.bat` là cách cũ (cần winget — Windows 10 LTSC không có; giữ **CRLF + chỉ
 ASCII** khi sửa vì Windows PowerShell 5.1 đọc file theo ANSI). Đừng chạy `run_ui.bat` song song với app desktop.

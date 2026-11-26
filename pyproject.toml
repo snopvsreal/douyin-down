@@ -1,7 +1,7 @@
 [project]
 name = "dytool"
 version = "0.4.0"
-description = "Tải video Douyin theo từ khóa/kênh, edit bằng FFmpeg, đăng lên Facebook Fanpage"
+description = "Douyin → edit → lồng tiếng Việt bằng AI → đăng theo lịch lên Facebook Page / TikTok"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "httpx>=0.27",

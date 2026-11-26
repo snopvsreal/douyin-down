@@ -1,105 +1,217 @@
-# dytool — Douyin → edit FFmpeg → Facebook Fanpage
+<div align="center">
 
-Quét kênh / từ khóa Douyin → tải video → edit (che sub Trung, lật, phủ màu) → dịch + phụ đề + **lồng tiếng Việt**
-(VoiceStudio, tự chọn giọng nam/nữ) → duyệt trên giao diện web → đăng / **lên lịch** Reels lên nhiều Page, nhiều tài khoản.
-Ghi chú cho lập trình viên / Claude: xem [CLAUDE.md](CLAUDE.md).
+<img src="docs/images/banner.png" alt="dytool — Douyin › edit › lồng tiếng Việt › Facebook / TikTok" width="100%">
 
-## Cài đặt trên Windows 10/11 — app dytool
+<br>
 
-1. Chạy **`dytool-Setup-<phiên bản>.exe`** (không cần quyền admin, mặc định cài vào `C:\dytool`).
-   Bước cuối tự tải thư viện (~4 GB: Python, torch, FFmpeg, backend Douyin, model AI, trình duyệt chống phát hiện
-   ShardX nhúng sẵn — không cần cài ShardBrowser riêng) — lần đầu 15–30 phút,
-   xem tiến độ ở cửa sổ màu xanh. Windows SmartScreen có thể cảnh báo vì file chưa ký số: bấm *More info → Run anyway*.
-2. Mở **dytool** (Desktop / Start Menu): app có cửa sổ riêng, không cần trình duyệt. Lần đầu vào **Cài đặt › AI**: bấm Cài và Đăng nhập 1 trong Claude / Codex / Gemini CLI
-   (không cần API key). VoiceStudio mở bằng nút **Mở** ở thanh trên cùng.
-3. **Đóng cửa sổ = thu xuống khay** (cạnh đồng hồ), tool vẫn chạy để edit / đăng theo lịch. Thoát hẳn: chuột phải
-   icon dytool ở khay → *Thoát dytool*.
-4. Lỗi thư viện / muốn cập nhật: Start Menu → **dytool - Cài đặt lại thư viện**. Cài bản mới: chạy file Setup mới
-   đè lên — dữ liệu (`data\`, `config.yaml`) được giữ. Gỡ cài đặt cũng giữ 2 mục này.
+**Biến video Douyin hot thành Reels tiếng Việt — tự tìm, tự edit, tự lồng tiếng, bạn chỉ việc duyệt.**
 
-Build file cài (lập trình viên): `powershell -ExecutionPolicy Bypass -File installer\build.ps1` → `dist\` (cần Inno Setup 7).
+[![Phiên bản](https://img.shields.io/github/v/release/snopvsreal/douyin-down?label=phi%C3%AAn%20b%E1%BA%A3n&color=0f766e&style=flat-square)](https://github.com/snopvsreal/douyin-down/releases/latest) [![Lượt tải](https://img.shields.io/github/downloads/snopvsreal/douyin-down/total?label=l%C6%B0%E1%BB%A3t%20t%E1%BA%A3i&color=0f766e&style=flat-square)](https://github.com/snopvsreal/douyin-down/releases) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white)](#-cài-đặt) [![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](pyproject.toml) [![Cập nhật](https://img.shields.io/github/last-commit/snopvsreal/douyin-down?label=c%E1%BA%ADp%20nh%E1%BA%ADt&color=555&style=flat-square)](https://github.com/snopvsreal/douyin-down/commits/main)
 
-### Cách cũ: chạy từ mã nguồn
+[**Tải bản mới nhất**](https://github.com/snopvsreal/douyin-down/releases/latest) · [Tính năng](#-tính-năng) · [Cài đặt](#-cài-đặt) · [Hướng dẫn nhanh](#-bắt-đầu-trong-5-phút) · [Có gì mới](CHANGELOG.md) · [Lập trình viên](docs/DEVELOPMENT.md)
 
-**Bấm đúp `install_windows.bat`.** File này tự làm hết: cài Git, uv (Python 3.12), FFmpeg bản full, thư viện Python,
-Chromium, backend tải Douyin, tải trước model AI (~1.5 GB), tạo `config.yaml` (hỏi Anthropic API key), cài VoiceStudio
-(hỏi trước), tạo shortcut **dytool** trên Desktop, hỏi đăng nhập Douyin và mở tool.
+</div>
 
-- Đặt trong thư mục dự án → cài tại chỗ.
-- Dùng riêng (chỉ copy mỗi file này sang máy mới) → tự đăng nhập GitHub và clone repo private về `%USERPROFILE%\douyin-down`.
-- Lỗi giữa chừng: sửa rồi chạy lại, các bước đã xong sẽ bỏ qua. Lần đầu mất khoảng 15–30 phút.
+---
 
-Cài từng bước (thay cho file trên): `powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1`.
+## ✨ dytool là gì?
 
-Sau khi cài:
+**dytool** là app Windows giúp bạn vận hành nhiều Page Facebook và kênh TikTok bằng video ngắn từ Douyin (TikTok
+Trung Quốc). Bạn gõ chủ đề bằng **tiếng Việt** — dytool tự dịch sang tiếng Trung, tìm video đang hot, tải bản nét
+nhất, edit cho khác bản gốc, dịch và **đọc lồng tiếng Việt bằng AI ngay trên máy bạn**, rồi xếp lịch đăng. Việc của
+bạn chỉ còn là lướt qua và bấm **Duyệt**.
 
-1. Mở **VoiceStudio** → Model Catalogue → chấp nhận license **OmniVoice** và **higgs-audio-v2-tokenizer**.
-2. Dịch / lồng tiếng dùng AI qua CLI (không cần API key): **Cài đặt › AI** → Cài + Đăng nhập Claude, Codex hoặc Gemini CLI.
-3. Cookie Douyin hết hạn → nút **Đăng nhập Douyin** trên giao diện (hoặc `uv run dytool douyin-login`).
-4. Mở tool: shortcut **dytool** trên Desktop (= `scripts\run_ui.bat`) → http://127.0.0.1:8000. **Đóng cửa sổ đen = tắt tool.**
-   Tự chạy khi bật máy: tạo shortcut của `run_ui.bat` trong thư mục `shell:startup`.
-5. Trên giao diện: **Tài khoản & Page** → thêm tài khoản → *Đăng nhập Facebook* → bật Page → thêm nguồn.
+<p align="center">
+  <img src="docs/images/pipeline.png" alt="Quét › Tải › Edit › Lồng tiếng › Duyệt › Đăng" width="100%">
+</p>
 
-## Cài đặt trên macOS (Apple Silicon)
+- 🖥️ **App thật, không phải web** — cửa sổ riêng, thu xuống khay, chạy nền cả ngày.
+- 🔒 **Dữ liệu ở trên máy bạn** — model giọng nói, nhận dạng giọng, OCR đều chạy cục bộ; không cần API key.
+- 🇻🇳 **Làm cho người Việt** — giao diện, phụ đề, giọng đọc, hướng dẫn đều tiếng Việt; giờ đăng theo giờ Việt Nam.
 
-```bash
-brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg uv   # ffmpeg có libass để vẽ phụ đề
-uv sync --python 3.12 && uv run playwright install chromium
-cp config.example.yaml config.yaml
-```
+## 🚀 Tính năng
 
-## Cấu hình `config.yaml`
+<table>
+<tr>
+<td width="50%" valign="top">
 
-1. **Cookie Douyin**: `uv run dytool douyin-login` (mọi hệ điều hành) hoặc trên macOS `uv run dytool cookie`
-   (đọc từ Chrome đã đăng nhập).
-2. **Kênh / từ khóa**: thêm link `https://www.douyin.com/user/<sec_uid>` vào `douyin.channels`, từ khóa (tiếng Trung) vào `douyin.keywords`.
-3. **Dịch phụ đề**: dùng AI chọn ở Cài đặt › AI (Claude / Codex / Gemini CLI đăng nhập bằng tài khoản; Google Translate miễn phí hay bị chặn).
-4. **Facebook**: `facebook.page_id` + `facebook.page_token` (Page Access Token có quyền `pages_manage_posts`, `pages_read_engagement`). Kiểm tra: `uv run dytool fb-check`.
+### 🔎 Tìm video hot trên Douyin
+- Gõ **từ khoá tiếng Việt**, AI viết cụm tìm kiếm người Trung hay gõ (xem trước, đổi cụm khác)
+- Theo dõi **kênh Douyin** — lấy mọi video của kênh
+- Thêm hàng loạt nguồn: mỗi dòng 1 từ khoá / 1 link
+- Lọc theo lượt like, độ dài; video bị lọc **ghi rõ lý do**
+- **Xem video gốc trước khi tải** — ưng thì bấm *Edit ngay*
+- Douyin đòi captcha → cửa sổ nổi **dịch câu hỏi sang tiếng Việt** + hướng dẫn từng bước
 
-## Giao diện web (nhiều tài khoản / nhiều Page)
+</td>
+<td width="50%" valign="top">
 
-```bash
-uv run dytool ui            # mở http://127.0.0.1:8000   (--lan để mở từ điện thoại cùng wifi)
-uv run dytool ui --autostart   # mở giao diện và tự bật chạy tự động
+### 🎬 Edit tự động bằng FFmpeg
+- **Che phụ đề tiếng Trung** — tự dò dải chữ bằng OCR, làm mờ dần mép
+- Lật ngang, nghiêng nhẹ, phủ màu, thu về ≤ 1080p
+- **Phụ đề Việt kiểu video ngắn**: chữ đậm viền đen, tự ngắt dòng không cắt đôi từ ghép
+- Chữ Be Vietnam Pro — font do người Việt thiết kế
+- Mỗi kênh 1 mẫu edit riêng
+- Edit thử 1 file bất kỳ trên máy
 
-# chạy nền, không phụ thuộc cửa sổ Terminal / app nào (log ở data/ui.log):
-nohup caffeinate -i uv run dytool ui --autostart > data/ui.log 2>&1 &
-```
+</td>
+</tr>
+<tr>
+<td valign="top">
 
-1. **Tài khoản & kênh** → thêm tài khoản Facebook → *Đăng nhập* (dytool tự tạo hồ sơ trình duyệt riêng cho tài
-   khoản — nhân ShardX nhúng sẵn, dấu vân tay riêng — mở ra, bạn tự đăng nhập) → tool tự tìm các Page.
-2. Bấm **Cài đặt** ở Page muốn dùng → thêm nguồn (từ khóa / kênh Douyin), chỉnh mẫu edit, giọng, caption, giới hạn đăng → tick *Bật Page này*.
-3. **Tổng quan** → *Bật* backend tải Douyin, mở app VoiceStudio → *Bật chạy tự động*.
-4. **Duyệt video** → xem video đã edit, sửa caption → *Duyệt* (đăng theo lịch) hoặc *Đăng ngay*.
-5. **Tiến trình** → xem từng video đang ở bước nào, lỗi gì, *Thử lại*.
+### 🎙️ Lồng tiếng Việt bằng AI
+- **Demucs** tách giọng khỏi nhạc nền, **Whisper** nghe lời
+- AI (Claude / Codex / Gemini) dịch **vừa khít thời lượng** câu gốc
+- **OmniVoice** đọc giọng tiếng Việt — nhận ra **nam / nữ** từng lượt nói
+- Nhân bản giọng từ file mẫu hoặc thiết kế giọng bằng mô tả
+- Từ điển phát âm, ngắt nghỉ đo từ video đọc thật
+- Thêm: đọc hàng loạt, lồng tiếng video bất kỳ, giọng → chữ (.srt), ~600 ngôn ngữ
 
-Dữ liệu: `data/app.db`; phiên Facebook từng tài khoản: `data/accounts/<id>/`.
+</td>
+<td valign="top">
 
-## Chạy bằng dòng lệnh
+### 📅 Duyệt & đăng theo lịch
+- **Hộp duyệt**: xem video, sửa caption, đổi giờ, *Giữ lại* / *Bỏ* — có **Hoàn tác**
+- **Lịch đăng 7 ngày** kéo thả, nút *Tự xếp* theo khung giờ từng kênh
+- Đăng **Reels Facebook** qua Meta Business Suite, **TikTok** qua TikTok Studio
+- Hẹn giờ, giới hạn bài / ngày, **đăng kèm** Page FB → kênh TikTok cùng giờ
+- Tự lấy **link bài đã đăng**, báo đúng lý do nếu bài không lên
+- Không bao giờ đăng trùng 1 video
 
-Cửa sổ 1 — backend tải Douyin (lần đầu tự clone TikTokDownloader vào `vendor/`):
+</td>
+</tr>
+<tr>
+<td valign="top">
 
-```bash
-uv run dytool server
-```
+### 👥 Nhiều tài khoản, an toàn
+- Mỗi tài khoản 1 **hồ sơ trình duyệt riêng** (nhân ShardX, dấu vân tay riêng)
+- Quản lý hồ sơ: proxy, WebRTC, cookie, tiện ích, bookmark, thùng rác 30 ngày
+- **Tự gắn proxy tĩnh** khác nhau cho mỗi tài khoản mới
+- **Proxy xoay**: Proxy.vn, TMProxy, KiotProxy, link API bất kỳ — nút *Đổi IP*
+- Bạn tự đăng nhập trong cửa sổ mở ra — dytool không giữ mật khẩu
 
-Cửa sổ 2:
+</td>
+<td valign="top">
 
-```bash
-uv run dytool edit-file video.mp4      # edit thử 1 file để duyệt mẫu
-uv run dytool run --no-post            # 1 lượt: quét + tải + edit, chưa đăng
-uv run dytool watch                    # chạy liên tục, tự bắt video mới và đăng theo lịch
-uv run dytool status                   # thống kê
-```
+### 🧘 Giao diện "bàn làm việc yên tĩnh"
+- Trang **Hôm nay** vừa 1 màn hình: video chờ duyệt, chờ edit, lịch hôm nay, kênh
+- Bấm ảnh kênh để bật / tắt, thanh trạng thái dịch vụ dưới đáy
+- **Chạy tự động** 1 công tắc — xem việc đang làm & tiếp theo, nút *Dừng*
+- Sáng / Tối / Tự động, cập nhật trực tiếp không cần tải lại trang
+- **Tự cập nhật trong app** (kiểm tra mã SHA256)
 
-## Mẫu edit (`edit:` trong config)
+</td>
+</tr>
+</table>
 
-| Bước | Tham số |
+## 📦 Cài đặt
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/installer-welcome.png" alt="Trình cài: liệt kê từng thứ sẽ tải"></td>
+<td width="50%"><img src="docs/images/installer-progress.png" alt="Trình cài: tiến độ từng bước"></td>
+</tr>
+<tr>
+<td align="center"><sub>Biết trước sẽ tải gì, bao nhiêu, từ đâu</sub></td>
+<td align="center"><sub>Thấy rõ từng bước, file, tốc độ tải</sub></td>
+</tr>
+</table>
+
+1. Tải **[`dytool-Setup-<phiên bản>.exe`](https://github.com/snopvsreal/douyin-down/releases/latest)** và chạy —
+   không cần quyền admin, cài vào `C:\dytool`.
+   > Windows SmartScreen có thể cảnh báo vì file chưa ký số: bấm **More info → Run anyway**.
+2. Trình cài tự tải Python, thư viện AI, FFmpeg, trình duyệt ShardX, bộ tải Douyin và model giọng nói.
+   Lần đầu mất **15–30 phút** (cần mạng ổn định); thứ máy đã có thì bỏ qua.
+3. Mở **dytool** từ Desktop / Start Menu. Màn hình khởi động tự bật sẵn bộ tải Douyin và máy chủ giọng nói.
+
+**Cấu hình gợi ý**
+
+| | Tối thiểu | Khuyên dùng |
+|---|---|---|
+| Hệ điều hành | Windows 10 64-bit (cả bản LTSC) | Windows 11 |
+| RAM | 8 GB | 16 GB |
+| Card đồ hoạ | Không bắt buộc (chạy CPU) | NVIDIA GTX 10xx trở lên, 4 GB VRAM — tách giọng nhanh ~3× |
+| Ổ đĩa trống | ~12 GB | SSD |
+
+**Cập nhật:** app tự báo khi có bản mới — bấm **Cập nhật** (Cài đặt › Cập nhật). Cài đè hay gỡ cài đều **giữ nguyên**
+dữ liệu (`data\`, `config.yaml`). Lỗi thư viện: Start Menu › **dytool - Cài đặt lại thư viện**.
+
+## ⚡ Bắt đầu trong 5 phút
+
+1. **Cài đặt › AI** — bấm *Cài* rồi *Đăng nhập* 1 trong Claude / Codex / Gemini CLI (đăng nhập bằng tài khoản, không
+   cần API key). AI dùng để dịch phụ đề, lồng tiếng và từ khoá.
+2. **Cài đặt › Douyin** — *Đăng nhập Douyin* trong cửa sổ mở ra.
+3. **Tài khoản** — thêm tài khoản Facebook hoặc TikTok → *Đăng nhập*. dytool tự tạo hồ sơ trình duyệt riêng và tự tìm
+   các Page của bạn.
+4. Bấm vào tên **kênh** ở menu trái → **Cài đặt kênh**: thêm nguồn (từ khoá tiếng Việt hoặc link kênh Douyin), chọn
+   mẫu edit, giọng đọc, khung giờ đăng, rồi bật kênh.
+5. Bật **Chạy tự động** ở cuối menu. Video edit xong hiện ở trang **Hôm nay** — duyệt là xong.
+
+> [!TIP]
+> Đóng cửa sổ = thu xuống khay (cạnh đồng hồ), dytool vẫn edit và đăng theo lịch. Thoát hẳn: chuột phải icon ở khay →
+> **Thoát dytool**.
+
+## ❓ Câu hỏi thường gặp
+
+<details>
+<summary><b>Có cần API key hay trả phí dịch vụ nào không?</b></summary>
+
+Không. AI dịch dùng CLI của Claude / Codex / Gemini đăng nhập bằng tài khoản của bạn. Giọng nói (OmniVoice), nhận
+dạng giọng (Whisper), đọc chữ trên video (RapidOCR) và tách giọng (Demucs) đều chạy ngay trên máy.
+</details>
+
+<details>
+<summary><b>Douyin báo captcha thì làm sao?</b></summary>
+
+dytool tự nhận ra, tạm ngừng tìm kiếm (tải / edit vẫn chạy) và mở cửa sổ douyin.com cùng một cửa sổ nhỏ dịch câu hỏi
+captcha sang tiếng Việt kèm cách làm. Bạn tự giải rồi bấm **Đã giải xong**. dytool không tự giải captcha.
+</details>
+
+<details>
+<summary><b>dytool có tự đăng bài khi tôi chưa duyệt không?</b></summary>
+
+Mặc định mọi video phải qua hộp duyệt. Bạn có thể bật *Tự đăng, không duyệt* cho từng kênh — video đó vẫn hiện nhãn
+**Tự duyệt** để bạn đổi giờ / giữ lại trước khi gửi lên nền tảng. Bài đăng lỗi giữa chừng **không bao giờ tự đăng
+lại**, tránh trùng bài.
+</details>
+
+<details>
+<summary><b>Máy không có card NVIDIA có chạy được không?</b></summary>
+
+Được. Trình cài tự chọn bản CPU; chỉ chậm hơn ở bước tách giọng và đọc lồng tiếng. Máy có card NVIDIA (GTX 10xx trở
+lên) được cài bản GPU tự động.
+</details>
+
+<details>
+<summary><b>Có chạy trên macOS không?</b></summary>
+
+App desktop và trình cài chỉ dành cho Windows. Trên macOS (Apple Silicon) có thể chạy từ mã nguồn với giao diện web —
+xem [hướng dẫn cho lập trình viên](docs/DEVELOPMENT.md).
+</details>
+
+## 🧩 Dựng trên các dự án mã nguồn mở
+
+| Thành phần | Dự án |
 |---|---|
-| Che sub Trung | `hide_hardsub` — làm mờ dải ngang `y_from`→`y_to` (% chiều cao) |
-| Lật ngang | `hflip: true` |
-| Nghiêng | `rotate_deg: 1` — tự phóng to để không lộ góc đen |
-| Phủ màu | `tint.color: 0x0066FF`, `tint.opacity: 0.12` |
-| Sub Việt | Whisper nhận dạng giọng Trung → dịch → vẽ phụ đề nền mờ |
+| Tải Douyin | [JoeanAmier/TikTokDownloader](https://github.com/JoeanAmier/TikTokDownloader) (GPL-3.0) |
+| Giọng nói | [k2-fsa/OmniVoice](https://github.com/k2-fsa/OmniVoice) (Apache-2.0) |
+| Nghe lời | [SYSTRAN/faster-whisper](https://github.com/SYSTRAN/faster-whisper) (MIT) |
+| Tách giọng | [facebookresearch/demucs](https://github.com/facebookresearch/demucs) (MIT) |
+| Đọc phụ đề trên video | [RapidAI/RapidOCR](https://github.com/RapidAI/RapidOCR) (Apache-2.0) |
+| Nhận giọng nam / nữ | [JaesungHuh/voice-gender-classifier](https://github.com/JaesungHuh/voice-gender-classifier) (MIT) |
+| Trình duyệt | [ProxyShard/ShardBrowser](https://github.com/ProxyShard/ShardBrowser) — SDK ShardX (MIT) |
+| Đăng TikTok | [wkaisertexas/tiktok-uploader](https://github.com/wkaisertexas/tiktok-uploader) (MIT) |
+| Edit video | [FFmpeg](https://ffmpeg.org) |
+| Giao diện | [FastAPI](https://github.com/fastapi/fastapi), [htmx](https://github.com/bigskysoftware/htmx), [pywebview](https://github.com/r0x0r/pywebview) |
+| Font chữ | [Be Vietnam Pro](https://github.com/bettergui/BeVietnamPro) (OFL) |
+| Từ điển từ ghép | [vntk/dictionary](https://github.com/vntk/dictionary) (MIT) |
 
-Video: `data/raw` (gốc), `data/edited` (đã edit). Trạng thái: `data/dytool.db`.
+## ⚠️ Lưu ý sử dụng
+
+dytool là công cụ hỗ trợ. Bạn tự chịu trách nhiệm về bản quyền nội dung đăng lại và việc tuân thủ điều khoản của
+Douyin, Facebook, TikTok. Hãy ghi nguồn, biên tập nội dung có giá trị riêng và đăng ở nhịp vừa phải.
+
+<div align="center">
+<br>
+<sub>Làm tại Việt Nam 🇻🇳 · <a href="CHANGELOG.md">Có gì mới</a> · <a href="https://github.com/snopvsreal/douyin-down/issues">Báo lỗi / góp ý</a></sub>
+</div>

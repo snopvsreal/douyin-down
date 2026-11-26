@@ -40,7 +40,12 @@ Dịch vụ ngoài phải đang chạy:
   **stdin là dây sống** (`stdin=PIPE`, tắt = đóng stdin): Windows **không đọc chặn stdin** — 1 ReadFile đang chờ trên ống
   chặn mọi thao tác khác trên ống đó (GetFileType lúc import torch) → nạp model kẹt mãi; dùng `PeekNamedPipe` mỗi giây,
   ERROR_BROKEN_PIPE = dytool đã chết → `os._exit`. GPU fp16 ~2,2 GB VRAM (GTX 1050 Ti: thiết kế 6 s, nhân bản 14 s cho
-  câu 3,6 s — **bằng đúng VoiceStudio** trên cùng card); `empty_cache` sau mỗi lần đọc để Demucs còn VRAM. Đừng chạy 2
+  câu 3,6 s — **bằng đúng VoiceStudio** trên cùng card); `empty_cache` sau mỗi lần đọc để Demucs còn VRAM.
+  **Card lỗi → tự chạy CPU** (2026-11-27, máy khác của người dùng báo lồng tiếng lỗi 500): lỗi CUDA lúc nạp / đọc
+  (`_is_cuda_error`) → `Engine.fall_back_to_cpu` nạp lại fp32 trên CPU rồi đọc lại câu đó; hết VRAM thì dọn bộ đệm thử
+  GPU 1 lần trước, và chỉ CPU tới hết phiên; lỗi khác (driver cũ, card không hợp torch) nhớ `settings.json`
+  `cpu_fallback` 24 giờ. Trang Giọng nói: cảnh báo + nút **Thử lại card đồ hoạ** (`/model/use-gpu`). Lỗi chưa lường
+  trước trả `{"detail": "TênLỗi: …"}` (handler `Exception`) thay cho "Internal Server Error" trơn. Đừng chạy 2
   tiến trình model cùng lúc: card 4 GB tràn sang RAM chung → chậm 8× (đo 108 s / câu). **Model** (`voice_model.py`):
   ghim `k2-fsa/OmniVoice@c5fdb5c` (bản còn `audio_tokenizer/` bên trong), mỗi file khớp SHA256 (LFS) / blob git SHA1,
   về `data/models/omnivoice` (3,3 GB); máy có app VoiceStudio đã tải đúng bản → **liên kết cứng** (không tốn ổ, không

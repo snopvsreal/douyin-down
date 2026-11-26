@@ -97,7 +97,49 @@ class Engine:
         self.error = ""
         self.lock = threading.Lock()   # 1 lần đọc / nạp tại 1 thời điểm
         self.on_cpu = False            # đã chuyển sang RAM (offload) — lần đọc sau đưa lại lên GPU
+        self.force_cpu = False         # card đồ hoạ lỗi -> chạy CPU tới hết phiên này
+        self.fallback = ""             # lý do đang chạy CPU thay cho GPU ("" = không)
         self._prompts: dict[str, object] = {}
+
+    def _pick_device(self) -> str:
+        import torch
+        if self.force_cpu or not torch.cuda.is_available():
+            return "cpu"
+        fb = _settings().get("cpu_fallback") or {}
+        if fb and time.time() - float(fb.get("at") or 0) < FALLBACK_HOURS * 3600:
+            self.force_cpu, self.fallback = True, str(fb.get("reason") or "card đồ hoạ lỗi lần trước")
+            return "cpu"
+        return "cuda"
+
+    def fall_back_to_cpu(self, e: Exception) -> None:
+        """Card đồ hoạ lỗi (driver cũ, card không hợp torch, hết VRAM…) -> bỏ model trên GPU, lần nạp sau chạy CPU
+        (chậm hơn nhưng lồng tiếng vẫn chạy). Lỗi không phải hết VRAM thì nhớ FALLBACK_HOURS giờ (khởi động lại máy
+        chủ không phải thử GPU hỏng lần nữa); nút 'Thử lại card đồ hoạ' ở trang Giọng nói xoá dấu này."""
+        reason = f"{type(e).__name__}: {e}".strip()[:300]
+        print(f"Card đồ hoạ lỗi -> chuyển sang CPU: {reason}", flush=True)
+        self.force_cpu, self.fallback = True, reason
+        if not _is_oom(e):
+            with _db_lock:
+                s = _settings()
+                s["cpu_fallback"] = {"reason": reason, "at": time.time()}
+                _save("settings.json", s)
+        self.model, self.on_cpu, self.device = None, False, "cpu"
+        self._prompts.clear()
+        gc.collect()
+        try:
+            import torch
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+    def use_gpu_again(self) -> None:
+        """Xoá dấu chạy CPU; lần nạp sau thử lại GPU (gọi trong self.lock)."""
+        with _db_lock:
+            s = _settings()
+            if s.pop("cpu_fallback", None) is not None:
+                _save("settings.json", s)
+        self.force_cpu, self.fallback = False, ""
+        self.unload()
 
     def start_loading(self) -> None:
         if self.state in ("loading", "loaded"):
@@ -121,18 +163,27 @@ class Engine:
             self.state = "loaded"
             return
         self.state = "loading"
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = self._pick_device()
         self.detail = "Đang kiểm tra file model…"
         path = voice_model.ensure()
-        self.detail = "Đang nạp model vào card đồ hoạ…" if self.device == "cuda" else "Đang nạp model (CPU — chậm)…"
         from omnivoice.models.omnivoice import OmniVoice
-        # fp16 trên GPU (nửa VRAM: ~2 GB, vừa card 4 GB); CPU không có phép nhân fp16 nhanh -> fp32
-        dtype = torch.float16 if self.device == "cuda" else torch.float32
         t = time.time()
-        self.model = OmniVoice.from_pretrained(str(path), device_map=self.device, dtype=dtype)
+        while True:
+            self.detail = ("Đang nạp model vào card đồ hoạ…" if self.device == "cuda"
+                           else "Đang nạp model (CPU — chậm)…")
+            # fp16 trên GPU (nửa VRAM: ~2 GB, vừa card 4 GB); CPU không có phép nhân fp16 nhanh -> fp32
+            dtype = torch.float16 if self.device == "cuda" else torch.float32
+            try:
+                self.model = OmniVoice.from_pretrained(str(path), device_map=self.device, dtype=dtype)
+                break
+            except Exception as e:
+                if self.device != "cuda" or not _is_cuda_error(e):
+                    raise
+                self.fall_back_to_cpu(e)          # nạp lên card lỗi -> nạp lại trên CPU
         self.on_cpu = False
         self.state, self.detail = "loaded", ""
-        print(f"Đã nạp OmniVoice trên {self.device} ({time.time() - t:.0f} s)", flush=True)
+        print(f"Đã nạp OmniVoice trên {self.device} ({time.time() - t:.0f} s)"
+              + (f" — chạy CPU vì card đồ hoạ lỗi: {self.fallback}" if self.fallback else ""), flush=True)
 
     def ensure(self):
         """Model sẵn sàng trên thiết bị đọc (gọi trong self.lock). Trả model."""
@@ -197,6 +248,21 @@ class Engine:
 
     def forget(self, pid: str) -> None:
         self._prompts.pop(pid, None)
+
+
+FALLBACK_HOURS = 24          # card lỗi (không phải hết VRAM) -> chạy CPU bấy nhiêu giờ rồi mới thử lại GPU
+
+_CUDA_WORDS = ("cuda", "cudnn", "cublas", "cufft", "curand", "nvrtc", "out of memory", "no kernel image",
+               "acceleratorerror", "nvidia driver", "device-side assert")
+
+
+def _is_cuda_error(e: BaseException) -> bool:
+    s = f"{type(e).__name__} {e}".lower()
+    return any(w in s for w in _CUDA_WORDS)
+
+
+def _is_oom(e: BaseException) -> bool:
+    return "out of memory" in f"{type(e).__name__} {e}".lower()
 
 
 ENGINE = Engine()
@@ -278,7 +344,10 @@ def synthesize(text: str, *, language: str | None = "vi", profile: dict | None =
     seed = int(seed) if seed is not None else random.randint(0, 2 ** 31 - 1)
     gen = {k: v for k, v in (gen or {}).items() if v is not None}
     t0 = time.time()
-    with ENGINE.lock:
+    speech_chars = sum(len(p[0].strip()) for p in parts) or 1
+    pause_s = sum(p[1] for p in parts) / 1000
+
+    def run() -> list:
         model = ENGINE.ensure()
         kw: dict = {"language": _lang(language)}
         if profile is not None:
@@ -288,25 +357,50 @@ def synthesize(text: str, *, language: str | None = "vi", profile: dict | None =
                                                                        ref_text=ref_text or None)
         elif instruct:
             kw["instruct"] = instruct
-        speech_chars = sum(len(p[0].strip()) for p in parts) or 1
-        pause_s = sum(p[1] for p in parts) / 1000
         out = []
-        try:
-            for chunk, pause_ms in parts:
-                if chunk.strip():
-                    _seed_all(seed)
-                    d = None
-                    if duration:
-                        d = max(0.3, (float(duration) - pause_s) * len(chunk.strip()) / speech_chars)
-                    audio = model.generate(text=chunk.strip(), duration=d, speed=None if d else speed,
-                                           **kw, **gen)[0]
-                    out.append(np.asarray(audio, dtype=np.float32))
-                if pause_ms:
-                    out.append(np.zeros(int(SR * pause_ms / 1000), dtype=np.float32))
-        except ValueError as e:              # mô tả giọng sai từ khoá, ngôn ngữ lạ…
-            raise ApiError(400, str(e)) from e
-        finally:
-            ENGINE.after_generate()
+        for chunk, pause_ms in parts:
+            if chunk.strip():
+                _seed_all(seed)
+                d = None
+                if duration:
+                    d = max(0.3, (float(duration) - pause_s) * len(chunk.strip()) / speech_chars)
+                audio = model.generate(text=chunk.strip(), duration=d, speed=None if d else speed,
+                                       **kw, **gen)[0]
+                out.append(np.asarray(audio, dtype=np.float32))
+            if pause_ms:
+                out.append(np.zeros(int(SR * pause_ms / 1000), dtype=np.float32))
+        return out
+
+    with ENGINE.lock:
+        retried_oom = False
+        while True:
+            try:
+                out = run()
+                break
+            except ApiError:
+                raise
+            except ValueError as e:              # mô tả giọng sai từ khoá, ngôn ngữ lạ…
+                raise ApiError(400, str(e)) from e
+            except Exception as e:
+                # card đồ hoạ lỗi -> hết VRAM thì dọn bộ nhớ đệm thử GPU thêm 1 lần, còn lại chuyển CPU rồi đọc lại
+                if ENGINE.device != "cuda" or not _is_cuda_error(e):
+                    raise
+                if _is_oom(e) and not retried_oom:
+                    retried_oom = True
+                    print(f"Hết VRAM, dọn bộ nhớ rồi thử lại: {e}", flush=True)
+                    gc.collect()
+                    try:
+                        import torch
+                        torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+                    continue
+                ENGINE.fall_back_to_cpu(e)
+            finally:
+                try:
+                    ENGINE.after_generate()
+                except Exception as e:           # card hỏng ngay lúc dọn -> lần đọc sau tự chuyển CPU
+                    print(f"Dọn VRAM sau khi đọc lỗi: {e}", flush=True)
     audio = np.concatenate(out) if out else np.zeros(1, dtype=np.float32)
     return audio, seed, time.time() - t0
 
@@ -460,6 +554,18 @@ def build_app():
     async def _api_err(_req, e: ApiError):
         return JSONResponse({"detail": str(e)}, status_code=e.status)
 
+    @app.exception_handler(Exception)
+    async def _any_err(_req, e: Exception):
+        # lỗi chưa lường trước (CUDA, thiếu file, nạp model…) -> trả đúng tên lỗi thay cho "Internal Server Error"
+        # trơn để dytool hiện ra; Starlette vẫn ghi traceback đầy đủ vào data/voicestudio.log
+        msg = f"{type(e).__name__}: {e}".strip()
+        low = msg.lower()
+        if "out of memory" in low:
+            msg += " — card đồ hoạ hết VRAM: đóng app khác dùng GPU / bật 'chuyển model sang RAM' rồi thử lại"
+        elif "no kernel image" in low or "not compatible with the current pytorch" in low:
+            msg += " — card đồ hoạ này không hợp bản torch đã cài: chạy 'Cài đặt lại thư viện' (DYTOOL_TORCH=cpu để dùng CPU)"
+        return JSONResponse({"detail": msg[:1000]}, status_code=500)
+
     @app.middleware("http")
     async def _guard(request: Request, call_next):
         # chỉ nhận yêu cầu từ chính máy này (không có đăng nhập) — chặn trang web lạ gọi qua trình duyệt
@@ -475,8 +581,24 @@ def build_app():
     @app.get("/health")
     def health():
         import torch
-        return {"status": "ok", "version": VERSION,
-                "device": (torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU")}
+        try:
+            dev = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+        except Exception:                    # driver hỏng: /health vẫn phải trả lời, không thì dytool tưởng máy chủ tắt
+            dev = "CPU"
+        if ENGINE.fallback:
+            dev = f"CPU (card {dev} lỗi)" if dev != "CPU" else "CPU (card đồ hoạ lỗi)"
+        return {"status": "ok", "version": VERSION, "device": dev}
+
+    @app.post("/model/use-gpu")
+    def use_gpu():
+        if not ENGINE.lock.acquire(timeout=5):
+            raise ApiError(409, "Đang đọc — đợi đọc xong rồi thử lại")
+        try:
+            ENGINE.use_gpu_again()
+        finally:
+            ENGINE.lock.release()
+        ENGINE.start_loading()
+        return {"ok": True}
 
     @app.get("/model/status")
     def model_status():
@@ -490,7 +612,8 @@ def build_app():
             detail = f"Đang tải model giọng nói ({s.get('done', 0) / 1e9:.1f} / {s.get('total', 0) / 1e9:.1f} GB)…"
         return {"loaded": ENGINE.state == "loaded", "state": ENGINE.state, "progress": prog,
                 "detail": ENGINE.error or detail, "error": ENGINE.error, "on_cpu": ENGINE.on_cpu,
-                "checkpoint": f"{voice_model.REPO}@{voice_model.REVISION[:7]}", "device": ENGINE.device}
+                "checkpoint": f"{voice_model.REPO}@{voice_model.REVISION[:7]}", "device": ENGINE.device,
+                "fallback": ENGINE.fallback}
 
     @app.get("/startup/progress")
     def startup_progress():

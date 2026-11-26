@@ -19,11 +19,17 @@
           <progress max="{{ dl.total or 1 }}" value="{{ dl.done or 0 }}" style="display:block; width:100%; margin-top:6px"></progress>
           {% elif dl.phase == 'error' %}{{ dl.error }}{% else %}Lồng tiếng cần model OmniVoice (3,3 GB, tải 1 lần từ Hugging Face, kiểm tra mã băm; máy có VoiceStudio thì dùng lại model của nó).{% endif %}
         {% else %}Tool tự bật khi có video cần lồng tiếng. Bấm Bật nếu muốn dùng ngay.{% endif %}</p>
+      {% if st == 'ok' and m.get('fallback') %}
+      <p class="hint" style="margin-top:6px; color:var(--warn)">Card đồ hoạ lỗi nên đang đọc bằng CPU (chậm hơn nhiều lần, lồng tiếng vẫn chạy).
+        Thường do driver NVIDIA cũ — cập nhật driver rồi bấm Thử lại card đồ hoạ.</p>
+      <details style="margin-top:4px"><summary class="hint">Chi tiết kỹ thuật</summary><code style="font-size:12px; word-break:break-all">{{ m.fallback }}</code></details>
+      {% endif %}
     </div>
     <div class="vs-actions">
       {% if st == 'off' %}
         <button class="btn primary" hx-post="/voicestudio/start" hx-swap="none" hx-disabled-elt="this">Bật</button>
       {% elif st in ('ok', 'starting') %}
+        {% if m.get('fallback') %}<button class="btn primary" hx-post="/voicestudio/use-gpu" hx-swap="none" hx-disabled-elt="this">Thử lại card đồ hoạ</button>{% endif %}
         <button class="btn" hx-post="/voicestudio/restart" hx-swap="none" hx-disabled-elt="this"
                 hx-confirm="Khởi động lại máy chủ giọng nói? Mất khoảng 30 giây để nạp lại model.">Khởi động lại</button>
         <button class="btn" hx-post="/voicestudio/stop" hx-swap="none" hx-disabled-elt="this">Tắt</button>

@@ -403,6 +403,11 @@ def set_offload(cfg: dict, on: bool) -> None:
     _call(cfg, "PUT", "/api/settings/perf/offload-after-generation", json={"enabled": bool(on)})
 
 
+def use_gpu(cfg: dict) -> None:
+    """Bỏ chế độ dự phòng CPU (card đồ hoạ lỗi lần trước) — máy chủ nạp lại model lên GPU."""
+    _call(cfg, "POST", "/model/use-gpu", timeout=15)
+
+
 def flush_memory(cfg: dict) -> dict:
     r = _call(cfg, "POST", "/system/flush-memory", timeout=60)
     try:

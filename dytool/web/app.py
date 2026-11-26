@@ -504,6 +504,18 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             return PlainTextResponse(str(e), 400)
         return _vs_done("Đã giải phóng bộ nhớ card đồ hoạ (model giọng nói nạp lại khi cần đọc)")
 
+    @app.post("/voicestudio/use-gpu")
+    def vs_use_gpu():
+        from .. import services, vs_api
+        if _editing():
+            return PlainTextResponse("Đang lồng tiếng 1 video — đợi xong rồi thử lại card đồ hoạ.", 400)
+        try:
+            vs_api.use_gpu(cfg)
+        except vs_api.VSError as e:
+            return PlainTextResponse(str(e), 400)
+        services._vs_info["at"] = 0
+        return _vs_done("Đang nạp lại model giọng nói lên card đồ hoạ — card vẫn lỗi thì tự quay về CPU")
+
     # ----- việc chạy nền (đọc thử / tạo giọng nói / nghe thử giọng thiết kế): ô kết quả tự hỏi lại -----
     _vs_jobs: dict = {}         # khoá -> {"state": "run"|"ok"|"err", "msg", "at", "label", "file"}
     JOB_RE = __import__("re").compile(r"^[a-z0-9-]{1,40}$")

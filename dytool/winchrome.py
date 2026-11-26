@@ -6,26 +6,28 @@ Cách làm (pywebview `frameless=True` = WinForms FormBorderStyle.None):
   nhấp đúp phóng to, kéo lên mép trên màn hình để phóng to (như thanh tiêu đề thật).
 - Thêm lại kiểu WS_THICKFRAME | WS_CAPTION… nhưng trả WM_NCCALCSIZE = 0 (không chừa chỗ cho khung) -> không thấy
   khung, vẫn có Aero Snap, Win+mũi tên, hiệu ứng thu nhỏ, bấm nút taskbar để thu nhỏ; phóng to không đè taskbar.
-- Đổi kích thước: WebView2 phủ kín cửa sổ nên mép cửa sổ không nhận chuột -> chừa viền `BORDER` px (Form.Padding,
-  cùng màu nền trang) và trả mã HTLEFT / HTTOP… cho WM_NCHITTEST ở viền đó. Phóng to thì bỏ viền.
+- Đổi kích thước như cửa sổ Windows thật (cách của Chromium / Windows Terminal): WM_NCCALCSIZE giữ khung mặc định ở
+  trái / phải / dưới (khung vô hình của Windows 10, nằm NGOÀI phần thấy được, kéo đổi kích thước được), chỉ bỏ thanh
+  tiêu đề trên -> trang phủ sát mép, nút ✕ nằm đúng góc trên phải như app Windows. Mép trên: `TOP_GRIP` px đầu trang
+  trả HTTOP (WebView2 chuyển WM_NCHITTEST lên cửa sổ cha — đã đo), dày vừa đủ để không lấn nút ─ ☐ ✕.
+  Trước đây: chừa viền 5px (Form.Padding) quanh trang -> nút ✕ cách góc 5px, nhìn lệch.
 Chỉ chạy trên Windows; lỗi gì cũng chỉ ghi log (cửa sổ vẫn dùng được, chỉ thiếu phần đổi kích thước / snap).
 """
 
 import ctypes
 from ctypes import wintypes
 
-BORDER = 5          # px thật (không theo DPI) viền đổi kích thước quanh nội dung
+TOP_GRIP = 4        # px thật: dải mép trên kéo đổi kích thước
+CORNER = 16         # px: đầu / cuối dải mép trên là góc chéo
 
 WM_NCCALCSIZE, WM_NCHITTEST, WM_NCACTIVATE, WM_NCDESTROY = 0x83, 0x84, 0x86, 0x82
 GWL_STYLE = -16
 WS_CAPTION, WS_THICKFRAME, WS_SYSMENU = 0x00C00000, 0x00040000, 0x00080000
 WS_MINIMIZEBOX, WS_MAXIMIZEBOX = 0x00020000, 0x00010000
 SWP_FLAGS = 0x0020 | 0x0002 | 0x0001 | 0x0004 | 0x0010   # FRAMECHANGED | NOMOVE | NOSIZE | NOZORDER | NOACTIVATE
-HTCLIENT = 1
-HT = {(True, False, False, False): 10, (False, True, False, False): 11,      # trái, phải
-      (False, False, True, False): 12, (False, False, False, True): 15,      # trên, dưới
-      (True, False, True, False): 13, (False, True, True, False): 14,        # trên-trái, trên-phải
-      (True, False, False, True): 16, (False, True, False, True): 17}        # dưới-trái, dưới-phải
+SWP_RESIZE = 0x0002 | 0x0004 | 0x0010                      # NOMOVE | NOZORDER | NOACTIVATE
+WM_WINDOWPOSCHANGED, WM_FIXSIZE = 0x0047, 0x8000 + 0xD7    # WM_APP + …: tin riêng, đặt lại cỡ sau khi thu về
+HTTOP, HTTOPLEFT, HTTOPRIGHT = 12, 13, 14
 
 LRESULT = ctypes.c_ssize_t
 SUBCLASSPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
@@ -63,33 +65,62 @@ def _api():
     u.MonitorFromWindow.restype = wintypes.HANDLE
     u.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)]
     u.IsZoomed.argtypes = [wintypes.HWND]
+    u.IsIconic.argtypes = [wintypes.HWND]
+    u.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
     u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
     return u, c
 
 
 def install(form) -> None:
     """Gọi trên luồng giao diện (form.Invoke) sau khi cửa sổ đã hiện."""
-    from System.Windows.Forms import Padding
     u, c = _api()
     hwnd = int(form.Handle.ToInt64())
+    # WinForms tưởng cửa sổ không khung (FormBorderStyle.None) -> thu về sau phóng to / thu nhỏ thì đặt cỡ cửa sổ =
+    # cỡ vùng trong cũ, mỗi lần nhỏ đi đúng bề dày khung (đo: 16 × 8 px). Nhớ cỡ lúc bình thường, thu về xong đặt lại.
+    st = {"size": None, "mode": "normal", "fix": False}
+
+    def mode(h):
+        return "max" if u.IsZoomed(h) else "min" if u.IsIconic(h) else "normal"
 
     def proc(h, msg, wp, lp, _id, _data):
         try:
+            if msg == WM_WINDOWPOSCHANGED:
+                res = c.DefSubclassProc(h, msg, wp, lp)
+                m = mode(h)
+                if m == "normal":
+                    if st["mode"] != "normal" and st["size"]:
+                        st["fix"] = True
+                        u.PostMessageW(h, WM_FIXSIZE, 0, 0)
+                    elif not st["fix"]:
+                        r = wintypes.RECT()
+                        u.GetWindowRect(h, ctypes.byref(r))
+                        st["size"] = (r.right - r.left, r.bottom - r.top)
+                st["mode"] = m
+                return res
+            if msg == WM_FIXSIZE:
+                st["fix"] = False
+                if mode(h) == "normal" and st["size"]:
+                    u.SetWindowPos(h, None, 0, 0, st["size"][0], st["size"][1], SWP_RESIZE)
+                return 0
             if msg == WM_NCCALCSIZE and wp:
+                p = NCCALCSIZE_PARAMS.from_address(lp)
                 if u.IsZoomed(h):    # phóng to: Windows đặt cửa sổ lố ra ngoài màn hình 1 khung -> co về vùng làm việc
                     mi = MONITORINFO(cbSize=ctypes.sizeof(MONITORINFO))
                     if u.GetMonitorInfoW(u.MonitorFromWindow(h, 2), ctypes.byref(mi)):
-                        NCCALCSIZE_PARAMS.from_address(lp).rgrc[0] = mi.rcWork
-                return 0             # không chừa chỗ cho khung / thanh tiêu đề
+                        p.rgrc[0] = mi.rcWork
+                else:                # khung trái / phải / dưới mặc định (vô hình), bỏ thanh tiêu đề trên
+                    top = p.rgrc[0].top
+                    c.DefSubclassProc(h, msg, wp, lp)
+                    p.rgrc[0].top = top
+                return 0
             if msg == WM_NCACTIVATE:
                 return c.DefSubclassProc(h, msg, wp, -1)     # -1: không vẽ lại khung khi đổi cửa sổ đang chọn
             if msg == WM_NCHITTEST and not u.IsZoomed(h):
                 x, y = ctypes.c_short(lp & 0xFFFF).value, ctypes.c_short((lp >> 16) & 0xFFFF).value
                 r = wintypes.RECT()
                 u.GetWindowRect(h, ctypes.byref(r))
-                b = BORDER + 2       # vùng bắt chuột rộng hơn viền 1 chút cho dễ trúng góc
-                key = (x < r.left + b, x >= r.right - b, y < r.top + b, y >= r.bottom - b)
-                return HT.get(key, HTCLIENT)
+                if r.top <= y < r.top + TOP_GRIP:    # trái / phải / dưới: Windows tự xử lý ở khung vô hình
+                    return HTTOPLEFT if x < r.left + CORNER else HTTOPRIGHT if x >= r.right - CORNER else HTTOP
         except Exception as e:      # ngoại lệ trong callback Windows làm sập tiến trình -> nuốt, để Windows xử lý
             print("winchrome:", e, flush=True)
         return c.DefSubclassProc(h, msg, wp, lp)
@@ -104,13 +135,6 @@ def install(form) -> None:
     # (đo: lề 1 hoặc -1 vẫn còn viền trắng)
     ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(wintypes.HWND(hwnd), ctypes.byref(MARGINS(0, 0, 0, 0)))
     u.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FLAGS)
-
-    def pad(*_):
-        want = 0 if u.IsZoomed(hwnd) else BORDER
-        if form.Padding.All != want:
-            form.Padding = Padding(want)
-    form.Resize += pad
-    pad()
 
 
 def enable_drag_regions(form) -> bool:

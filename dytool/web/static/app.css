@@ -559,10 +559,9 @@ html.in-app .topbar a, html.in-app .topbar button, html.in-app .topbar input, ht
 html.in-app .winctl { app-region: no-drag; }
 /* 3 nút luôn ở góc phải trên (chip dịch vụ có xuống dòng khi cửa sổ hẹp cũng không kéo theo) */
 html.in-app .topbar { padding-right: 144px; }
-/* sát góc trên phải của tấm trang (cách mép cửa sổ đúng khe nền 8px như mọi chỗ khác); nút ✕ bo theo góc tấm để
-   nền đỏ khi rê chuột không lẹm ra ngoài đường cong. Trước: dính mép cửa sổ -> đè lên góc bo của tấm (rõ ở nền sáng) */
-html.in-app .winctl { display: flex; position: fixed; top: 8px; right: 8px; z-index: 30; }
-.winctl button.close { border-top-right-radius: 0; }
+/* sát đúng góc trên phải cửa sổ như app Windows (winchrome.py: khung đổi kích thước nằm ngoài, không viền quanh trang);
+   46 × 32 px, rê chuột vào ✕ nền đỏ #c42b1c như Windows */
+html.in-app .winctl { display: flex; position: fixed; top: 0; right: 0; z-index: 30; }
 html.in-app .content::-webkit-scrollbar-track { margin-top: 52px; }   /* thanh cuộn bắt đầu dưới thanh trên, không lẫn với nút ✕ */
 .winctl button { display: inline-flex; align-items: center; justify-content: center; width: 46px; height: 32px; padding: 0;
   border: 0; border-radius: 0; background: transparent; color: var(--t2); cursor: default;
@@ -1269,8 +1268,6 @@ nav.side { background: var(--side-bg); color: var(--side-t1); padding: 16px 14px
 .run-card .btn { background: transparent; border-color: var(--side-line); color: var(--side-t1); }
 .app-ver { color: var(--side-t3); }
 .chan-dot { box-shadow: 0 0 0 2px var(--side-ring); }
-html.in-app .winctl { top: 0; right: 0; }   /* khung trang sát mép -> nút cửa sổ nằm đúng góc như cửa sổ Windows */
-.winctl button.close { border-top-right-radius: 0; }
 
 /* trang: rộng rãi hơn */
 main { padding: 32px 40px 80px; }

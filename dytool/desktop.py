@@ -224,7 +224,7 @@ class WindowApi:
             return {"max": False}
 
     def bg(self, color: str):
-        """Màu nền trang (đổi sáng / tối) -> màu viền đổi kích thước quanh trang, cho liền màu."""
+        """Màu nền trang (đổi sáng / tối) -> màu nền cửa sổ (hiện thoáng qua lúc đổi kích thước), cho liền màu."""
         import re
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", color or ""):
             return

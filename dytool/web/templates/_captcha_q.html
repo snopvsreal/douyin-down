@@ -1,19 +1,21 @@
-{# Câu hỏi captcha đang hiện trong cửa sổ douyin.com + bản dịch (captcha.snapshot, tự làm mới 3 s). Chỉ dịch chữ —
-   dytool không chọn / gợi ý ảnh đúng: người dùng tự giải. #}
+{# Câu hỏi captcha đang hiện trong cửa sổ douyin.com + bản dịch + cách làm ĐÚNG dạng đang gặp (captcha.kind_of nhận theo
+   chữ trên khung; captcha.snapshot, tự làm mới 3 s). Chỉ dịch chữ — dytool không chọn / gợi ý ảnh đúng: người dùng tự giải. #}
 {% if snap.tabs %}
   {% if snap.tabs|length > 1 %}<p class="small muted" style="margin:0 0 6px">Cửa sổ Douyin có {{ snap.tabs|length }} tab đang hỏi captcha — chỉ cần giải ở 1 tab.</p>{% endif %}
   {% for t in snap.tabs %}
   <div class="captcha-q">
-    <div class="small muted">Tab tìm <b lang="zh">{{ t.tab }}</b></div>
-    <div class="cq-zh" lang="zh">{{ t.q }}</div>
+    {% if snap.tabs|length > 1 %}<div class="small muted">Tab tìm <b lang="zh">{{ t.tab }}</b></div>{% endif %}
+    {% if t.kind %}<div class="cq-kind">{{ t.kind }}</div>{% endif %}
     <div class="cq-vi">{{ t.q_vi or 'Chưa dịch được — kiểm tra mạng' }}</div>
-    <div class="small muted">{{ 'AI dịch' if t.by == 'ai' else 'Dịch máy — AI đang dịch lại cho chuẩn nghĩa…' if t.q_vi else '' }}</div>
+    <div class="cq-zh" lang="zh">{{ t.q }}{% if t.by != 'ai' and t.q_vi %} <span class="small muted">· dịch máy, AI đang dịch lại…</span>{% endif %}</div>
     {% if t.ask_vi %}<div class="small" style="margin-top:6px"><b>Yêu cầu:</b> {{ t.ask_vi }}</div>{% endif %}
-    {% if t.how %}<div class="small" style="margin-top:4px"><b>Cách làm:</b> {{ t.how }}</div>{% endif %}
+    {% if t.steps %}<ol class="cq-steps">{% for s in t.steps %}<li>{{ s }}</li>{% endfor %}</ol>
+    {% else %}<p class="small muted" style="margin:6px 0 0">Chưa nhận ra dạng này — làm theo câu hỏi đã dịch ở trên.</p>{% endif %}
   </div>
   {% endfor %}
 {% elif snap.err %}
   <p class="small muted" style="margin:0">{{ snap.err }}</p>
 {% else %}
-  <p class="small muted" style="margin:0"><span class="spin" aria-hidden="true"></span> Đang đọc câu hỏi captcha…</p>
+  <p class="small muted" style="margin:0"><span class="spin" aria-hidden="true"></span> Đang đọc captcha… Chưa thấy captcha
+    trong cửa sổ Douyin thì gõ tìm 1 từ bất kỳ ở đó.</p>
 {% endif %}

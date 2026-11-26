@@ -102,6 +102,15 @@
                         'tự tạo khi bấm Đăng nhập Douyin') }}
       </div>
     </div>
+    <div class="set-row">
+      <div class="set-label"><b>Hướng dẫn captcha</b>
+        <p class="hint">Khi Douyin đòi xác minh, app mở cửa sổ nổi cạnh cửa sổ douyin.com: câu hỏi đã dịch sang tiếng
+          Việt + cách giải. Xem thử với câu hỏi mẫu.</p></div>
+      <div>
+        <button class="btn" hx-post="/captcha/float/demo" hx-target="#cf-demo-msg" hx-disabled-elt="this">Xem thử cửa sổ hướng dẫn</button>
+        <div id="cf-demo-msg" role="status" style="margin-top:6px"></div>
+      </div>
+    </div>
   </div>
 </section>
 

@@ -360,6 +360,7 @@ def main() -> None:
         if w:
             w.stop()
         tray.stop()
+        close_float()
         window.destroy()            # webview.start() trả về -> cuối main() tắt hết dịch vụ rồi mới tắt server
 
     def on_closing():
@@ -388,7 +389,51 @@ def main() -> None:
             return
         if own:
             own["app"].state.show_window = show
+            own["app"].state.open_float = open_float
+            own["app"].state.close_float = close_float
         _frameless(window, url)
+
+    # Cửa sổ nổi (luôn trên cùng, có thanh tiêu đề Windows để kéo / đóng): hướng dẫn captcha Douyin đặt sát mép phải
+    # màn hình, cạnh cửa sổ douyin.com. Chỉ 1 cái: mở lại = đưa cái cũ lên + tải lại trang.
+    floating = {"w": None}
+    float_lock = threading.Lock()
+
+    def open_float(path: str):
+        with float_lock:
+            fw = floating["w"]
+            if fw is not None:
+                try:
+                    fw.load_url(URL + path)
+                    fw.restore()
+                    fw.show()
+                    return
+                except Exception:
+                    floating["w"] = None     # cửa sổ đã bị đóng ngoài ý -> tạo lại
+            fw_w, fw_h, x, y = 400, 540, None, None
+            try:
+                scr = webview.screens[0]
+                fw_h = min(fw_h, int(scr.height * 0.85))
+                x, y = max(0, scr.width - fw_w - 12), max(0, (scr.height - fw_h) // 2 - 20)
+            except Exception:
+                pass
+            fw = webview.create_window("Xác minh Douyin · dytool", URL + path, width=fw_w, height=fw_h, x=x, y=y,
+                                       min_size=(320, 360), on_top=True, background_color=bg, text_select=True)
+
+            def gone():
+                if floating["w"] is fw:
+                    floating["w"] = None
+            fw.events.closed += gone
+            fw.events.shown += lambda: _style_window(fw)
+            floating["w"] = fw
+
+    def close_float():
+        fw = floating["w"]
+        floating["w"] = None
+        if fw is not None:
+            try:
+                fw.destroy()
+            except Exception:
+                pass
 
     window.events.closing += on_closing
     window.events.shown += lambda: _style_window(window)

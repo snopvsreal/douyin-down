@@ -156,7 +156,7 @@
     const typing = (a) => a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) &&
       !['checkbox', 'radio', 'button', 'submit', 'range', 'color', 'file', 'hidden'].includes(a.type);
     const busy = () => typing(document.activeElement) || dirty || document.getElementById('palette')?.open ||
-      document.getElementById('dy-confirm')?.open ||
+      document.getElementById('dy-confirm')?.open || !!document.querySelector('main dialog[open]') ||
       [...document.querySelectorAll('main video')].some(v => !v.paused) ||
       !!document.querySelector('.dragging, .drop-on, main .htmx-request, main form.htmx-request, main [data-live-hold]');
     const refresh = async (v) => {

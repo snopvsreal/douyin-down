@@ -10,7 +10,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -96,6 +96,9 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     app.middleware("http")(_request_guard(lan))
     app.state.worker = worker         # app desktop (desktop.py) dùng để tạm dừng / bật từ icon khay
     app.state.show_window = None       # desktop.py gán hàm đưa cửa sổ lên trước (khi mở dytool.exe lần 2)
+    app.state.open_float = None        # desktop.py: mở / đưa lên cửa sổ nổi (luôn trên cùng) — hướng dẫn captcha Douyin
+    app.state.close_float = None
+    worker.on_captcha = lambda: _open_float()
     if autostart:
         worker.start()          # tự bật chạy tự động khi mở giao diện
         from .. import updates
@@ -1170,7 +1173,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         # "Cần bạn xử lý": gom mọi việc người dùng phải làm vào 1 chỗ
         todo = []
         if worker.captcha:      # Douyin đòi xác minh: đứng đầu — tìm kiếm của mọi kênh đang ngừng
-            todo.append({"kind": "dy", "n": None, "captcha": True, "title": "Douyin cần bạn xác minh (captcha)",
+            todo.append({"kind": "dy", "n": None, "captcha": True, "captcha_since": worker.captcha["since"], "title": "Douyin cần bạn xác minh (captcha)",
                          "sub": f"Từ {vn_fmt(worker.captcha['since'], '%H:%M')} — tìm video của mọi kênh đang tạm ngừng. "
                                 "Giải captcha trong cửa sổ douyin.com, xong thì dytool tự quét tiếp."})
         missing = store.q("SELECT v.id, v.page_id, v.error, p.platform FROM videos v JOIN pages p ON p.id=v.page_id "
@@ -1351,7 +1354,62 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         err = worker.open_captcha_window()
         if err:
             return PlainTextResponse(err, 400)
+        _open_float()               # app desktop: hướng dẫn + câu hỏi đã dịch nổi cạnh cửa sổ douyin.com
         return HTMLResponse('<span class="small muted">Đã mở cửa sổ douyin.com — giải captcha ở đó</span>')
+
+    def _open_float(demo: bool = False) -> bool:
+        """Cửa sổ nổi Xác minh Douyin (desktop.py gán app.state.open_float). Trình duyệt thường / chưa bị captcha -> False.
+        demo: xem thử với câu hỏi mẫu (Cài đặt › Douyin), không cần đang bị captcha."""
+        if not app.state.open_float or not (demo or worker.captcha):
+            return False
+        try:
+            app.state.open_float("/captcha/float?demo=1" if demo else "/captcha/float")
+            return True
+        except Exception as e:
+            print("Không mở được cửa sổ nổi captcha:", e, flush=True)
+            return False
+
+    @app.post("/captcha/float")
+    def captcha_float_open():
+        """Nút Hướng dẫn / tự mở khi bị captcha: 204 = đã mở cửa sổ nổi; 404 = trang tự hiện hộp hướng dẫn."""
+        return Response(status_code=204) if _open_float() else Response(status_code=404)
+
+    @app.post("/captcha/float/demo")
+    def captcha_float_demo():
+        """Cài đặt › Douyin › Xem thử: mở cửa sổ nổi với câu hỏi mẫu (không cần đang bị captcha, không gọi Douyin)."""
+        if _open_float(demo=True):
+            return HTMLResponse('<span class="small muted">Đã mở cửa sổ xem thử ở mép phải màn hình</span>')
+        return PlainTextResponse("Cửa sổ nổi chỉ có trong app desktop dytool (đang mở bằng trình duyệt thường)", 400)
+
+    # câu hỏi mẫu cho chế độ xem thử (?demo=1..n): mỗi dạng 1 câu, nhận dạng bằng đúng captcha.kind_of
+    _DEMO_Q = [("世界著名景点", "请选择所有符合上文描述的图片，并拖拽到下方", "Địa danh nổi tiếng thế giới"),
+               ("拖动滑块，使图片角度为正", "", "Kéo thanh trượt để ảnh đứng thẳng"),
+               ("按住左边按钮拖动完成上方拼图", "", "Giữ nút bên trái, kéo để hoàn thành ghép hình ở trên"),
+               ("请依次点击「春」「天」「来」", "", "Hãy bấm lần lượt 「春」「天」「来」"),
+               ("发送短信验证码", "", "Gửi mã xác minh qua tin nhắn")]
+
+    @app.get("/captcha/float", response_class=HTMLResponse)
+    def captcha_float_page(request: Request, demo: int = 0):
+        from .. import captcha
+        snap, names = None, []
+        if demo:
+            for q, ask, vi in _DEMO_Q:
+                names.append(captcha.kind_of([q, ask])[0])
+            q, ask, vi = _DEMO_Q[(demo - 1) % len(_DEMO_Q)]
+            kind, steps = captcha.kind_of([q, ask])
+            snap = {"err": None, "tabs": [{"tab": "猫咪", "q": q, "q_vi": vi, "by": "ai", "ask": ask,
+                                           "ask_vi": "", "kind": kind, "steps": steps}]}
+        return render(request, "captcha_float.html", demo=bool(demo), snap=snap, demo_kinds=names)
+
+    @app.get("/captcha/float/state")
+    def captcha_float_state():
+        return JSONResponse({"active": worker.captcha is not None})
+
+    @app.post("/captcha/float/close")
+    def captcha_float_close():
+        if app.state.close_float:
+            app.state.close_float()
+        return Response(status_code=204)
 
     @app.get("/partials/captcha", response_class=HTMLResponse)
     def captcha_partial(request: Request):

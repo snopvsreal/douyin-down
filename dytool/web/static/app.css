@@ -1503,5 +1503,21 @@ html.theme-swap *, html.theme-swap *::before, html.theme-swap *::after { transit
 .captcha-tbl td:first-child { width: 38%; color: var(--t1); }
 /* câu hỏi captcha + bản dịch (trang Hôm nay) */
 .captcha-q { border: 1px solid var(--line); background: var(--sunken); padding: 10px 12px; margin-bottom: 8px; }
-.captcha-q .cq-zh { font-size: 15px; color: var(--t2); margin-top: 2px; }
 .captcha-q .cq-vi { font-size: 18px; line-height: 26px; font-weight: 700; color: var(--t1); margin-top: 2px; }
+.captcha-q .cq-kind { display: inline-block; font-size: 12.5px; font-weight: 600; color: var(--primary-text);
+  background: var(--primary-tint); padding: 1px 8px; margin-bottom: 4px; }
+.captcha-q .cq-zh { font-size: 13px; color: var(--t2); }
+.captcha-q .cq-steps { margin: 8px 0 0; padding-left: 20px; }
+.captcha-q .cq-steps li { margin-bottom: 2px; }
+/* cửa sổ nổi Xác minh Douyin (captcha_float.html) — hẹp, đặt cạnh cửa sổ douyin.com */
+.cf-body { background: var(--tile, var(--canvas)); overflow: auto; }
+.cf { padding: 14px 16px 18px; }
+.cf-h { font-size: 16px; line-height: 22px; margin: 0 0 10px; }
+.cf-demo { border-left: 3px solid var(--primary); background: var(--sunken); padding: 6px 10px; margin: 0 0 10px; }
+.cf-act { display: flex; gap: 6px; margin: 4px 0 6px; flex-wrap: wrap; }
+.cf-act .btn { flex: 1 1 auto; }
+#cf-msg { min-height: 18px; margin-bottom: 8px; }
+.cf-done { border: 1px solid var(--line); background: var(--sunken); padding: 12px; }
+.cf .captcha-steps { padding-left: 18px; margin: 0 0 8px; }
+.cf .captcha-steps li { margin-bottom: 4px; }
+.cf .captcha-tbl td:first-child { width: 34%; }

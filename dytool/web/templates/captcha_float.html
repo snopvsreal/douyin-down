@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>try { const t = localStorage.getItem('dy-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <title>Xác minh Douyin · dytool</title>
+  <link rel="icon" type="image/png" href="/static/favicon.png">
+  <link rel="stylesheet" href="/static/app.css?v={{ css_v() }}">
+  <script src="/static/htmx.min.js"></script>
+</head>
+{# Cửa sổ nổi luôn trên cùng (app desktop, desktop.py open_float) đặt cạnh cửa sổ douyin.com: câu hỏi captcha đã dịch +
+   cách giải + nút Đã giải xong. Chỉ đọc / dịch chữ — người dùng tự giải, dytool không tự giải / gợi ý ảnh đúng. #}
+<body class="cf-body">
+<main class="cf">
+  <h1 class="cf-h">Xác minh Douyin</h1>
+  {% if demo %}<p class="cf-demo small" role="note"><b>Xem thử</b> — câu hỏi mẫu, không phải captcha thật. Bấm
+    <b>Đã giải xong</b> để xem cửa sổ tự đóng.</p>
+    {% if demo_kinds %}<p class="small" style="margin:-4px 0 10px">Xem dạng khác:
+      {% for i in range(demo_kinds|length) %}<a href="/captcha/float?demo={{ i + 1 }}">{{ demo_kinds[i] }}</a>{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}{% endif %}
+  <div id="cf-done" class="cf-done" role="status" hidden>
+    <b>Douyin hết đòi xác minh</b><br><span class="small muted">dytool tìm video tiếp. Cửa sổ này tự đóng…</span>
+  </div>
+  <div id="cf-live">
+    {# câu hỏi đang hiện + bản dịch, tự làm mới 3 s / lần #}
+    {% if demo %}
+    <div>{% include "_captcha_q.html" %}</div>
+    <div class="cf-act">
+      <button type="button" class="btn sm" disabled title="Xem thử: không mở douyin.com">Mở cửa sổ Douyin</button>
+      <button type="button" class="btn sm primary" onclick="finish()">Đã giải xong</button>
+    </div>
+    {% else %}
+    <div hx-get="/partials/captcha" hx-trigger="load, every 3s [!document.hidden]" hx-swap="innerHTML" aria-live="polite"></div>
+    <div class="cf-act">
+      <button class="btn sm" hx-post="/douyin/captcha/open" hx-target="#cf-msg" hx-disabled-elt="this">Mở cửa sổ Douyin</button>
+      <button class="btn sm primary" hx-post="/douyin/captcha/check" hx-target="#cf-msg" hx-disabled-elt="this">Đã giải xong</button>
+    </div>
+    {% endif %}
+    <div id="cf-msg" role="status"></div>
+    <p class="small muted" style="margin:0">Thấy <span lang="zh">验证成功</span> (xác minh thành công) thì bấm <b>Đã giải xong</b>.</p>
+  </div>
+</main>
+<script>
+  // htmx bỏ qua phản hồi lỗi (400) -> hiện lời nhắn ngay dưới 2 nút
+  document.addEventListener('htmx:responseError', (e) => {
+    const m = document.getElementById('cf-msg');
+    m.innerHTML = '';
+    const s = document.createElement('span');
+    s.className = 'small'; s.style.color = 'var(--err-text, #b42318)';
+    s.textContent = e.detail.xhr.responseText || 'Có lỗi — thử lại';
+    m.appendChild(s);
+  });
+  // hết captcha -> báo xong rồi tự đóng cửa sổ
+  let closing = false;
+  function finish() {
+    if (closing) return;
+    closing = true;
+    document.getElementById('cf-live').hidden = true;
+    document.getElementById('cf-done').hidden = false;
+    setTimeout(() => fetch('/captcha/float/close', { method: 'POST' }).catch(() => {}), 3000);
+  }
+  {% if not demo %}
+  setInterval(async () => {
+    if (closing) return;
+    try {
+      const s = await (await fetch('/captcha/float/state')).json();
+      if (s.active) return;
+    } catch (_) { return; }
+    finish();
+  }, 3000);
+  {% endif %}
+</script>
+</body>
+</html>

@@ -64,6 +64,7 @@ class Worker:
         self._src_scanned: dict[int, float] = {}    # nguồn id -> lần quét được gần nhất (quét nguồn lâu chưa quét trước)
         # Douyin đòi xác minh (captcha): {"since", "checked"} — tìm kiếm tạm ngừng tới khi người dùng giải xong
         self.captcha: dict | None = None
+        self.on_captcha = None      # app (web/app.py) gán: mở cửa sổ nổi hướng dẫn captcha khi Douyin đòi xác minh
         self._canary_ok_at = 0.0                    # lần tìm thử "猫咪" ra video gần nhất (tin 10 phút)
         self._captcha_rotated_at = 0.0              # lần đổi IP proxy Douyin vì captcha gần nhất
         self._dy = None
@@ -827,6 +828,11 @@ class Worker:
         self.store.log("Douyin đòi xác minh (captcha) — đã mở cửa sổ douyin.com, bạn giải xong thì dytool tự quét tiếp "
                        "(hướng dẫn tiếng Việt ở trang Hôm nay)", "error")
         self.open_captcha_window()
+        if self.on_captcha:         # app desktop: cửa sổ nổi hướng dẫn + câu hỏi đã dịch cạnh cửa sổ douyin.com
+            try:
+                self.on_captcha()
+            except Exception as e:
+                print("Không mở được cửa sổ nổi captcha:", e, flush=True)
         from . import captcha       # đọc + dịch câu hỏi captcha đang hiện (chỉ chữ) cho trang Hôm nay
         captcha.ensure_watch(self.data, lambda: self.captcha is not None)
 

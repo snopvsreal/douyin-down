@@ -12,18 +12,28 @@ import time
 import urllib.parse
 from pathlib import Path
 
-# kiểu captcha nhận theo chữ trên khung -> cách thao tác (tiếng Việt)
+# dạng captcha nhận theo chữ trên khung -> (tên dạng, các bước ngắn). Thứ tự quan trọng: dạng cụ thể trước
+# (拖拽到下方 trước 选择, 旋转 trước 滑块 vì captcha xoay cũng ghi 拖动滑块, 依次点击 trước 点击).
 KINDS = [
-    (("拖拽到下方", "拖拽到这里"), "Kéo TẤT CẢ ảnh khớp với câu hỏi xuống ô 拖拽到这里 (kéo vào đây) ở dưới — giữ chuột "
-                                   "trái vào ảnh, kéo xuống ô, thả ra; làm lần lượt từng ảnh — rồi bấm 提交 (gửi). "
-                                   "Sót hay thừa 1 ảnh là Douyin ra câu khác."),
-    (("旋转", "角度"), "Kéo thanh trượt bên dưới: ảnh tròn xoay theo — thả chuột khi ảnh đứng thẳng."),
-    (("滑块", "拼图"), "Giữ chuột vào nút đầu trái thanh trượt, kéo sang phải tới khi mảnh ghép khớp vào chỗ trống "
-                       "trên ảnh rồi thả."),
-    (("依次点击",), "Bấm vào ảnh theo đúng thứ tự các chữ trong ngoặc 「」 — so hình dạng nét chữ, không cần biết đọc — "
-                   "rồi bấm 确定 (xác nhận)."),
-    (("点击", "选择"), "Bấm vào những chỗ trên ảnh khớp với câu hỏi, rồi bấm 确定 (xác nhận)."),
-    (("短信", "发送"), "Bấm 发送 (gửi), nhập mã gửi về điện thoại của tài khoản Douyin, bấm 验证 (xác minh)."),
+    (("拖拽到下方", "拖拽到这里"), "Kéo ảnh đúng chủ đề vào ô", [
+        "Giữ chuột vào từng ảnh khớp câu hỏi, kéo xuống ô 拖拽到这里 rồi thả.",
+        "Kéo đủ TẤT CẢ ảnh đúng — sót hay thừa 1 ảnh là sai.",
+        "Bấm 提交 (gửi)."]),
+    (("旋转", "角度"), "Xoay ảnh cho thẳng", [
+        "Kéo thanh trượt bên dưới — ảnh tròn xoay theo.",
+        "Thả chuột khi ảnh đứng thẳng."]),
+    (("滑块", "拼图"), "Kéo mảnh ghép", [
+        "Giữ chuột vào nút đầu trái thanh trượt.",
+        "Kéo sang phải tới khi mảnh ghép khớp chỗ trống trên ảnh rồi thả."]),
+    (("依次点击",), "Bấm chữ theo thứ tự", [
+        "Bấm lên ảnh theo đúng thứ tự các chữ trong 「」 — so hình nét chữ, không cần biết đọc.",
+        "Bấm 确定 (xác nhận)."]),
+    (("点击", "选择"), "Bấm vào ảnh", [
+        "Bấm vào những chỗ trên ảnh khớp với câu hỏi.",
+        "Bấm 确定 (xác nhận)."]),
+    (("短信", "发送"), "Mã tin nhắn", [
+        "Bấm 发送 (gửi) — mã gửi về điện thoại của tài khoản Douyin.",
+        "Nhập mã, bấm 验证 (xác minh)."]),
 ]
 _SKIP = {"刷新", "反馈", "提交", "确定", "拖拽到这里", "验证码"}     # chữ nút, không phải câu hỏi
 
@@ -112,12 +122,13 @@ def better_vietnamese(q: str) -> tuple[str, str]:
     return to_vietnamese(q), "google"
 
 
-def how_to(lines: list[str]) -> str:
+def kind_of(lines: list[str]) -> tuple[str, list[str]]:
+    """(tên dạng, các bước) theo chữ trên khung captcha; không nhận ra -> ("", [])."""
     joined = " ".join(lines)
-    for keys, how in KINDS:
+    for keys, name, steps in KINDS:
         if any(k in joined for k in keys):
-            return how
-    return ""
+            return name, steps
+    return "", []
 
 
 def _tab_label(url: str) -> str:
@@ -165,8 +176,9 @@ def _translate(tabs: list[dict]) -> list[dict]:
         q = t["lines"][0]
         ask = t["lines"][1] if len(t["lines"]) > 1 else ""
         q_vi, by = better_vietnamese(q)
+        kind, steps = kind_of(t["lines"])
         res.append({"tab": t["tab"], "q": q, "q_vi": q_vi, "by": by, "ask": ask,
-                    "ask_vi": to_vietnamese(ask) if ask else "", "how": how_to(t["lines"])})
+                    "ask_vi": to_vietnamese(ask) if ask else "", "kind": kind, "steps": steps})
     return res
 
 

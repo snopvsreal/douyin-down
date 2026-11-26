@@ -8,6 +8,12 @@ Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh h�
 
 ---
 
+## [0.5.5] — 2026-11-27
+
+**Nút "Edit lại" cho video đã edit nhưng chưa đăng**
+
+- ✨ **Edit lại**: mở 1 video Chờ duyệt / Đã duyệt / chờ gửi lịch (bấm video ở trang Hôm nay, trang kênh hoặc trang Video) → bấm **Edit lại** → video được edit lại theo cài đặt kênh hiện tại (vd. để có lại tiếng mèo sau bản 0.5.4, hoặc sau khi đổi giọng), bản edit cũ được thay, xong thì về Chờ duyệt để duyệt lại. Video đang đăng / đã đăng / đã hẹn giờ trên nền tảng không có nút này (tránh đăng trùng); video đã bị dọn file gốc cũng không edit lại được.
+
 ## [0.5.4] — 2026-11-27
 
 **Lồng tiếng giữ lại tiếng mèo kêu, tiếng động gốc + hết lỗi "máy chủ giọng nói không trả lời" khi đọc bằng CPU**

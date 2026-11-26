@@ -8,7 +8,9 @@ Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh h�
 
 ---
 
-## Chưa phát hành
+## [0.4.1] — 2026-11-26
+
+**Trang Hướng dẫn trong app**
 
 - ✨ **Trang Hướng dẫn** (menu Hệ thống): mục **Bắt đầu** liệt kê các bước thiết lập lần đầu — AI, Douyin, tài khoản, nguồn, bật kênh, model giọng nói, Chạy tự động, duyệt video đầu tiên — tự đánh dấu bước đã xong, nút đi thẳng tới chỗ cần làm. Bên dưới là hướng dẫn theo chủ đề (quy trình 1 video, nguồn & lọc, duyệt + phím tắt, lịch đăng, lồng tiếng, TikTok, captcha, proxy, chạy tự động, cập nhật & sao lưu) kèm mục lục.
 - 🛠️ Trang kênh: nhãn trạng thái dài ("Đã lên lịch trên Facebook") không còn đè lên cột Thời điểm.
@@ -118,6 +120,7 @@ Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh h�
 - ✨ **TikTok**: kênh riêng hoặc đăng kèm cùng giờ với Page Facebook.
 - ✨ Mỗi tài khoản 1 hồ sơ trình duyệt chống phát hiện riêng, tự tạo khi Đăng nhập.
 
+[0.4.1]: https://github.com/snopvsreal/dytool/releases/tag/v0.4.1
 [0.4.0]: https://github.com/snopvsreal/dytool/releases/tag/v0.4.0
 [0.3.13]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.13
 [0.3.12]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.12

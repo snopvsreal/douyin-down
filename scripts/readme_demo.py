@@ -7,6 +7,7 @@
 Bản mẫu không tải nhân ShardX, không lấy ảnh / link Facebook, không bật chạy tự động.
 """
 import json
+import re
 import random
 import subprocess
 import sys
@@ -177,7 +178,8 @@ def seed():
 def serve():
     import uvicorn
     from dytool import avatars, browsers, updates
-    updates.installed = lambda app: "0.4.0"
+    ver = re.search(r'^version = "([^"]+)"', (REPO / "pyproject.toml").read_text(encoding="utf-8"), re.M).group(1)
+    updates.installed = lambda app: ver                          # .venv có thể còn metadata bản cũ
     from dytool.worker import Worker
     browsers.install_engine_background = lambda *a, **k: None     # không tải nhân ShardX
     avatars.refresh_fb_background = lambda *a, **k: None          # không lấy ảnh Facebook

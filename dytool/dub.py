@@ -20,6 +20,9 @@ def separate(video: Path, work: Path) -> tuple[Path, Path]:
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(video), "-vn", "-ac", "2", "-ar", "44100",
                     str(wav)], check=True)
     base = [sys.executable, "-m", "demucs", "--two-stems=vocals", "-n", "htdemucs", "-o", str(out_dir)]
+    from .services import voice_device
+    if voice_device() == "cpu":            # người dùng chọn chạy lồng tiếng bằng CPU (Cài đặt) -> không đụng card
+        base += ["-d", "cpu"]
     # Demucs tự dùng GPU nếu torch có CUDA (bản cài "gpu", máy có card NVIDIA). Lỗi phía GPU (hết VRAM — card 4 GB
     # dùng chung với VoiceStudio, driver…) -> chạy lại bằng CPU thay vì làm hỏng cả video
     r = subprocess.run(base + [str(wav)], capture_output=True)
@@ -72,6 +75,52 @@ class VoiceStudio:
         except httpx.HTTPError as e:
             raise DubError(f"Không kết nối được máy chủ giọng nói tại {self.api}. Bật ở chip Giọng nói trên cùng rồi thử lại.") from e
 
+    def _speech(self, body: dict) -> httpx.Response:
+        """POST /v1/audio/speech. Card đồ hoạ lỗi -> máy chủ trả 503 + x-restart rồi tự thoát để chạy lại bằng CPU
+        (hoặc chết ngang lúc đọc): bật lại máy chủ, chờ nạp model, gửi lại 1 lần — video không hỏng vì lỗi card."""
+        for attempt in (0, 1):
+            try:
+                r = self.http.post(self.api + "/v1/audio/speech", json=body)
+            except httpx.TransportError as e:
+                if attempt:
+                    raise DubError(f"Máy chủ giọng nói không trả lời: {e}") from e
+                self._wait_restart()
+                continue
+            if r.status_code == 503 and r.headers.get("x-restart") and not attempt:
+                self._wait_restart()
+                continue
+            return r
+        return r
+
+    def _wait_restart(self, timeout: float = 420) -> None:
+        """Chờ máy chủ cũ thoát, bật lại (services), chờ model nạp xong. Không do dytool bật -> chỉ chờ nó lên lại."""
+        import time
+        from . import progress, services
+        progress.detail("Card đồ hoạ lỗi — đang khởi động lại giọng nói bằng CPU…")
+        end = time.time() + 20                      # máy chủ tự thoát ~1 s sau khi trả lời
+        while services.vs_ours_running() and time.time() < end:
+            progress.check()
+            time.sleep(0.5)
+        end = time.time() + timeout
+        while time.time() < end:
+            progress.check()
+            r = services.start_voicestudio(self.cfg)
+            if r == "remote":
+                r = services.vs_state(self.cfg)
+            if r == "ok":
+                try:
+                    m = self.http.get(self.api + "/model/status", timeout=5).json()
+                    if m.get("loaded"):
+                        return
+                    if m.get("state") == "error" and m.get("error"):
+                        raise DubError(f"Máy chủ giọng nói không nạp được model: {m['error']}")
+                except (httpx.HTTPError, ValueError):
+                    pass
+            elif r in ("crashed", "missing"):
+                raise DubError("Máy chủ giọng nói bật lại không được (xem Nhật ký ở trang Giọng nói)")
+            time.sleep(2)
+        raise DubError("Máy chủ giọng nói khởi động lại quá lâu")
+
     REF_TEXT = ("Xin chào các bạn, hôm nay mình sẽ kể cho các bạn nghe một câu chuyện rất thú vị. "
                 "Nhớ theo dõi đến cuối video nhé.")
 
@@ -103,7 +152,7 @@ class VoiceStudio:
                     "language": "vi", "seed": int(spec.get("seed", 42)), "response_format": "wav"}
             if spec.get("instruct"):
                 body["instructions"] = spec["instruct"]
-            r = self.http.post(self.api + "/v1/audio/speech", json=body)
+            r = self._speech(body)
             if r.status_code != 200:
                 raise DubError(f"Không tạo được giọng mẫu: {r.text[:300]}")
             ref_path = work / f"{name}_ref.wav"
@@ -130,7 +179,7 @@ class VoiceStudio:
             body["duration"] = round(duration, 2)
         if self.cfg.get("num_step"):
             body["num_step"] = int(self.cfg["num_step"])
-        r = self.http.post(self.api + "/v1/audio/speech", json=body)
+        r = self._speech(body)
         if r.status_code != 200:
             raise DubError(f"Máy chủ giọng nói lỗi {r.status_code}: {r.text[:300]}")
         raw = dest.with_suffix(".raw.wav")

@@ -79,9 +79,10 @@ def check_id(x: str) -> str:
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, msg: str):
+    def __init__(self, status: int, msg: str, restart: bool = False):
         super().__init__(msg)
         self.status = status
+        self.restart = restart         # máy chủ sắp tự khởi động lại (card lỗi) -> dytool chờ rồi gửi lại
 
 
 # ============================ model ============================
@@ -103,27 +104,41 @@ class Engine:
 
     def _pick_device(self) -> str:
         import torch
-        if self.force_cpu or not torch.cuda.is_available():
+        mode = device_mode()
+        if self.force_cpu or mode == "cpu" or not torch.cuda.is_available():
             return "cpu"
-        fb = _settings().get("cpu_fallback") or {}
-        if fb and time.time() - float(fb.get("at") or 0) < FALLBACK_HOURS * 3600:
+        if mode == "gpu":
+            return "cuda"
+        fb = cpu_fallback_active()
+        if fb:
             self.force_cpu, self.fallback = True, str(fb.get("reason") or "card đồ hoạ lỗi lần trước")
             return "cpu"
         return "cuda"
 
     def fall_back_to_cpu(self, e: Exception) -> None:
-        """Card đồ hoạ lỗi (driver cũ, card không hợp torch, hết VRAM…) -> bỏ model trên GPU, lần nạp sau chạy CPU
-        (chậm hơn nhưng lồng tiếng vẫn chạy). Lỗi không phải hết VRAM thì nhớ FALLBACK_HOURS giờ (khởi động lại máy
-        chủ không phải thử GPU hỏng lần nữa); nút 'Thử lại card đồ hoạ' ở trang Giọng nói xoá dấu này."""
+        """Card đồ hoạ lỗi -> chạy CPU (chậm hơn nhưng lồng tiếng vẫn chạy).
+        - Hết VRAM: bỏ model trên GPU, nạp lại trên CPU ngay trong tiến trình này (tới hết phiên).
+        - Lỗi khác (illegal memory access, driver cũ, card không hợp torch…): CUDA của CẢ tiến trình hỏng hẳn — mọi lệnh
+          torch.cuda sau đó lỗi lại, kể cả torch.manual_seed khi đọc bằng CPU (người dùng gặp trên RTX 3050 Ti,
+          2026-11-27). Không cứu được trong tiến trình -> ghi dấu cpu_fallback (FALLBACK_HOURS giờ), trả 503 kèm
+          x-restart rồi tự thoát mã RESTART_EXIT; dytool bật lại máy chủ, main() thấy dấu thì ẩn GPU
+          (CUDA_VISIBLE_DEVICES=-1; chuỗi rỗng trên Windows = xoá biến, không ẩn được) trước khi nạp torch. Nút 'Thử lại card đồ hoạ' ở trang Giọng nói xoá dấu này."""
         reason = f"{type(e).__name__}: {e}".strip()[:300]
-        print(f"Card đồ hoạ lỗi -> chuyển sang CPU: {reason}", flush=True)
         self.force_cpu, self.fallback = True, reason
+        self.model, self.on_cpu, self.device = None, False, "cpu"
+        self._prompts.clear()
         if not _is_oom(e):
+            print(f"Card đồ hoạ lỗi -> khởi động lại máy chủ giọng nói, chạy CPU: {reason}", flush=True)
             with _db_lock:
                 s = _settings()
                 s["cpu_fallback"] = {"reason": reason, "at": time.time()}
                 _save("settings.json", s)
-        self.model, self.on_cpu, self.device = None, False, "cpu"
+            self.state, self.detail = "error", "Card đồ hoạ lỗi — đang khởi động lại máy chủ giọng nói bằng CPU…"
+            self.error = self.detail
+            threading.Timer(1.0, lambda: os._exit(RESTART_EXIT)).start()   # chờ trả lời xong yêu cầu đang dở
+            raise ApiError(503, "Card đồ hoạ lỗi — máy chủ giọng nói tự khởi động lại và chạy bằng CPU "
+                                f"(khoảng 1 phút). Chi tiết: {reason}", restart=True)
+        print(f"Card đồ hoạ hết VRAM -> chuyển sang CPU: {reason}", flush=True)
         self._prompts.clear()
         gc.collect()
         try:
@@ -133,13 +148,12 @@ class Engine:
             pass
 
     def use_gpu_again(self) -> None:
-        """Xoá dấu chạy CPU; lần nạp sau thử lại GPU (gọi trong self.lock)."""
+        """Xoá dấu chạy CPU. GPU đã bị ẩn từ lúc bật tiến trình (CUDA_VISIBLE_DEVICES=-1) -> dytool phải khởi động lại
+        máy chủ thì mới dùng lại được card."""
         with _db_lock:
             s = _settings()
             if s.pop("cpu_fallback", None) is not None:
                 _save("settings.json", s)
-        self.force_cpu, self.fallback = False, ""
-        self.unload()
 
     def start_loading(self) -> None:
         if self.state in ("loading", "loaded"):
@@ -177,8 +191,8 @@ class Engine:
                 self.model = OmniVoice.from_pretrained(str(path), device_map=self.device, dtype=dtype)
                 break
             except Exception as e:
-                if self.device != "cuda" or not _is_cuda_error(e):
-                    raise
+                if self.device != "cuda" or not _is_cuda_error(e) or device_mode() == "gpu":
+                    raise                         # người dùng chọn "luôn GPU": báo lỗi, không tự chuyển CPU
                 self.fall_back_to_cpu(e)          # nạp lên card lỗi -> nạp lại trên CPU
         self.on_cpu = False
         self.state, self.detail = "loaded", ""
@@ -251,6 +265,21 @@ class Engine:
 
 
 FALLBACK_HOURS = 24          # card lỗi (không phải hết VRAM) -> chạy CPU bấy nhiêu giờ rồi mới thử lại GPU
+RESTART_EXIT = 75            # mã thoát "khởi động lại tôi" (card lỗi) — services không coi là chết ngay sau khi bật
+
+
+def device_mode() -> str:
+    """auto | gpu | cpu — người dùng chọn ở Cài đặt (services.voice_device ghi data/voice/device.json)."""
+    m = _load("device.json", {}).get("mode")
+    return m if m in ("auto", "gpu", "cpu") else "auto"
+
+
+def cpu_fallback_active() -> dict | None:
+    fb = _settings().get("cpu_fallback") or {}
+    try:
+        return fb if fb and time.time() - float(fb.get("at") or 0) < FALLBACK_HOURS * 3600 else None
+    except (TypeError, ValueError):
+        return None
 
 _CUDA_WORDS = ("cuda", "cudnn", "cublas", "cufft", "curand", "nvrtc", "out of memory", "no kernel image",
                "acceleratorerror", "nvidia driver", "device-side assert")
@@ -395,6 +424,8 @@ def synthesize(text: str, *, language: str | None = "vi", profile: dict | None =
                     except Exception:
                         pass
                     continue
+                if device_mode() == "gpu":       # người dùng chọn "luôn GPU": báo lỗi, không tự chuyển CPU
+                    raise
                 ENGINE.fall_back_to_cpu(e)
             finally:
                 try:
@@ -552,7 +583,8 @@ def build_app():
 
     @app.exception_handler(ApiError)
     async def _api_err(_req, e: ApiError):
-        return JSONResponse({"detail": str(e)}, status_code=e.status)
+        return JSONResponse({"detail": str(e)}, status_code=e.status,
+                            headers={"x-restart": "cpu"} if e.restart else None)
 
     @app.exception_handler(Exception)
     async def _any_err(_req, e: Exception):
@@ -585,20 +617,17 @@ def build_app():
             dev = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
         except Exception:                    # driver hỏng: /health vẫn phải trả lời, không thì dytool tưởng máy chủ tắt
             dev = "CPU"
-        if ENGINE.fallback:
+        if device_mode() == "cpu":
+            dev = "CPU (chọn ở Cài đặt)"
+        elif ENGINE.fallback:
             dev = f"CPU (card {dev} lỗi)" if dev != "CPU" else "CPU (card đồ hoạ lỗi)"
         return {"status": "ok", "version": VERSION, "device": dev}
 
     @app.post("/model/use-gpu")
     def use_gpu():
-        if not ENGINE.lock.acquire(timeout=5):
-            raise ApiError(409, "Đang đọc — đợi đọc xong rồi thử lại")
-        try:
-            ENGINE.use_gpu_again()
-        finally:
-            ENGINE.lock.release()
-        ENGINE.start_loading()
-        return {"ok": True}
+        """Xoá dấu chạy CPU — dytool khởi động lại máy chủ ngay sau đó (GPU đang bị ẩn trong tiến trình này)."""
+        ENGINE.use_gpu_again()
+        return {"ok": True, "restart": True}
 
     @app.get("/model/status")
     def model_status():
@@ -1040,6 +1069,17 @@ def main() -> None:
     os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
     os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
     DATA.mkdir(parents=True, exist_ok=True)
+    mode = device_mode()
+    fb = cpu_fallback_active() if mode == "auto" else None
+    if mode == "cpu":
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"          # người dùng chọn CPU: không khởi tạo CUDA
+        print("Chạy CPU (chọn ở Cài đặt › Dịch & lồng tiếng)", flush=True)
+    elif fb:
+        # card lỗi lần trước: ẩn GPU TRƯỚC khi nạp torch -> CUDA không khởi tạo, chạy CPU sạch (xem fall_back_to_cpu)
+        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+        ENGINE.force_cpu, ENGINE.fallback = True, str(fb.get("reason") or "card đồ hoạ lỗi lần trước")
+        print(f"Chạy CPU (card đồ hoạ lỗi lần trước, thử lại GPU sau {FALLBACK_HOURS} giờ hoặc nút "
+              f"'Thử lại card đồ hoạ'): {ENGINE.fallback}", flush=True)
     try:
         n = migrate_from_voicestudio()
         if n:

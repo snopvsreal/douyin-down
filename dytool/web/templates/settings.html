@@ -48,6 +48,12 @@
         <a class="btn" href="/voicestudio">Mở trang Giọng nói</a>
         <p class="hint">Trạng thái, tải model lần đầu (3,3 GB), giọng đã lưu: trang Giọng nói / chip Giọng nói trên cùng.</p></div>
     </div>
+    <div class="set-row">
+      <div class="set-label"><b>Chạy lồng tiếng bằng</b>
+        <p class="hint">Đọc giọng (OmniVoice) trên card đồ hoạ NVIDIA nhanh hơn CPU nhiều lần. Đổi lúc giọng nói đang bật
+          thì máy chủ giọng nói tự khởi động lại.</p></div>
+      {% with mode = voice_mode, devices = voice_devices, msg = '' %}{% include '_voice_device.html' %}{% endwith %}
+    </div>
   </div>
 </section>
 

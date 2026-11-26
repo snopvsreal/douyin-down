@@ -510,11 +510,32 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         if _editing():
             return PlainTextResponse("Đang lồng tiếng 1 video — đợi xong rồi thử lại card đồ hoạ.", 400)
         try:
-            vs_api.use_gpu(cfg)
+            vs_api.use_gpu(cfg)              # xoá dấu chạy CPU
         except vs_api.VSError as e:
             return PlainTextResponse(str(e), 400)
+        services.restart_voicestudio(cfg)    # GPU bị ẩn trong tiến trình cũ -> phải bật lại
         services._vs_info["at"] = 0
-        return _vs_done("Đang nạp lại model giọng nói lên card đồ hoạ — card vẫn lỗi thì tự quay về CPU")
+        return _vs_done("Đang khởi động lại giọng nói trên card đồ hoạ — card vẫn lỗi thì tự quay về CPU")
+
+    @app.post("/settings/voice-device")
+    def voice_device_set(request: Request, mode: str = Form(...)):
+        from .. import services
+        if mode not in services.VOICE_DEVICES:
+            return PlainTextResponse("Lựa chọn không hợp lệ", 400)
+        old = services.voice_device()
+        if mode != old and _editing():
+            return PlainTextResponse("Đang edit / lồng tiếng 1 video — đợi xong rồi đổi.", 400)
+        services.set_voice_device(mode)
+        msg = ""
+        if mode != old:
+            msg = "Đã lưu — áp dụng từ lần bật giọng nói tới"
+            if services.vs_state(cfg) != "off":
+                msg = ("Đã lưu — đang khởi động lại máy chủ giọng nói (khoảng 1 phút)"
+                       if services.restart_voicestudio(cfg) else
+                       "Đã lưu — máy chủ giọng nói đặt ở máy khác: khởi động lại trên máy đó để áp dụng")
+        services._vs_info["at"] = 0
+        return tpl.TemplateResponse(request, "_voice_device.html",
+                                    {"mode": mode, "devices": services.VOICE_DEVICES, "msg": msg})
 
     # ----- việc chạy nền (đọc thử / tạo giọng nói / nghe thử giọng thiết kế): ô kết quả tự hỏi lại -----
     _vs_jobs: dict = {}         # khoá -> {"state": "run"|"ok"|"err", "msg", "at", "label", "file"}
@@ -1581,13 +1602,14 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request):
         import os
-        from .. import updates
+        from .. import services, updates
         from ..cookies import cookie_status
         # tăng tốc AI: đọc phiên bản torch (bản "+cu…" = có CUDA), không import torch (không khởi động CUDA / tốn VRAM)
         return render(request, "settings.html", shard=_shard_info(),
                       douyin=cookie_status(cfg["douyin"].get("cookie", "")), dy_logging_in=_alive("douyin"),
                       version=updates.installed("dytool"), root=str(ROOT), data_dir=str(data),
-                      config_file=str(ROOT / config_path), accel=accel)
+                      config_file=str(ROOT / config_path), accel=accel,
+                      voice_mode=services.voice_device(), voice_devices=services.VOICE_DEVICES)
 
     # tăng tốc AI: phiên bản torch (bản "+cu…" = có CUDA; không import torch -> không khởi động CUDA / tốn VRAM) và
     # tên card NVIDIA. nvidia-smi mất ~1.2 s -> đọc 1 lần ở luồng nền lúc mở app, trang Cài đặt chỉ đọc kết quả

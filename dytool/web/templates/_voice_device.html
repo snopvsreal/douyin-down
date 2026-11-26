@@ -1,0 +1,16 @@
+{# Cài đặt › Dịch & lồng tiếng › Thiết bị đọc giọng nói (services.voice_device). Bấm = POST, máy chủ trả lại khối này #}
+<div id="voice-device">
+  <div class="theme-seg theme-seg-lg" role="group" aria-label="Thiết bị đọc giọng nói">
+    {% for k, label in devices.items() %}
+    <button type="button" aria-pressed="{{ 'true' if k == mode else 'false' }}"
+            hx-post="/settings/voice-device" hx-vals='{"mode": "{{ k }}"}' hx-target="#voice-device" hx-swap="outerHTML"
+            hx-disabled-elt="closest .theme-seg"><span>{{ label }}</span></button>
+    {% endfor %}
+  </div>
+  <p class="hint" style="margin-top:6px">
+    {% if mode == 'auto' %}Dùng card NVIDIA nếu có; card lỗi (driver cũ, hết bộ nhớ card…) thì tự chuyển sang CPU, lồng tiếng vẫn chạy.
+    {% elif mode == 'gpu' %}Luôn dùng card đồ hoạ. Card lỗi thì video báo lỗi, không tự chuyển CPU.
+    {% else %}Không dùng card đồ hoạ — cả đọc giọng lẫn tách giọng (Demucs). Chậm hơn nhiều lần, dùng khi card hay lỗi.{% endif %}
+  </p>
+  {% if msg %}<p class="small muted" role="status" style="margin:4px 0 0">{{ msg }}</p>{% endif %}
+</div>

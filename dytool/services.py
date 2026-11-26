@@ -56,6 +56,40 @@ def ensure_tdl(cfg: dict, config_path: str = "config.yaml", wait: float = 90) ->
 # nếu máy vẫn cài. config.yaml `edit.dub.api` trỏ máy khác / cổng khác thì dùng địa chỉ đó (không tự bật).
 VOICE_PORT = 3910
 _OLD_DEFAULT = "http://127.0.0.1:3900"
+VS_RESTART_EXIT = 75          # = voice_server.RESTART_EXIT (không import: kéo theo FastAPI / torch)
+VOICE_DEVICES = {"auto": "Tự động", "gpu": "Card đồ hoạ (GPU)", "cpu": "CPU"}
+
+
+def voice_device() -> str:
+    """Thiết bị đọc giọng nói người dùng chọn (Cài đặt › Dịch & lồng tiếng): auto = GPU, card lỗi thì tự chuyển CPU;
+    gpu = luôn GPU (lỗi thì báo lỗi); cpu = luôn CPU (cả Demucs tách giọng). Lưu data/voice/device.json — máy chủ
+    giọng nói đọc lúc bật."""
+    import json
+    try:
+        m = json.loads((ROOT / "data" / "voice" / "device.json").read_text("utf-8-sig")).get("mode")
+    except (OSError, ValueError, AttributeError):
+        m = None
+    return m if m in VOICE_DEVICES else "auto"
+
+
+def set_voice_device(mode: str) -> None:
+    import json
+    import os
+    if mode not in VOICE_DEVICES:
+        raise ValueError(mode)
+    p = ROOT / "data" / "voice" / "device.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"mode": mode}), "utf-8")
+    os.replace(tmp, p)
+
+
+def restart_voicestudio(cfg: dict) -> bool:
+    """Tắt rồi bật lại máy chủ giọng nói do dytool bật (đổi thiết bị đọc). False = máy chủ không do dytool bật."""
+    if not stop_voicestudio() and vs_state(cfg) != "off":
+        return False
+    start_voicestudio(cfg)
+    return True
 
 
 def vs_api(cfg: dict) -> str:
@@ -107,8 +141,10 @@ def start_voicestudio(cfg: dict) -> str:
         from . import voice_model
         voice_model.ensure_background()       # 3,3 GB — tải xong lần sau bật được
         return "missing"
-    if _vs_proc is not None and _vs_proc.poll() is not None and time.time() - _vs_started < 300:
-        _vs_retry_at = time.time() + 600
+    if _vs_proc is not None and _vs_proc.poll() is not None:
+        # thoát mã VS_RESTART_EXIT = máy chủ tự xin khởi động lại (card đồ hoạ lỗi -> lần sau chạy CPU): bật lại ngay
+        if _vs_proc.returncode != VS_RESTART_EXIT and time.time() - _vs_started < 300:
+            _vs_retry_at = time.time() + 600
         _vs_proc = None
     if time.time() < _vs_retry_at:
         return "crashed"

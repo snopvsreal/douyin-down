@@ -41,11 +41,18 @@ Dịch vụ ngoài phải đang chạy:
   chặn mọi thao tác khác trên ống đó (GetFileType lúc import torch) → nạp model kẹt mãi; dùng `PeekNamedPipe` mỗi giây,
   ERROR_BROKEN_PIPE = dytool đã chết → `os._exit`. GPU fp16 ~2,2 GB VRAM (GTX 1050 Ti: thiết kế 6 s, nhân bản 14 s cho
   câu 3,6 s — **bằng đúng VoiceStudio** trên cùng card); `empty_cache` sau mỗi lần đọc để Demucs còn VRAM.
-  **Card lỗi → tự chạy CPU** (2026-11-27, máy khác của người dùng báo lồng tiếng lỗi 500): lỗi CUDA lúc nạp / đọc
-  (`_is_cuda_error`) → `Engine.fall_back_to_cpu` nạp lại fp32 trên CPU rồi đọc lại câu đó; hết VRAM thì dọn bộ đệm thử
-  GPU 1 lần trước, và chỉ CPU tới hết phiên; lỗi khác (driver cũ, card không hợp torch) nhớ `settings.json`
-  `cpu_fallback` 24 giờ. Trang Giọng nói: cảnh báo + nút **Thử lại card đồ hoạ** (`/model/use-gpu`). Lỗi chưa lường
-  trước trả `{"detail": "TênLỗi: …"}` (handler `Exception`) thay cho "Internal Server Error" trơn. Đừng chạy 2
+  **Card lỗi → tự chạy CPU** (2026-11-27, RTX 3050 Ti của người dùng: `AcceleratorError: illegal memory access`):
+  lỗi CUDA lúc nạp / đọc (`_is_cuda_error`) → `Engine.fall_back_to_cpu`. Hết VRAM: dọn bộ đệm thử GPU 1 lần, rồi nạp
+  lại fp32 trên CPU ngay trong tiến trình. Lỗi khác: **CUDA của cả tiến trình hỏng hẳn** (mọi lệnh torch.cuda sau đó
+  lỗi lại — kể cả `torch.manual_seed` khi đọc bằng CPU; bản 0.5.1 chuyển CPU trong tiến trình nên vẫn 500) → ghi
+  `settings.json` `cpu_fallback` (24 giờ), trả 503 + `x-restart`, tự thoát mã 75 (`RESTART_EXIT`; services không coi
+  là "bật lên rồi chết"); `main()` thấy dấu thì `CUDA_VISIBLE_DEVICES=-1` trước khi nạp torch (**chuỗi rỗng trên
+  Windows = xoá biến**, không ẩn được). `dub.VoiceStudio._speech`: 503 x-restart / mất kết nối → `_wait_restart` (chờ
+  tiến trình cũ thoát, `start_voicestudio`, chờ `/model/status` loaded) rồi gửi lại 1 lần. **Lựa chọn thiết bị** ở Cài
+  đặt › Dịch & lồng tiếng (`_voice_device.html`, `/settings/voice-device`, `services.voice_device` →
+  `data/voice/device.json`): auto (như trên) / gpu (luôn GPU, lỗi thì báo, không chuyển) / cpu (ẩn GPU, Demucs `-d
+  cpu`); đổi lúc máy chủ đang bật → `services.restart_voicestudio`. Trang Giọng nói: cảnh báo + nút **Thử lại card
+  đồ hoạ** (xoá dấu + khởi động lại). Lỗi chưa lường trước trả `{"detail": "TênLỗi: …"}` (handler `Exception`). Đừng chạy 2
   tiến trình model cùng lúc: card 4 GB tràn sang RAM chung → chậm 8× (đo 108 s / câu). **Model** (`voice_model.py`):
   ghim `k2-fsa/OmniVoice@c5fdb5c` (bản còn `audio_tokenizer/` bên trong), mỗi file khớp SHA256 (LFS) / blob git SHA1,
   về `data/models/omnivoice` (3,3 GB); máy có app VoiceStudio đã tải đúng bản → **liên kết cứng** (không tốn ổ, không

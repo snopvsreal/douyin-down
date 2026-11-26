@@ -6,9 +6,9 @@
 
 **Biến video Douyin hot thành Reels tiếng Việt — tự tìm, tự edit, tự lồng tiếng, bạn chỉ việc duyệt.**
 
-[![Phiên bản](https://img.shields.io/github/v/release/snopvsreal/douyin-down?label=phi%C3%AAn%20b%E1%BA%A3n&color=0f766e&style=flat-square)](https://github.com/snopvsreal/douyin-down/releases/latest) [![Lượt tải](https://img.shields.io/github/downloads/snopvsreal/douyin-down/total?label=l%C6%B0%E1%BB%A3t%20t%E1%BA%A3i&color=0f766e&style=flat-square)](https://github.com/snopvsreal/douyin-down/releases) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white)](#-cài-đặt) [![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](pyproject.toml) [![Cập nhật](https://img.shields.io/github/last-commit/snopvsreal/douyin-down?label=c%E1%BA%ADp%20nh%E1%BA%ADt&color=555&style=flat-square)](https://github.com/snopvsreal/douyin-down/commits/main)
+[![Phiên bản](https://img.shields.io/github/v/release/snopvsreal/dytool?label=phi%C3%AAn%20b%E1%BA%A3n&color=0f766e&style=flat-square)](https://github.com/snopvsreal/dytool/releases/latest) [![Lượt tải](https://img.shields.io/github/downloads/snopvsreal/dytool/total?label=l%C6%B0%E1%BB%A3t%20t%E1%BA%A3i&color=0f766e&style=flat-square)](https://github.com/snopvsreal/dytool/releases) [![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows&logoColor=white)](#-cài-đặt) [![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](pyproject.toml) [![Cập nhật](https://img.shields.io/github/last-commit/snopvsreal/dytool?label=c%E1%BA%ADp%20nh%E1%BA%ADt&color=555&style=flat-square)](https://github.com/snopvsreal/dytool/commits/main)
 
-[**Tải bản mới nhất**](https://github.com/snopvsreal/douyin-down/releases/latest) · [Tính năng](#-tính-năng) · [Cài đặt](#-cài-đặt) · [Hướng dẫn nhanh](#-bắt-đầu-trong-5-phút) · [Có gì mới](CHANGELOG.md) · [Lập trình viên](docs/DEVELOPMENT.md)
+[**Tải bản mới nhất**](https://github.com/snopvsreal/dytool/releases/latest) · [Tính năng](#-tính-năng) · [Cài đặt](#-cài-đặt) · [Hướng dẫn nhanh](#-bắt-đầu-trong-5-phút) · [Có gì mới](CHANGELOG.md) · [Lập trình viên](docs/DEVELOPMENT.md)
 
 </div>
 
@@ -117,7 +117,7 @@ bạn chỉ còn là lướt qua và bấm **Duyệt**.
 </tr>
 </table>
 
-1. Tải **[`dytool-Setup-<phiên bản>.exe`](https://github.com/snopvsreal/douyin-down/releases/latest)** và chạy —
+1. Tải **[`dytool-Setup-<phiên bản>.exe`](https://github.com/snopvsreal/dytool/releases/latest)** và chạy —
    không cần quyền admin, cài vào `C:\dytool`.
    > Windows SmartScreen có thể cảnh báo vì file chưa ký số: bấm **More info → Run anyway**.
 2. Trình cài tự tải Python, thư viện AI, FFmpeg, trình duyệt ShardX, bộ tải Douyin và model giọng nói.
@@ -213,5 +213,5 @@ Douyin, Facebook, TikTok. Hãy ghi nguồn, biên tập nội dung có giá tr�
 
 <div align="center">
 <br>
-<sub>Làm tại Việt Nam 🇻🇳 · <a href="CHANGELOG.md">Có gì mới</a> · <a href="https://github.com/snopvsreal/douyin-down/issues">Báo lỗi / góp ý</a></sub>
+<sub>Làm tại Việt Nam 🇻🇳 · <a href="CHANGELOG.md">Có gì mới</a> · <a href="https://github.com/snopvsreal/dytool/issues">Báo lỗi / góp ý</a></sub>
 </div>

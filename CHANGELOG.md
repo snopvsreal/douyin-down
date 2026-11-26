@@ -1,7 +1,7 @@
 # Có gì mới
 
 Mọi thay đổi đáng chú ý của dytool. Tải bản cài ở trang
-[Releases](https://github.com/snopvsreal/douyin-down/releases) — từ 0.3.2 trở đi app tự báo và tự cài bản mới
+[Releases](https://github.com/snopvsreal/dytool/releases) — từ 0.3.2 trở đi app tự báo và tự cài bản mới
 (Cài đặt › Cập nhật).
 
 Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh hơn
@@ -113,18 +113,18 @@ Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh h�
 - ✨ **TikTok**: kênh riêng hoặc đăng kèm cùng giờ với Page Facebook.
 - ✨ Mỗi tài khoản 1 hồ sơ trình duyệt chống phát hiện riêng, tự tạo khi Đăng nhập.
 
-[0.4.0]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.4.0
-[0.3.13]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.13
-[0.3.12]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.12
-[0.3.11]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.11
-[0.3.10]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.10
-[0.3.9]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.9
-[0.3.8]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.8
-[0.3.7]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.7
-[0.3.6]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.6
-[0.3.5]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.5
-[0.3.4]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.4
-[0.3.3]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.3
-[0.3.2]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.2
-[0.3.1]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.1
-[0.3.0]: https://github.com/snopvsreal/douyin-down/releases/tag/v0.3.0
+[0.4.0]: https://github.com/snopvsreal/dytool/releases/tag/v0.4.0
+[0.3.13]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.13
+[0.3.12]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.12
+[0.3.11]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.11
+[0.3.10]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.10
+[0.3.9]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.9
+[0.3.8]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.8
+[0.3.7]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.7
+[0.3.6]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.6
+[0.3.5]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.5
+[0.3.4]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.4
+[0.3.3]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.3
+[0.3.2]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.2
+[0.3.1]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.1
+[0.3.0]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.0

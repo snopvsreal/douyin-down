@@ -12,10 +12,10 @@ goto :EOF
 #>
 # ----- phan POWERSHELL -----
 # File nay tu chua toan bo trinh cai dat: dat trong thu muc du an (cai tai cho) hoac dung rieng
-# (tu clone repo private snopvsreal/douyin-down ve %USERPROFILE%\douyin-down).
+# (tu clone repo snopvsreal/dytool ve %USERPROFILE%\douyin-down).
 # "Continue": lenh ngoai (uv, gh, git) ghi ra stderr la binh thuong; tu kiem tra $LASTEXITCODE
 $ErrorActionPreference = "Continue"
-$Repo = "snopvsreal/douyin-down"
+$Repo = "snopvsreal/dytool"
 
 function Say($msg, $color = "Cyan") { Write-Host ""; Write-Host ">> $msg" -ForegroundColor $color }
 function Ok($msg) { Write-Host "   [OK] $msg" -ForegroundColor Green }

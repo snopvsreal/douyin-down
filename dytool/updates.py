@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CHECK_EVERY = 6 * 3600
 
 APPS = {
-    "dytool": {"name": "dytool", "repo": "snopvsreal/douyin-down", "asset": r"^dytool-Setup-[\d.]+\.exe$"},
+    "dytool": {"name": "dytool", "repo": "snopvsreal/dytool", "asset": r"^dytool-Setup-[\d.]+\.exe$"},
 }
 
 _lock = threading.Lock()

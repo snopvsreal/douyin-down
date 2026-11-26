@@ -21,8 +21,27 @@
 
 {% from "_macros.html" import chan_av %}
 {% macro nav_chan(ch, on=false, oob=false) -%}
-<a href="/pages/{{ ch.id }}" id="nav-ch-{{ ch.id }}" class="nav-item nav-chan {{ 'on' if on }} {{ '' if ch.enabled else 'off' }}" {{ 'aria-current=page' if on }}
-   title="{{ ch.name }} — {{ 'đang bật' if ch.enabled else 'đang tắt' }}" {{ 'hx-swap-oob=outerHTML' if oob }}>
-  {{ chan_av(ch.id, ch.name, ch.tt, ch.color, size=22) }}
-  <span class="label">{{ ch.name }}</span><span class="sr-only">{{ ' (TikTok)' if ch.tt else ' (Facebook)' }}</span></a>
+{# 1 kênh ở menu trái (người dùng 2026-11-26): bấm ẢNH ĐẠI DIỆN = bật / tắt kênh (ảnh xám = đang tắt), bấm TÊN = mở
+   Cài đặt kênh. Phản hồi bật / tắt: hx-swap-oob (_ch_toggle.html) #}
+<div class="nav-chan-row {{ '' if ch.enabled else 'off' }}" id="nav-ch-{{ ch.id }}" {{ 'hx-swap-oob=outerHTML' if oob }}>
+  {{ av_toggle(ch, 22) }}
+  <a href="/pages/{{ ch.id }}?tab=nguon" class="nav-item nav-chan {{ 'on' if on }} {{ '' if ch.enabled else 'off' }}" {{ 'aria-current=page' if on }}
+     title="Cài đặt kênh {{ ch.name }}">
+    <span class="label">{{ ch.name }}</span><span class="sr-only">{{ ' (TikTok)' if ch.tt else ' (Facebook)' }}{{ '' if ch.enabled else ' — đang tắt' }}</span></a>
+</div>
+{%- endmacro %}
+
+{# ảnh đại diện kênh = nút bật / tắt kênh #}
+{% macro av_toggle(ch, size=22) -%}
+<button type="button" class="av-tgl {{ 'is-on' if ch.enabled else 'is-off' }}" role="switch" aria-checked="{{ 'true' if ch.enabled else 'false' }}"
+        aria-label="Bật kênh {{ ch.name }}" title="{{ ch.name }} {{ 'đang bật — bấm ảnh để tắt' if ch.enabled else 'đang tắt — bấm ảnh để bật' }}"
+        hx-post="/pages/{{ ch.id }}/toggle" hx-swap="none" hx-disabled-elt="this">{{ chan_av(ch.id, ch.name, ch.tt, ch.color, size=size) }}</button>
+{%- endmacro %}
+
+{# công tắc "Bật kênh" đầu trang kênh (ô của form tự lưu #settings) — vẽ lại khi bật / tắt nhanh từ menu, không thì
+   lần tự lưu sau gửi giá trị cũ, bật lại kênh vừa tắt #}
+{% macro switch(page, oob=false) -%}
+<label class="ch-switch" id="ch-switch" {{ 'hx-swap-oob=outerHTML' if oob }}>Bật kênh
+  <input type="checkbox" class="switch" role="switch" name="enabled" form="settings" {{ 'checked' if page.enabled }}
+         aria-label="Bật kênh {{ page.name }} — tool tự quét, edit, lồng tiếng và đăng"></label>
 {%- endmacro %}

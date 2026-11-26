@@ -8,16 +8,26 @@
       <video class="vv-video" src="/media/edited/p{{ v.page_id }}_{{ v.id }}.mp4" controls preload="metadata" playsinline></video>
       {% if raw %}<div class="seg vv-seg" role="group" aria-label="Xem bản">
         <button type="button" data-vv-src="/media/edited/p{{ v.page_id }}_{{ v.id }}.mp4" aria-pressed="true">Đã edit</button>
-        <button type="button" data-vv-src="/media/raw/{{ v.id }}" aria-pressed="false">Bản gốc</button></div>{% endif %}
-    {% elif raw %}
-      <video class="vv-video" src="/media/raw/{{ v.id }}" controls preload="metadata" playsinline></video>
+        <button type="button" data-vv-src="{{ raw_src }}" aria-pressed="false">Bản gốc</button></div>{% endif %}
+    {% elif raw and not raw_src.startswith('/media/preview/') %}
+      <video class="vv-video" src="{{ raw_src }}" controls preload="metadata" playsinline></video>
       <p class="small muted" style="margin:6px 0 0">Chưa edit xong — đây là video gốc.</p>
     {% else %}
-      {# chưa tải về (hoặc đã dọn sau khi đăng): phát thẳng bản gốc trên Douyin qua /media/preview — không lưu file #}
-      <video class="vv-video" src="/media/preview/{{ v.page_id }}/{{ v.id }}" controls preload="metadata" playsinline
-             onerror="this.hidden=true; this.nextElementSibling.hidden=false"></video>
-      <div class="vv-none small muted" hidden>Không phát được video gốc từ Douyin — video có thể đã bị xoá / để riêng tư,
-        hoặc backend tải Douyin chưa chạy. Thử <a href="https://www.douyin.com/video/{{ v.id }}" target="_blank" rel="noopener">mở trên douyin.com</a>.</div>    {% endif %}
+      {# chưa tải về (hoặc đã dọn sau khi đăng), hoặc file gốc trên máy là H.265 (WebView2 không hiện hình): phát thẳng
+         bản H.264 trên Douyin qua /media/preview — không lưu file #}
+      {# lần đầu mất 5–10 s (lấy link mới qua backend tải) -> hiện "Đang lấy video…"; lỗi thì hiện đúng lý do máy chủ trả
+         (hỏi lại 2 byte đầu) thay vì khung đen (người dùng 2026-11-26: "lại không xem được") #}
+      <div class="vv-pv">
+        <video class="vv-video" src="/media/preview/{{ v.page_id }}/{{ v.id }}" controls preload="metadata" playsinline
+               onloadeddata="this.parentNode.querySelector('.vv-wait').hidden=true"
+               onerror="const w=this.parentNode.querySelector('.vv-wait'), n=this.parentNode.querySelector('.vv-none'); this.hidden=true; w.hidden=true; n.hidden=false;
+                        fetch(this.src, {headers: {Range: 'bytes=0-1'}}).then(r => r.ok ? '' : r.text()).catch(e => String(e)).then(t => { if (t) n.querySelector('.vv-why').textContent = t; })"></video>
+        <div class="vv-wait"><span class="spin" aria-hidden="true"></span>Đang lấy video gốc từ Douyin… (lần đầu 5–10 giây)</div>
+        <div class="vv-none small muted" hidden><b>Không phát được video gốc từ Douyin.</b>
+          <span class="vv-why">Video có thể đã bị xoá / để riêng tư, hoặc backend tải Douyin chưa chạy.</span>
+          Thử <a href="https://www.douyin.com/video/{{ v.id }}" target="_blank" rel="noopener">mở trên douyin.com</a>.</div>
+      </div>
+    {% endif %}
   </div>
   <div class="vv-info">
     {% if pos %}

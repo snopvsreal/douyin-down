@@ -2,23 +2,20 @@
 {% block title %}Hôm nay{% endblock %}
 {% block crumb %}Làm việc › <b>Hôm nay</b>{% endblock %}
 {% block body %}
-{% from "_macros.html" import empty, plat_icon %}
+{% from "_macros.html" import empty, plat_icon, chan_av %}
 {#
   Trang Hôm nay (thiết kế lại 2026-11): trả lời đúng thứ tự 3 câu người dùng hỏi mỗi lần mở app —
   1. Việc gì chờ mình?  2. Hôm nay đang chạy thế nào?  3. Có gì hỏng không?
   VỪA 1 MÀN HÌNH, KHÔNG CUỘN (người dùng 2026-11-26; .today = khung cao đúng phần còn lại của cửa sổ, chỉ bật khi
-  cửa sổ đủ to — app.css "Hôm nay vừa 1 màn hình"): dòng chào + nút · 4 ô tổng quan · thân 2 cột lấp phần còn lại:
-  trái = việc cần xử lý + dải video chờ duyệt NẰM NGANG (video co theo chiều cao, nhiều thì lướt ngang; video tự duyệt
-  chưa gửi nối đuôi, có nhãn) + dây chuyền dạng dải mảnh; phải = Lịch hôm nay, Kênh (mỗi khối tự cuộn bên trong).
+  cửa sổ đủ to — app.css "Hôm nay vừa 1 màn hình"): dòng chào + nút · thân 2 cột lấp phần còn lại:
+  trái = việc cần xử lý (ô tổng quan Chờ duyệt / Đăng hôm nay đã bỏ 2026-11-26 — người dùng: vô nghĩa) + dải video chờ duyệt NẰM NGANG (video co theo chiều cao, nhiều thì lướt ngang; video tự duyệt
+  chưa gửi nối đuôi, có nhãn); dây chuyền video đã chuyển sang đầu trang Video (2026-11-26); phải = Lịch hôm nay, Kênh (mỗi khối tự cuộn bên trong).
   Đang làm / Tiếp theo: hộp mở từ thẻ Chạy tự động cuối menu. Nhật ký: nút ở dòng chào mở hộp #logpop.
 #}
 {% set t = totals %}
-{% set n_today = today|selectattr('cls', 'equalto', 'ok')|list|length %}
-{% set n_wait = today|length - n_today %}
 {% set hour = vnt(time.time(), '%H')|int %}
 {% set wd = ['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'][vnt(time.time(), '%w')|int] %}
 {% set greet = 'Chào buổi sáng' if hour < 11 else ('Chào buổi trưa' if hour < 14 else ('Chào buổi chiều' if hour < 18 else 'Chào buổi tối')) %}
-{% set cap_used = chans|sum(attribute='n') %}{% set cap_all = chans|sum(attribute='cap') %}
 
 <div class="today">
 <header class="today-hero">
@@ -44,30 +41,6 @@
 <div hx-get="/partials/login/douyin" hx-trigger="load, every 1s [!document.hidden]" hx-swap="innerHTML" class="lp-slot"></div>
 {% if msg %}<div class="notice" role="status">{{ msg }}</div>{% endif %}
 
-{# ---------- 4 ô tổng quan ---------- #}
-<div class="today-kpis">
-  <a class="kpi {{ 'is-on' if rq }}" href="#cho-duyet">
-    <span class="kpi-l">Chờ duyệt</span>
-    <span class="kpi-n num">{{ rq|length }}</span>
-    <span class="kpi-s">{% if rq_auto %}{{ rq_auto|length }} đã duyệt, chưa gửi{% elif t.get('downloaded') %}{{ t.downloaded }} video đang chờ edit{% else %}không còn video nào{% endif %}</span>
-  </a>
-  <a class="kpi" href="/calendar">
-    <span class="kpi-l">Đăng hôm nay</span>
-    <span class="kpi-n num">{{ n_today }}<small> / {{ today|length }}</small></span>
-    <span class="kpi-bar" aria-hidden="true"><span style="width:{{ (100 * n_today / today|length)|round|int if today else 0 }}%"></span></span>
-    <span class="kpi-s">{% if n_wait %}{{ n_wait }} bài còn chờ giờ đăng{% elif today %}đã đăng hết bài hôm nay{% else %}chưa có bài nào hôm nay{% endif %}</span>
-  </a>
-  <a class="kpi {{ 'is-warn' if todo else 'is-ok' }}" href="{{ '#can-xu-ly' if todo else '/queue' }}">
-    <span class="kpi-l">Hệ thống</span>
-    <span class="kpi-n">{% if todo %}<span class="num">{{ todo|length }}</span><small> việc cần xử lý</small>{% else %}Ổn định{% endif %}</span>
-    <span class="kpi-s"><span class="dot {{ 'ok' if worker.running else 'warn' }}"></span> Chạy tự động {{ 'đang bật' if worker.running else 'đang tạm dừng' }}</span>
-  </a>
-  <a class="kpi" href="/accounts">
-    <span class="kpi-l">Kênh đang bật</span>
-    <span class="kpi-n num">{{ chans|length }}</span>
-    <span class="kpi-s">{% if chans %}{{ cap_used }} / {{ cap_all }} bài hôm nay theo giới hạn{% else %}bật kênh ở trang kênh{% endif %}</span>
-  </a>
-</div>
 
 {% set icons = {
   'review': '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m8.5 12.2 2.4 2.3 4.6-4.7"/>',
@@ -134,31 +107,42 @@
         <div class="rq-row">{% for v in rq[:40] %}{{ rq_card(v, '0') }}{% endfor %}{% for v in rq_auto[:24] %}{{ rq_card(v, '') }}{% endfor %}
           {% if rq|length > 40 %}<p class="small muted rq-more">Còn {{ rq|length - 40 }} video nữa — bấm <b>Duyệt {{ rq|length }} video</b> để duyệt lần lượt hết.</p>{% endif %}</div>
       {% else %}
-        <div class="today-empty">
-          {% call empty('ok', 'Không còn video nào chờ duyệt', tone='ok', sm=true) %}Video edit xong sẽ hiện ở đây{% if t.get('downloaded') %} — đang có {{ t.downloaded }} video chờ edit{% endif %}.{% endcall %}
+        <div class="today-empty {{ 'is-compact' if edit_q }}">
+          {% call empty('ok', 'Không còn video nào chờ duyệt', tone='ok', sm=true) %}Video edit xong sẽ hiện ở đây{% if t.get('downloaded') and not edit_q %} — đang có {{ t.downloaded }} video chờ edit{% endif %}.{% endcall %}
         </div>
       {% endif %}
     </section>
 
-    {# Dây chuyền: đúng thứ tự 1 video đi qua; bấm 1 bước để xem danh sách #}
-    {% set steps = [
-      ('Tìm thấy', t.get('new', 0), '/queue?status=new', ''),
-      ('Đã tải', t.get('downloaded', 0), '/queue?status=downloaded', ''),
-      ('Chờ duyệt', t.get('review', 0), '#cho-duyet', 'hot' if t.get('review') else ''),
-      ('Chờ đăng', t.get('approved', 0) + t.get('publish_now', 0) + t.get('schedule_pending', 0) + t.get('uploading', 0), '/calendar', ''),
-      ('Đã hẹn giờ', t.get('scheduled', 0), '/calendar', ''),
-      ('Đã đăng', t.get('uploaded', 0), '/queue?status=uploaded', 'fin')] %}
-    <section class="today-sec pipe-sec" aria-labelledby="h-pipe">
-      <div class="sec-h"><h2 id="h-pipe">Dây chuyền video</h2>
-        <span class="small muted">bấm 1 bước để xem các video ở bước đó</span>
-        {% if t.get('failed') %}<a class="pill err" href="/queue?status=failed">{{ t.failed }} lỗi</a>{% endif %}</div>
-      <nav class="pipe" aria-label="Số video ở từng bước">
-        {% for label, n, href, cls in steps %}
-          <a class="pipe-step {{ cls }} {{ 'is-zero' if not n }}" href="{{ href }}">
-            <span class="pipe-n num">{{ n }}</span><span class="pipe-l">{{ label }}</span></a>
+    {# Chờ edit (người dùng 2026-11-26): video đã tải, chưa edit — luôn hiện (còn video chờ duyệt thì là khối thấp bên
+       dưới, hết thì lấp cả cột). Mỗi dòng có ảnh + tên kênh; chip lọc theo kênh (lọc ngay trên trang). Bấm dòng = xem
+       video gốc, Edit ngay = làm trước (không cần bật chạy tự động) #}
+    {% if edit_q %}
+    <section class="today-sec edit-sec" aria-labelledby="h-edit">
+      <div class="sec-h"><h2 id="h-edit">Chờ edit <span class="count">{{ t.get('downloaded', edit_q|length) }}</span></h2>
+        <span class="small muted">edit xong sẽ lên Chờ duyệt — <b>Edit ngay</b> để làm trước</span>
+        <a class="small edit-all" href="/queue?status=downloaded">Xem tất cả</a></div>
+      {% if edit_by|length > 1 %}
+      <div class="ed-chips" role="group" aria-label="Lọc video chờ edit theo kênh">
+        <button type="button" class="ed-chip on" data-ed-ch="" aria-pressed="true">Mọi kênh <span class="num">{{ t.get('downloaded', edit_q|length) }}</span></button>
+        {% for c in edit_by %}
+        <button type="button" class="ed-chip" data-ed-ch="{{ c.page_id }}" aria-pressed="false">
+          <span class="chan-dot" style="background:{{ colors.get(c.page_id, 'var(--t3)') }}" aria-hidden="true"></span>{{ c.name }} <span class="num">{{ c.n }}</span></button>
         {% endfor %}
-      </nav>
+      </div>
+      {% endif %}
+      <div class="card edit-list">
+        {% for v in edit_q %}
+        <div class="ed-row" data-ed-page="{{ v.page_id }}" data-vview="{{ v.page_id }}:{{ v.id }}" tabindex="0" role="button"
+             aria-label="Xem video gốc của {{ v.page_name }}: {{ (v.caption or v.desc or v.id)[:80] }}">
+          {{ chan_av(v.page_id, v.page_name, v.platform == 'tiktok', colors.get(v.page_id, 'var(--primary)'), size=28) }}
+          <span class="ed-main"><b class="trunc">{{ v.caption or v.desc or v.id }}</b>
+            <span class="small muted trunc"><span class="ed-ch">{{ v.page_name }}</span> · {{ (v.duration or 0)|round|int }}s · ♥ {{ '{:,}'.format(v.likes or 0) }}</span></span>
+          {% with pid=v.page_id, vid=v.id %}{% include "_edit_btn.html" %}{% endwith %}
+        </div>
+        {% endfor %}
+      </div>
     </section>
+    {% endif %}
   </div>
 
   <aside class="today-side" aria-label="Đang chạy hôm nay">
@@ -198,6 +182,16 @@
 </div>
 
 <script>
+  // Chờ edit: chip lọc theo kênh (gắn 1 lần — trang tự làm mới chạy lại script này)
+  if (!window.__dyEdFilter) {
+    window.__dyEdFilter = true;
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-ed-ch]'); if (!b) return;
+      const ch = b.dataset.edCh;
+      b.parentElement.querySelectorAll('[data-ed-ch]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
+      document.querySelectorAll('.ed-row[data-ed-page]').forEach(r => r.hidden = !!ch && r.dataset.edPage !== ch);
+    });
+  }
   // dải video chờ duyệt nằm ngang: lăn chuột dọc = lướt ngang (gắn 1 lần — trang tự làm mới chạy lại script này)
   if (!window.__dyRqWheel) {
     window.__dyRqWheel = true;

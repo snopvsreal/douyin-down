@@ -1,0 +1,10 @@
+{# 1 dòng trang Tất cả kênh (dùng lại khi bật / tắt nhanh — oob=true) #}
+{% from "_ch_live.html" import av_toggle %}
+<tr id="chan-row-{{ row.id }}" class="{{ '' if row.enabled else 'is-off' }}" data-name="{{ (row.name ~ ' ' ~ row.account)|lower }}"
+    {{ 'hx-swap-oob=outerHTML' if oob }}>
+  <td><div class="chan-cell">{{ av_toggle(row, 30) }}
+    <a href="/pages/{{ row.id }}?tab=nguon" title="Cài đặt kênh {{ row.name }}"><b>{{ row.name }}</b><span class="small muted">{{ 'TikTok' if row.tt else 'Facebook' }}{{ ' · ' ~ row.account if row.account }}</span></a></div></td>
+  <td class="num">{% if row.enabled %}{{ row.n }} / {{ row.cap }}{% else %}<span class="muted">—</span>{% endif %}</td>
+  <td class="num">{% if row.review %}<span class="pill info">{{ row.review }}</span>{% else %}<span class="muted">0</span>{% endif %}</td>
+  <td><span class="pill {{ 'ok' if row.enabled else '' }}">{{ 'Đang bật' if row.enabled else 'Đang tắt' }}</span></td>
+</tr>

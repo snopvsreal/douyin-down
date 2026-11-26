@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Tất cả kênh{% endblock %}
+{% block crumb %}Kênh › <b>Tất cả kênh</b>{% endblock %}
+{% block body %}
+{# Tất cả kênh (người dùng 2026-11-26: nhiều kênh thì menu trái chỉ hiện vài kênh đầu + mục "Tất cả kênh" dẫn tới đây):
+   mỗi kênh 1 dòng, bật / tắt nhanh, tìm theo tên #}
+<div class="head">
+  <div><h1>Tất cả kênh</h1>
+    <p class="sub">{{ rows|length }} kênh · {{ rows|selectattr('enabled')|list|length }} đang bật. Bấm ảnh đại diện để bật / tắt kênh, bấm tên để mở cài đặt kênh.</p></div>
+  <div class="spacer"></div>
+  <a class="btn" href="/accounts">Thêm kênh</a>
+</div>
+{% if rows %}
+<div class="toolbar">
+  <label class="search-field"><span class="sr-only">Tìm kênh</span>
+    <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+    <input type="text" id="chq" placeholder="Tìm tên kênh, tài khoản…" autocomplete="off"
+           oninput="const q=this.value.trim().toLowerCase(); document.querySelectorAll('#chan-table tr[data-name]').forEach(r => r.hidden = !!q && !r.dataset.name.includes(q))"></label>
+</div>
+<div class="card table-card">
+<table id="chan-table">
+  <tr><th>Kênh</th><th style="width:150px">Hôm nay / giới hạn</th><th style="width:110px">Chờ duyệt</th><th style="width:130px">Trạng thái</th></tr>
+  {% for row in rows %}{% include "_chan_row.html" %}{% endfor %}
+</table>
+</div>
+{% else %}
+<p class="muted">Chưa có kênh — đăng nhập tài khoản ở <a href="/accounts">Tài khoản</a>, tool tự tìm Page.</p>
+{% endif %}
+{% endblock %}

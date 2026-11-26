@@ -22,14 +22,13 @@
 <a class="skip" href="#main">Bỏ qua menu, tới nội dung chính</a>
 <div class="app" data-css="{{ css_v() }}" data-rev="{{ data_rev }}">
   <nav class="side" aria-label="Menu chính">
-    <div class="brand" translate="no"><img src="/static/icon.png" alt=""><span>dytool</span></div>
-    <button type="button" class="search-btn" data-palette-open aria-label="Tìm hoặc ra lệnh (Ctrl+K)">
+    <div class="brand" translate="no"><img src="/static/icon.png" alt=""><span>dytool{% if app_ver() %}<small class="brand-ver">{{ app_ver() }}</small>{% endif %}</span></div>
+    <button type="button" class="search-btn" data-palette-open aria-label="Tìm hoặc ra lệnh">
       <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
-      <span>Tìm hoặc ra lệnh…</span><kbd>Ctrl K</kbd></button>
+      <span>Tìm hoặc ra lệnh…</span></button>
     {% set p = request.url.path %}
     {% macro nav(href, label, on, key, icon, extra='') %}
-      <a href="{{ href }}" class="nav-item {{ 'on' if on }} {{ extra }}" {{ 'aria-current=page' if on }} title="{{ label }}{{ ' (Ctrl+' ~ key ~ ')' if key }}"
-         {% if key %}data-key="{{ key }}"{% endif %}>
+      <a href="{{ href }}" class="nav-item {{ 'on' if on }} {{ extra }}" {{ 'aria-current=page' if on }} title="{{ label }}">
         <svg viewBox="0 0 24 24" aria-hidden="true">{{ icon|safe }}</svg>
         <span class="label">{{ label }}</span>{{ caller() if caller }}</a>
     {% endmacro %}
@@ -46,15 +45,24 @@
     {% endcall %}
 
     {# nhóm Kênh: nút + nhỏ cạnh tiêu đề (không phải 1 mục menu — trước đây trông như nút "thêm tài khoản" giữa menu) #}
-    <div class="nav-sec nav-sec-row"><span>Kênh</span>
+    {# chữ "Kênh" = mở trang Tất cả kênh (bật / tắt, tìm kênh); số = đang bật / tổng #}
+    <div class="nav-sec nav-sec-row"><a href="/channels" class="nav-sec-link {{ 'on' if p.startswith('/channels') }}"
+        {{ 'aria-current=page' if p.startswith('/channels') }} title="Tất cả kênh: bật / tắt nhanh, tìm kênh">Kênh
+        {%- if nav_pages %} <span class="nav-count num">{{ nav_pages|selectattr('enabled')|list|length }}/{{ nav_pages|length }}</span>{% endif %}
+        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5"/></svg></a>
       <a href="/accounts" class="nav-sec-add" title="Thêm kênh: đăng nhập tài khoản Facebook / TikTok, tool tự tìm Page"
          aria-label="Thêm kênh"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg></a></div>
     {% from "_ch_live.html" import nav_chan %}
+    {# nhiều kênh: menu chỉ hiện NAV_MAX kênh đầu (+ kênh đang mở) — còn lại ở trang Tất cả kênh (bấm chữ Kênh), menu không bị dồn chật #}
+    {% set NAV_MAX = 4 %}
+    <div class="nav-chans">
     {% for ch in nav_pages %}
-      {{ nav_chan(ch, on=(p == '/pages/' ~ ch.id)) }}
+      {% if loop.index <= NAV_MAX or p == '/pages/' ~ ch.id %}{{ nav_chan(ch, on=(p == '/pages/' ~ ch.id)) }}{% endif %}
     {% else %}
       <p class="nav-empty">Chưa có kênh — đăng nhập tài khoản ở <a href="/accounts">Tài khoản</a>, tool tự tìm Page.</p>
     {% endfor %}
+    {% if nav_pages|length > NAV_MAX %}<a href="/channels" class="nav-more">+ {{ nav_pages|length - NAV_MAX }} kênh khác</a>{% endif %}
+    </div>
 
     <p class="nav-sec">Hệ thống</p>
     {{ nav('/accounts', 'Tài khoản', p.startswith('/accounts'), 4,
@@ -71,12 +79,11 @@
       {# vẽ sẵn nội dung (run_task) — không dùng trigger "load": chuyển tab sẽ thấy khung rỗng rồi mới hiện chữ (nháy) #}
       <div class="run-card" id="runcard" hx-get="/partials/runcard" hx-trigger="every 3s [!document.hidden]" hx-swap="innerHTML">
         {% with task=run_task %}{% include "_runcard.html" %}{% endwith %}</div>
-      <div class="app-ver"><span>dytool {{ app_ver() or '' }}</span><span>Ctrl+1–6 · Ctrl+K</span></div>
     </div>
   </nav>
 
   <div class="content" id="main" tabindex="-1">
-    {# thanh trên cùng: đường dẫn trang + trạng thái dịch vụ (Douyin / Tải Douyin / VoiceStudio / cập nhật), poll 5s #}
+    {# thanh trên cùng: đường dẫn trang + chip cập nhật (khi có bản mới), poll 5s. Douyin / Tải Douyin / Giọng nói: thanh trạng thái dưới đáy #}
     <header class="topbar">
       <div class="crumb">{% block crumb %}{{ self.title() }}{% endblock %}</div>
       {# hx-preserve: chuyển tab (hx-boost thay body) giữ nguyên chip đang hiện, không trống rồi hiện lại (nháy) #}
@@ -105,9 +112,16 @@
     {% endif %}
     {% block body %}{% endblock %}</main>
   </div>
+
+  {# thanh trạng thái dưới đáy cửa sổ (người dùng 2026-11-26): Hệ thống + đăng nhập Douyin + backend Tải Douyin + Giọng nói, dồn phải (phiên bản: cạnh tên app đầu menu) (poll 5s, giữ nguyên khi
+     chuyển tab — hx-preserve) · phiên bản + phím tắt #}
+  <footer class="statusbar">
+    <div class="sb-group right" id="svc-bar" hx-preserve="true" hx-get="/partials/services?part=bar" hx-swap="innerHTML"
+         hx-trigger="load, every 5s [!document.hidden], visibilitychange[!document.hidden] from:document"></div>
+  </footer>
 </div>
 
-{# Ctrl+K: tìm trang / kênh / video, chạy lệnh nhanh #}
+{# hộp Tìm (nút đầu menu): tìm trang / kênh / video, chạy lệnh nhanh #}
 <dialog class="palette" id="palette" aria-label="Tìm hoặc ra lệnh">
   <div class="pal-box">
     <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
@@ -150,7 +164,7 @@
   })();
   // CẬP NHẬT TRỰC TIẾP: hỏi /partials/rev 3 s / lần; dữ liệu đổi (bạn sửa, hoặc tool chạy nền tải / edit / đăng xong)
   // -> lấy lại trang đang mở, thay <main> + menu trái (giữ mục <details> đang mở, vị trí cuộn, thẻ Chạy tự động).
-  // Hoãn lại khi đang gõ / chọn trong ô, có chỉnh sửa chưa lưu, đang xem video, đang kéo thả, hộp Ctrl+K mở.
+  // Hoãn lại khi đang gõ / chọn trong ô, có chỉnh sửa chưa lưu, đang xem video, đang kéo thả, hộp Tìm mở.
   if (!window.__dyLive) {
     window.__dyLive = true;
     let pending = false, dirty = false;     // mốc = data-rev lúc vẽ trang (.app), cập nhật sau mỗi lần vẽ lại
@@ -289,7 +303,6 @@
       if (e.target.id === 'runpop') e.target.close();
     });
   }
-  // Phím tắt: Ctrl+1..6 chuyển trang, Ctrl+K tìm / lệnh nhanh. Chỉ gắn 1 lần (boost chạy lại script này).
   // Hộp xem lại video: bấm phần tử có data-vview -> lấy /videos/<page>/<id>/view, mở <dialog>. Đóng = dừng phát.
   if (!window.__dyVview) {
     window.__dyVview = true;
@@ -317,7 +330,7 @@
         sw.parentElement.querySelectorAll('[data-vv-src]').forEach(x => x.setAttribute('aria-pressed', x === sw));
       }
     });
-    // link /?v=<page>:<id> (Ctrl+K, link Hộp duyệt cũ): mở thẳng hộp duyệt video đó
+    // link /?v=<page>:<id> (hộp Tìm, link Hộp duyệt cũ): mở thẳng hộp duyệt video đó
     const openFromUrl = () => {
       const k = new URLSearchParams(location.search).get('v');
       if (location.pathname === '/' && k && /^\d+:\d+$/.test(k)) {
@@ -390,12 +403,7 @@
       d.showModal(); const q = document.getElementById('pal-q'); q.value = ''; q.focus();
       htmx.trigger(q, 'focus');
     };
-    document.addEventListener('keydown', (e) => {
-      if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); openPal(); return; }
-      if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
-      const a = document.querySelector('.nav-item[data-key="' + e.key + '"]');
-      if (a) { e.preventDefault(); a.click(); }
-    });
+    // phím tắt Ctrl+1..6 / Ctrl+K đã bỏ (người dùng 2026-11-26) — hộp tìm chỉ mở bằng nút Tìm ở đầu menu
     document.addEventListener('click', (e) => {
       if (e.target.closest('[data-palette-open]')) { openPal(); return; }
       const d = pal();

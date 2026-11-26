@@ -50,6 +50,23 @@ def today_items(store) -> list[dict]:
     return sorted(out, key=lambda x: x["ts"] or 0)
 
 
+def channel_list(store, page_settings, only: int | None = None) -> list[dict]:
+    """Trang Tất cả kênh: mọi kênh (cả đang tắt) + tài khoản, số bài hôm nay / giới hạn, số video chờ duyệt."""
+    t0 = day_start(vn_time(time.time()).date())
+    accs = {r["id"]: r["name"] for r in store.q("SELECT id, name FROM accounts")}
+    out = []
+    for p in nav_pages(store):
+        if only is not None and p["id"] != only:
+            continue
+        page = store.one("SELECT * FROM pages WHERE id=?", (p["id"],))
+        n = store.one("SELECT COUNT(*) n FROM videos WHERE page_id=? AND ((uploaded_at>=? AND uploaded_at<?) OR "
+                      "(status IN ('schedule_pending','scheduled','uploading') AND scheduled_at>=? AND scheduled_at<?))",
+                      (p["id"], t0, t0 + 86400, t0, t0 + 86400))["n"]
+        out.append({**p, "account": accs.get(page["account_id"], ""), "n": n,
+                    "cap": int(page_settings(page)["max_posts_per_day"]), "review": store.counts(p["id"]).get("review", 0)})
+    return out
+
+
 def channel_today(store, page_settings) -> list[dict]:
     """Kênh đang bật: số bài hôm nay (đã đăng + đã / chờ hẹn giờ trong ngày) so với giới hạn/ngày."""
     t0 = day_start(vn_time(time.time()).date())

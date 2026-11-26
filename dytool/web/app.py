@@ -1161,13 +1161,10 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             return ai_partial(request, msg=str(e), msg_err=True)
 
     # ---------------- Hôm nay (trang đầu) ----------------
-    @app.get("/", response_class=HTMLResponse)
-    def home(request: Request, msg: str = ""):
-        import os
-        from . import plan
+    def todo_list(totals: dict) -> list[dict]:
+        """Mục "Cần bạn xử lý" (trang Hôm nay) — cũng là trạng thái Hệ thống trên thanh dưới đáy."""
         from .. import browsers
         from ..cookies import cookie_status
-        totals = store.counts()
         from .. import ai
         need_key = not ai.ready()
         # "Cần bạn xử lý": gom mọi việc người dùng phải làm vào 1 chỗ
@@ -1184,11 +1181,6 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             todo.append({"kind": "err", "n": len(missing), "title": "Bài không thấy trên nền tảng sau giờ đăng",
                          "sub": m0["error"].split(" — ")[0].split(": ", 1)[-1][:200], "btn": "Xem",
                          "href": f"/?v={m0['page_id']}:{m0['id']}"})
-        # mục "Chờ duyệt" của trang này (thay trang Hộp duyệt cũ — không lặp lại thành 1 thẻ "Cần bạn xử lý"):
-        # video chờ duyệt + nhóm riêng video đã duyệt nhưng chưa gửi lên nền tảng (đổi giờ / giữ lại / bỏ được)
-        rq_all = review_list()
-        rq = review_list(only_review=True)      # cùng danh sách với duyệt lần lượt ("2 / 5")
-        rq_auto = [r for r in rq_all if r["status"] != "review"]
         if totals.get("failed"):
             todo.append({"kind": "err", "n": totals["failed"], "title": "Video lỗi", "sub": "Xem lý do rồi bấm Thử lại",
                          "href": "/queue?status=failed", "btn": "Xem video lỗi"})
@@ -1220,8 +1212,27 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         if need_key:
             todo.append({"kind": "key", "n": None, "title": "Chưa cài AI", "sub": "Cài và đăng nhập Claude / Codex / Gemini CLI để dịch, lồng tiếng",
                          "href": "/settings#ai", "btn": "Cài AI"})
+        return todo
+
+    @app.get("/", response_class=HTMLResponse)
+    def home(request: Request, msg: str = ""):
+        import os
+        from . import plan
+        totals = store.counts()
+        todo = todo_list(totals)
+        # mục "Chờ duyệt" của trang này (thay trang Hộp duyệt cũ — không lặp lại thành 1 thẻ "Cần bạn xử lý"):
+        # video chờ duyệt + nhóm riêng video đã duyệt nhưng chưa gửi lên nền tảng (đổi giờ / giữ lại / bỏ được)
+        rq_all = review_list()
+        rq = review_list(only_review=True)      # cùng danh sách với duyệt lần lượt ("2 / 5")
+        rq_auto = [r for r in rq_all if r["status"] != "review"]
         logs = store.q("SELECT * FROM logs ORDER BY id DESC LIMIT 6")
-        return render(request, "home.html", totals=totals, todo=todo, today=plan.today_items(store),
+        # video đã tải, chờ edit (kênh bật + nhiều like trước), có nút Edit ngay; edit_by = số video chờ edit mỗi kênh
+        edit_q = store.q("SELECT v.*, p.name page_name, p.platform FROM videos v JOIN pages p ON p.id=v.page_id "
+                         "WHERE v.status='downloaded' ORDER BY p.enabled DESC, v.likes DESC LIMIT 60")
+        edit_by = store.q("SELECT v.page_id, p.name, p.platform, COUNT(*) n FROM videos v JOIN pages p ON p.id=v.page_id "
+                          "WHERE v.status='downloaded' GROUP BY v.page_id ORDER BY p.enabled DESC, n DESC")
+        return render(request, "home.html", totals=totals, todo=todo, today=plan.today_items(store), edit_q=edit_q,
+                      edit_by=edit_by,
                       chans=plan.channel_today(store, store.page_settings), logs=logs, rq=rq, rq_auto=rq_auto, msg=msg,
                       colors=plan.colors(store), today_label=vn_fmt(time.time(), "%d/%m"))
 
@@ -1262,7 +1273,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             return progress_partial(request)
         return runcard(request)
 
-    # ---------------- Ctrl+K: tìm / lệnh nhanh ----------------
+    # ---------------- Hộp Tìm: tìm / lệnh nhanh ----------------
     @app.get("/partials/palette", response_class=HTMLResponse)
     def palette(request: Request, q: str = ""):
         from . import plan
@@ -1289,12 +1300,14 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         return render(request, "_palette.html", items=items[:20], q=q)
 
     @app.get("/partials/services", response_class=HTMLResponse)
-    def services_partial(request: Request):
+    def services_partial(request: Request, part: str = ""):
         from .. import progress, updates
         from ..cookies import cookie_status
-        return render(request, "_services.html", health=health(), 
+        todo = todo_list(store.counts()) if part == "bar" else []
+        return render(request, "_services.html", health=health(), todo=todo,
                       task=progress.snapshot(), n_updates=updates.pending(),
-                      douyin=cookie_status(cfg["douyin"].get("cookie", "")), dy_logging_in=_alive("douyin"))
+                      douyin=cookie_status(cfg["douyin"].get("cookie", "")), dy_logging_in=_alive("douyin"),
+                      part="bar" if part == "bar" else "")
 
     # ---------------- Cập nhật (dytool / VoiceStudio) ----------------
     @app.get("/partials/updates", response_class=HTMLResponse)
@@ -2369,6 +2382,28 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         store.log(f"Đã lưu cài đặt Page #{pid}", page_id=pid)
         return RedirectResponse(f"/pages/{pid}?saved=1&tab=lich", 303)
 
+    @app.post("/pages/{pid}/toggle", response_class=HTMLResponse)
+    def page_toggle(request: Request, pid: int):
+        """Bật / tắt nhanh 1 kênh (công tắc ở menu trái, trang Tất cả kênh). Phản hồi = các phần hx-swap-oob."""
+        from urllib.parse import urlparse
+        from . import plan
+        page = store.one("SELECT * FROM pages WHERE id=?", (pid,))
+        if not page:
+            return PlainTextResponse("Không thấy kênh này", 404)
+        new = 0 if page["enabled"] else 1
+        store.x("UPDATE pages SET enabled=? WHERE id=?", (new, pid))
+        store.log(f"{'Bật' if new else 'Tắt'} kênh {page['name']}", page_id=pid)
+        path = urlparse(request.headers.get("HX-Current-URL", "")).path
+        rows = plan.channel_list(store, store.page_settings, only=pid) if path == "/channels" else []
+        return render(request, "_ch_toggle.html", ch=next(c for c in plan.nav_pages(store) if c["id"] == pid),
+                      on=path == f"/pages/{pid}", page=store.one("SELECT * FROM pages WHERE id=?", (pid,)),
+                      row=rows[0] if rows else None, oob=True)
+
+    @app.get("/channels", response_class=HTMLResponse)
+    def channels(request: Request):
+        from . import plan
+        return render(request, "channels.html", rows=plan.channel_list(store, store.page_settings))
+
     @app.post("/pages/{pid}/copy-settings")
     def copy_settings(pid: int, to: int = Form(...), with_sources: str = Form(None)):
         """Sao chép cài đặt kênh (lịch, edit, giọng, caption, lọc) sang kênh khác. Không chép đăng kèm TikTok / nhóm
@@ -2765,9 +2800,11 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                 up = None
             if up is None:
                 await client.aclose()
+                print(f"Xem trực tiếp {vid}: Douyin từ chối link (403/404/410)", flush=True)
                 return PlainTextResponse("Douyin không cho phát video này (có thể đã bị xoá / để riêng tư)", 502)
         except (DouyinError, httpx.HTTPError) as e:
             await client.aclose()
+            print(f"Xem trực tiếp {vid}: {type(e).__name__}: {e}", flush=True)
             return PlainTextResponse(f"Không lấy được video gốc từ Douyin: {e}", 502)
         out = {k: up.headers[k] for k in ("content-length", "content-range", "accept-ranges") if k in up.headers}
         out["content-type"] = "video/mp4"
@@ -2800,6 +2837,11 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             return PlainTextResponse("Không tìm thấy video", 404)
         edited = (data / "edited" / f"p{pid}_{vid}.mp4").is_file()
         raw = (data / "raw" / f"{vid}.mp4").is_file()
+        # file gốc tải về hay là H.265 (luồng bitrate cao nhất của Douyin) -> trình phát WebView2 chỉ có tiếng, hình đen
+        # (người dùng 2026-11-26) -> phát luồng H.264 của Douyin (/media/preview) thay cho file trên máy
+        from .. import editor
+        raw_src = (f"/media/preview/{pid}/{vid}" if raw and editor.video_codec(data / "raw" / f"{vid}.mp4") in ("hevc", "h265")
+                   else f"/media/raw/{vid}")
         # chỉ duyệt được khi đã có bản edit (giống Hộp duyệt: ở đó chỉ có video đã edit)
         can_review = v["status"] in ("review",) + QUEUED and edited
         seq = seq if seq.isdigit() else ""
@@ -2816,7 +2858,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                 prv = keys[i - 1] if i > 0 else ""
                 nxt = keys[i + 1] if i + 1 < total else ""
         import json
-        return render(request, "_video_view.html", v=v, edited=edited, raw=raw, msg=msg, msg_ok=msg_ok, seq=seq,
+        return render(request, "_video_view.html", v=v, edited=edited, raw=raw, raw_src=raw_src, msg=msg, msg_ok=msg_ok, seq=seq,
                       nxt=nxt, prv=prv, pos=pos, total=total, done=done,
                       undo=json.dumps({k: str(x) for k, x in undo.items()}) if undo else "",
                       can_review=can_review, **(review_ctx(pid) if can_review else {}))

@@ -1,0 +1,7 @@
+{# Phản hồi bật / tắt nhanh 1 kênh (menu trái / trang Tất cả kênh): mọi chỗ hiện trạng thái kênh đổi ngay (hx-swap-oob);
+   chỗ nào không có trên trang hiện tại thì htmx bỏ qua #}
+{% from "_ch_live.html" import nav_chan, pill, switch %}
+{{ nav_chan(ch, on=on, oob=true) }}
+{% if on %}{{ pill(page, oob=true) }}{{ switch(page, oob=true) }}{% endif %}
+{# <tr> phải bọc <template> (htmx 2) — để trần thì trình duyệt bỏ thẻ bảng lạc chỗ, dòng không đổi #}
+{% if row %}<template>{% include "_chan_row.html" %}</template>{% endif %}

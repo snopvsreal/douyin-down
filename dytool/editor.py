@@ -9,6 +9,27 @@ from pathlib import Path
 from . import progress, subtitles
 
 
+_codec_cache: dict[tuple[str, float], str] = {}
+
+
+def video_codec(path: Path) -> str:
+    """Mã hoá luồng hình ('h264', 'hevc'…; '' nếu không đọc được) — nhớ theo đường dẫn + giờ sửa file."""
+    try:
+        key = (str(path), path.stat().st_mtime)
+    except OSError:
+        return ""
+    if key not in _codec_cache:
+        try:
+            _codec_cache[key] = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name",
+                 "-of", "csv=p=0", str(path)], capture_output=True, text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        if len(_codec_cache) > 500:
+            _codec_cache.clear()
+    return _codec_cache[key]
+
+
 def probe(path: Path) -> tuple[int, int]:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",

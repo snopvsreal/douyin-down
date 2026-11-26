@@ -1,24 +1,38 @@
-{# Chip trạng thái trên thanh trên cùng (poll 5s): cập nhật · Douyin · Tải Douyin · Giọng nói #}
-{% if n_updates %}
-  <a class="chip warn" href="/settings#cap-nhat" title="Có bản mới — bấm để xem và cập nhật"><span class="dot warn"></span>{{ n_updates }} bản cập nhật</a>
+{# Trạng thái dịch vụ (poll 5s), 2 chỗ:
+   - part == 'bar': thanh trạng thái dưới đáy cửa sổ — Hệ thống (ổn định / N việc cần xử lý) · đăng nhập Douyin · backend Tải Douyin · Giọng nói
+     (người dùng 2026-11-26 muốn đưa xuống 1 thanh riêng phía dưới)
+   - còn lại: chip trên thanh trên cùng — chỉ còn "N bản cập nhật" (khi có bản mới) #}
+{% if part == 'bar' %}
+{% if todo %}
+  <a class="sb-item sb-alert" href="/#can-xu-ly" title="{{ todo|map(attribute='title')|join(' · ') }}"><span class="dot warn"></span>{{ todo|length }} việc cần xử lý</a>
+{% else %}
+  <span class="sb-item" title="Không có việc nào cần bạn xử lý"><span class="dot ok"></span>Hệ thống<span class="sb-s"> · ổn định</span></span>
 {% endif %}
 {% if dy_logging_in %}
-  <span class="chip"><span class="dot warn"></span>Douyin: đang đăng nhập…</span>
+  <span class="sb-item"><span class="dot warn"></span>Douyin<span class="sb-s"> · đang đăng nhập…</span></span>
 {% elif worker.captcha %}
-  <a class="chip" href="/#can-xu-ly" title="Douyin đòi xác minh — tìm video đang tạm ngừng. Bấm để xem hướng dẫn"><span class="dot err"></span>Douyin · cần xác minh</a>
+  <a class="sb-item sb-alert" href="/#can-xu-ly" title="Douyin đòi xác minh — tìm video đang tạm ngừng. Bấm để xem hướng dẫn"><span class="dot err"></span>Douyin · cần xác minh</a>
 {% elif douyin.logged_in %}
   {% set soon = douyin.days_left is not none and douyin.days_left < 7 %}
-  <span class="chip" title="{% if douyin.expires %}Đăng nhập Douyin hết hạn {{ vnt(douyin.expires, '%d/%m/%Y') }}{% endif %}">
-    <span class="dot {{ 'warn' if soon else 'ok' }}"></span>Douyin{% if douyin.days_left is not none %} · còn {{ douyin.days_left }} ngày{% endif %}
+  <span class="sb-item" title="{% if douyin.expires %}Đăng nhập Douyin hết hạn {{ vnt(douyin.expires, '%d/%m/%Y') }}{% endif %}">
+    <span class="dot {{ 'warn' if soon else 'ok' }}"></span>Douyin<span class="sb-s">{% if douyin.days_left is not none %} · còn {{ douyin.days_left }} ngày{% else %} · đã đăng nhập{% endif %}</span>
     {% if soon %}<form method="post" action="/services/douyin-login"><button class="chip-btn">Gia hạn</button></form>{% endif %}</span>
 {% else %}
-  <span class="chip"><span class="dot err"></span>Douyin {{ 'hết hạn' if douyin.expired else 'chưa đăng nhập' }}
+  <span class="sb-item"><span class="dot err"></span>Douyin<span class="sb-s"> · {{ 'hết hạn' if douyin.expired else 'chưa đăng nhập' }}</span>
     <form method="post" action="/services/douyin-login"><button class="chip-btn">Đăng nhập</button></form></span>
 {% endif %}
-<span class="chip" title="Backend tải video Douyin (TikTokDownloader) — tool tự bật khi cần"><span class="dot {{ 'ok' if health.tdl else '' }}"></span>Tải Douyin{{ '' if health.tdl else ' tắt' }}
-  {% if not health.tdl %}<form method="post" action="/services/tdl"><button class="chip-btn" title="Bật ngay">Bật</button></form>{% endif %}</span>
+<span class="sb-item" title="Backend tải video Douyin (TikTokDownloader) — tool tự bật khi cần">
+  <span class="dot {{ 'ok' if health.tdl else '' }}"></span>Tải Douyin<span class="sb-s">{{ ' · đang chạy' if health.tdl else ' · tắt' }}</span>
+  {% if not health.tdl %}<form method="post" action="/services/tdl"><button class="chip-btn" title="Bật ngay">Bật</button></form>{% endif %}
+</span>
 {% set vs = health.vs %}
-<span class="chip" title="Lồng tiếng Việt (model OmniVoice chạy ngay trong dytool) — tự bật khi cần, rảnh lâu thì tắt cho nhẹ máy"><span class="dot {{ {'ok': 'ok', 'starting': 'warn', 'off': ''}.get(vs, 'err') }}"></span><a href="/voicestudio" class="chip-link" title="Mở trang Giọng nói: bật / tắt, nghe thử giọng, tạo giọng">Giọng nói{{ {'ok': '', 'starting': ' đang bật…', 'off': ' · tự bật khi cần'}.get(vs, ' · chưa có model') }}</a>
+<span class="sb-item" title="Lồng tiếng Việt (model OmniVoice chạy ngay trong dytool) — tự bật khi cần, rảnh lâu thì tắt cho nhẹ máy">
+  <span class="dot {{ {'ok': 'ok', 'starting': 'warn', 'off': ''}.get(vs, 'err') }}"></span>
+  <a href="/voicestudio" class="chip-link" title="Mở trang Giọng nói: bật / tắt, nghe thử giọng, tạo giọng">Giọng nói<span class="sb-s">{{ {'ok': ' · đang chạy', 'starting': ' · đang bật…', 'off': ' · tự bật khi cần'}.get(vs, ' · chưa có model') }}</span></a>
   {% if vs == 'off' %}
     <button class="chip-btn" hx-post="/services/voicestudio" hx-swap="none" hx-disabled-elt="this" title="Bật máy chủ giọng nói ngay">Bật</button>
-  {% endif %}</span>
+  {% endif %}
+</span>
+{% elif n_updates %}
+  <a class="chip warn" href="/settings#cap-nhat" title="Có bản mới — bấm để xem và cập nhật"><span class="dot warn"></span>{{ n_updates }} bản cập nhật</a>
+{% endif %}

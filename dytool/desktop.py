@@ -69,6 +69,19 @@ def _first_instance() -> bool:
     return not (_app_mutex and k32.GetLastError() == 183)     # 183 = ERROR_ALREADY_EXISTS
 
 
+def _beta_mark(img):
+    """App beta: chấm cam góc dưới phải icon khay — 2 icon khay (app chính + beta) không lẫn nhau khi bấm Thoát."""
+    if not _instance.IS_BETA:
+        return img
+    from PIL import ImageDraw
+    img = img.convert("RGBA")
+    w, h = img.size
+    r = max(4, w * 0.22)
+    ImageDraw.Draw(img).ellipse((w - 2 * r - 1, h - 2 * r - 1, w - 1, h - 1), fill="#f08a1c", outline="#ffffff",
+                                width=max(1, int(w / 32)))
+    return img
+
+
 def _message(text: str, title: str = TITLE) -> None:
     if sys.platform == "win32":
         import ctypes
@@ -155,7 +168,7 @@ def _browser_mode(app, server, pystray, Image) -> None:
 
     with Image.open(ICON) if ICON.exists() else Image.new("RGB", (64, 64), "#172030") as im:
         im.load()
-        img = im.copy()
+        img = _beta_mark(im.copy())
     pystray.Icon(TITLE, img, TITLE, menu=pystray.Menu(
         pystray.MenuItem("Mở dytool (trình duyệt)", open_ui, default=True),
         pystray.Menu.SEPARATOR, pystray.MenuItem("Thoát dytool", quit_app))).run()
@@ -485,14 +498,14 @@ def main() -> None:
         menu_items.append(pystray.MenuItem(
             lambda it: "Tạm dừng chạy tự động" if _app() and _app().state.worker.running else "Bật chạy tự động",
             toggle_worker))
-    menu_items += [pystray.Menu.SEPARATOR, pystray.MenuItem("Thoát dytool", quit_app)]
+    menu_items += [pystray.Menu.SEPARATOR, pystray.MenuItem(f"Thoát {TITLE}", quit_app)]
     def _icon_image():
         # đọc hết vào bộ nhớ rồi đóng file: Image.open giữ file mở -> trình cài bản mới không ghi đè được dytool.ico
         if not ICON.exists():
             return Image.new("RGB", (64, 64), "#172030")
         with Image.open(ICON) as im:
             im.load()
-            return im.copy()
+            return _beta_mark(im.copy())
 
     tray = pystray.Icon("dytool", _icon_image(),
                         TITLE, menu=pystray.Menu(*menu_items))

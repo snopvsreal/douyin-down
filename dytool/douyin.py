@@ -75,8 +75,19 @@ class DouyinClient:
         self.api = cfg["api"].rstrip("/")
         self.http = httpx.Client(timeout=120, follow_redirects=True)
 
+    def _proxy(self) -> str:
+        """Proxy chọn ở Trình duyệt › Proxy (mục "Proxy cho Douyin", có thể là proxy xoay), không có thì config.yaml.
+        Lỗi lấy proxy xoay -> báo "Không kết nối được…" để worker coi như backend tạm hỏng (thử lại sau), không nhầm
+        thành captcha."""
+        try:
+            from . import browser_mgr
+            url = browser_mgr.douyin_proxy_url()
+        except Exception as e:
+            raise DouyinError(f"Không kết nối được proxy Douyin: {e}") from e
+        return url or self.cfg.get("proxy", "") or ""
+
     def _post(self, path: str, body: dict) -> list[dict]:
-        body = {"cookie": self.cfg.get("cookie", ""), "proxy": self.cfg.get("proxy", ""), "source": True, **body}
+        body = {"cookie": self.cfg.get("cookie", ""), "proxy": self._proxy(), "source": True, **body}
         try:
             r = self.http.post(self.api + path, json=body)
         except httpx.ConnectError as e:

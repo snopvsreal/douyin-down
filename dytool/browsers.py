@@ -379,7 +379,7 @@ def _proxy_url(meta: dict) -> str | None:
     p = browser_mgr.get_proxy(pid)
     if not p:
         raise BrowserError("Proxy gắn với hồ sơ đã bị xoá — chọn proxy khác ở trang Hồ sơ trình duyệt")
-    return p["url"]
+    return browser_mgr.resolve(pid)          # proxy xoay: proxy hiện tại của nhà cung cấp
 
 
 def _proxy_reachable(url: str) -> None:
@@ -451,7 +451,16 @@ def _launch_kwargs(pid: str) -> dict:
     kw: dict = {"webrtc": meta.get("webrtc") or "auto"}
     url = _proxy_url(meta)
     if url:
-        _proxy_reachable(url)
+        try:
+            _proxy_reachable(url)
+        except BrowserError:
+            # proxy xoay kiểu API: proxy đã lưu có thể đã hết hạn sớm -> lấy lại 1 lần rồi thử tiếp
+            from . import browser_mgr
+            p = browser_mgr.get_proxy(meta.get("proxy_id") or "")
+            if not ((p or {}).get("rot") or {}).get("kind") == "api":
+                raise
+            url = browser_mgr.resolve(p["id"], force=True)
+            _proxy_reachable(url)
         kw["proxy"] = url
     args = parse_extra_args(meta.get("extra_args") or "")
     from . import browser_mgr

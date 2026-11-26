@@ -65,6 +65,7 @@ class Worker:
         # Douyin đòi xác minh (captcha): {"since", "checked"} — tìm kiếm tạm ngừng tới khi người dùng giải xong
         self.captcha: dict | None = None
         self._canary_ok_at = 0.0                    # lần tìm thử "猫咪" ra video gần nhất (tin 10 phút)
+        self._captcha_rotated_at = 0.0              # lần đổi IP proxy Douyin vì captcha gần nhất
         self._dy = None
         self._vs_warned = 0.0
         self._vs_starting = False       # đã ghi log "đang bật VoiceStudio" cho lần bật này
@@ -735,7 +736,7 @@ class Worker:
                 if not items:
                     progress.detail("Douyin trả về rỗng — tìm thử 1 từ chắc có video xem có bị đòi xác minh không")
                     pause(random.uniform(4, 8))
-                    if self._search_blocked():
+                    if self._search_blocked() and not self._captcha_rotate(pause):
                         self._need_captcha()
                         stopped_at = i
                         break
@@ -783,6 +784,40 @@ class Worker:
         if ok:
             self._canary_ok_at = time.time()
         return not ok
+
+    def _captcha_rotate(self, pause) -> bool:
+        """Douyin đòi captcha + proxy Douyin là proxy xoay đổi được + bật "đổi IP khi captcha" -> đổi IP rồi tìm thử lại.
+        True = hết bị chặn (quét tiếp). Tối đa 1 lần / 10 phút (captcha có thể gắn với cookie chứ không phải IP —
+        đổi liên tục chỉ tốn lượt). Nhà cung cấp bắt chờ ≤ 150 s thì chờ rồi đổi."""
+        from . import browser_mgr, progress, proxy_rotate
+        if time.time() - self._captcha_rotated_at < 600:
+            return False
+        for attempt in range(2):
+            try:
+                p = browser_mgr.rotate_douyin_for_captcha()
+                break
+            except proxy_rotate.RotateError as e:
+                if attempt == 0 and e.wait and e.wait <= 150:
+                    progress.detail(f"Douyin đòi xác minh — chờ {e.wait} s để đổi IP proxy")
+                    pause(e.wait + 2)
+                    continue
+                self.store.log(f"Douyin đòi xác minh — đổi IP proxy không được: {e}", "warn")
+                return False
+            except Exception as e:
+                self.store.log(f"Douyin đòi xác minh — đổi IP proxy không được: {e}", "warn")
+                return False
+        if not p:
+            return False
+        self._captcha_rotated_at = time.time()
+        progress.detail("Đã đổi IP proxy — tìm thử lại")
+        pause(5)
+        self._canary_ok_at = 0.0
+        if not self._search_blocked():
+            self.store.log(f"Douyin đòi xác minh — đã đổi IP proxy '{p.get('label')}', hết bị chặn, quét tiếp")
+            return True
+        self.store.log("Douyin đòi xác minh — đã đổi IP proxy nhưng vẫn bị chặn (captcha có thể gắn với tài khoản "
+                       "Douyin, không phải IP)", "warn")
+        return False
 
     def _need_captcha(self) -> None:
         if self.captcha:

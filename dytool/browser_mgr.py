@@ -51,7 +51,195 @@ def get_proxy(proxy_id: str) -> dict | None:
 
 def mask(url: str) -> str:
     """socks5://user:pass@host:port -> socks5://user:•••@host:port (hiện trên giao diện)."""
+    if not url:
+        return "(chưa lấy proxy)"
     return re.sub(r"(://[^:/@]*:)[^@]*@", r"\1•••@", url)
+
+
+# ---------- proxy xoay (proxy_rotate.py) ----------
+# Mục proxy xoay có thêm "rot": {kind: api|link|auto, provider, key, new_url, cur_url, change_url, scheme, isp, region,
+#   alts: {http, socks5}, got_at, exp_at, last: {at, ok, msg}, wait_until}. "url" = proxy hiện tại (đã lấy gần nhất).
+CUR_TTL = 60            # kiểu api có API "proxy hiện tại": hỏi lại tối đa 1 lần / phút
+_rot_lock = __import__("threading").Lock()
+
+
+def _update(proxy_id: str, **kw) -> dict | None:
+    items = list_proxies()
+    for x in items:
+        if x["id"] == proxy_id:
+            for k, v in kw.items():
+                if k == "rot":
+                    x.setdefault("rot", {}).update(v)
+                else:
+                    x[k] = v
+            _save_proxies(items)
+            return x
+    return None
+
+
+def add_rotating(kind: str, provider: str, key: str, new_url: str, cur_url: str, change_url: str, fixed: str,
+                 scheme: str, isp: str, region: str, label: str) -> dict:
+    from . import proxy_rotate as pr
+    if kind not in pr.KINDS:
+        raise BrowserError("Chưa chọn kiểu proxy xoay")
+    scheme = scheme if scheme in ("http", "socks5") else "http"
+    rot: dict = {"kind": kind, "scheme": scheme}
+    url = ""
+
+    def link(s: str, what: str) -> str:
+        s = s.strip()
+        if not re.match(r"^https?://\S+$", s):
+            raise BrowserError(f"{what} phải là link http(s)://…")
+        return s[:1000]
+
+    if kind == "api":
+        provider = provider if provider in pr.PROVIDERS else "custom"
+        rot["provider"] = provider
+        if provider == "custom":
+            rot["new_url"] = link(new_url, "Link lấy proxy mới")
+            rot["cur_url"] = link(cur_url, "Link lấy proxy hiện tại") if cur_url.strip() else ""
+        else:
+            key = key.strip()
+            if not re.fullmatch(r"[A-Za-z0-9_\-.]{6,200}", key):
+                raise BrowserError("Key không hợp lệ (chỉ chữ, số, - _ .)")
+            rot["key"] = key
+            rot["isp"] = isp if isp in pr.PROXYVN_ISP else "random"
+            rot["region"] = str(int(region)) if region.strip().isdigit() else "0"
+    else:
+        try:
+            url = normalize_proxy(fixed, scheme)
+        except Exception as e:
+            raise BrowserError(f"Proxy cố định không hợp lệ: {e}") from e
+        if kind == "link":
+            rot["change_url"] = link(change_url, "Link đổi IP")
+    lb = " ".join(label.split())[:60] or (pr.PROVIDERS.get(rot.get("provider"), "") if kind == "api" else "") \
+        or pr.KINDS[kind]
+    item = {"id": uuid.uuid4().hex[:12], "url": url, "label": lb, "check": None, "rot": rot}
+    items = list_proxies()
+    items.append(item)
+    _save_proxies(items)
+    if kind == "api":                       # lấy proxy ngay để báo key sai sớm (lỗi không xoá mục — sửa / thử lại)
+        try:
+            resolve(item["id"])
+        except BrowserError:
+            pass                            # lỗi đã ghi vào rot.last — hiện ở bảng proxy
+    return get_proxy(item["id"])
+
+
+def _apply(proxy_id: str, res: dict, how: str) -> dict:
+    now = int(time.time())
+    rot = {"alts": res["alts"], "got_at": now, "exp_at": now + res["ttl"] - 20 if res.get("ttl") else None,
+           "last": {"at": now, "ok": True, "msg": (how + (f" — {res['msg']}" if res.get("msg") else ""))[:200]}}
+    return _update(proxy_id, url=res["url"], rot=rot)
+
+
+def resolve(proxy_id: str, prefer: str | None = None, force: bool = False) -> str:
+    """Proxy hiện tại để dùng (mở hồ sơ, tìm Douyin, kiểm tra). Proxy thường -> url. Xoay kiểu api: hết hạn / chưa có
+    -> xin mới; có API "hiện tại" -> hỏi lại tối đa 1 lần / phút. API lỗi mà còn proxy cũ -> dùng proxy cũ.
+    prefer="http": lấy bản HTTP nếu nhà cung cấp có cả HTTP + SOCKS5 (backend tải Douyin dùng httpx)."""
+    from . import proxy_rotate as pr
+    p = get_proxy(proxy_id)
+    if not p:
+        raise BrowserError("Không có proxy này")
+    rot = p.get("rot") or {}
+    if rot.get("kind") == "api":
+        with _rot_lock:
+            p = get_proxy(proxy_id) or p
+            rot = p.get("rot") or {}
+            now = time.time()
+            expired = not p.get("url") or (rot.get("exp_at") and now > rot["exp_at"])
+            try:
+                if expired or force:
+                    res = pr.fetch(rot, new=False) if not force else None
+                    if res is None:
+                        res = pr.fetch(rot, new=True)
+                        p = _apply(proxy_id, res, "Lấy proxy mới")
+                    else:
+                        p = _apply(proxy_id, res, "Lấy proxy hiện tại")
+                elif now - (rot.get("got_at") or 0) > CUR_TTL:
+                    res = pr.fetch(rot, new=False)
+                    if res is not None:
+                        p = _apply(proxy_id, res, "Lấy proxy hiện tại")
+            except pr.RotateError as e:
+                _update(proxy_id, rot={"last": {"at": int(now), "ok": False, "msg": str(e)[:200]}})
+                if not p.get("url") or expired:
+                    raise BrowserError(f"Proxy xoay '{p.get('label')}': {e}") from e
+        rot = p.get("rot") or {}
+    if prefer and (rot.get("alts") or {}).get(prefer):
+        return rot["alts"][prefer]
+    return p["url"]
+
+
+def rotate(proxy_id: str) -> dict:
+    """Đổi IP (bấm tay / Douyin đòi captcha). Trả mục proxy sau khi đổi. Nhà cung cấp bắt chờ -> RotateError.wait."""
+    from . import proxy_rotate as pr
+    p = get_proxy(proxy_id)
+    if not p:
+        raise BrowserError("Không có proxy này")
+    rot = p.get("rot") or {}
+    kind = rot.get("kind")
+    if kind not in ("api", "link"):
+        raise BrowserError("Proxy này không đổi IP được (proxy thường hoặc cổng tự xoay)")
+    now = int(time.time())
+    if rot.get("wait_until", 0) > now:
+        raise pr.RotateError(f"Nhà cung cấp bắt chờ {rot['wait_until'] - now} s nữa mới đổi IP được",
+                             rot["wait_until"] - now)
+    with _rot_lock:
+        try:
+            if kind == "api":
+                res = pr.fetch(rot, new=True)
+                p = _apply(proxy_id, res, "Đổi IP")
+            else:
+                msg = pr.change_ip(rot["change_url"])
+                p = _update(proxy_id, rot={"last": {"at": now, "ok": True, "msg": f"Đổi IP — {msg}"[:200]}})
+        except pr.RotateError as e:
+            _update(proxy_id, rot={"last": {"at": now, "ok": False, "msg": str(e)[:200]},
+                                   **({"wait_until": now + e.wait} if e.wait else {})})
+            raise
+    _update(proxy_id, check=None)           # IP cũ không còn đúng
+    return p
+
+
+def rotatable(p: dict | None) -> bool:
+    return bool(p and (p.get("rot") or {}).get("kind") in ("api", "link"))
+
+
+# ---------- proxy cho backend tải Douyin ----------
+DOUYIN_NET = SDK_DIR / "douyin_proxy.json"
+
+
+def douyin_net() -> dict:
+    try:
+        d = json.loads(DOUYIN_NET.read_text("utf-8-sig"))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_douyin_net(proxy_id: str, rotate_on_captcha: bool) -> None:
+    if proxy_id and not get_proxy(proxy_id):
+        raise BrowserError("Không có proxy này")
+    DOUYIN_NET.parent.mkdir(parents=True, exist_ok=True)
+    DOUYIN_NET.write_text(json.dumps({"proxy_id": proxy_id, "rotate_on_captcha": bool(rotate_on_captcha)}), "utf-8")
+
+
+def douyin_proxy_url() -> str | None:
+    """Proxy cho mọi lần gọi backend tải Douyin (tìm / chi tiết). None = không proxy. Lỗi -> BrowserError."""
+    pid = douyin_net().get("proxy_id")
+    if not pid:
+        return None
+    if not get_proxy(pid):
+        return None
+    return resolve(pid, prefer="http")
+
+
+def rotate_douyin_for_captcha() -> dict | None:
+    """Douyin đòi captcha -> đổi IP proxy Douyin (nếu bật + đổi được). None = không cấu hình. Lỗi -> RotateError."""
+    net = douyin_net()
+    p = get_proxy(net.get("proxy_id") or "")
+    if not (net.get("rotate_on_captcha") and rotatable(p)):
+        return None
+    return rotate(p["id"])
 
 
 def normalize_proxy(line: str, scheme: str = "socks5") -> str:
@@ -85,7 +273,7 @@ def add_proxies(text: str, scheme: str = "socks5", label: str = "") -> tuple[int
     """Dán nhiều proxy (mỗi dòng 1 cái). Trả (số đã thêm, các dòng lỗi). Trùng thì bỏ qua."""
     scheme = scheme if scheme in ("socks5", "http", "https") else "socks5"
     items = list_proxies()
-    have = {p["url"] for p in items}
+    have = {p.get("url") for p in items if not p.get("rot")}
     added, bad = 0, []
     for line in text.splitlines():
         if not line.strip() or line.strip().startswith("#"):
@@ -115,6 +303,9 @@ def update_proxy(proxy_id: str, label: str) -> None:
 def delete_proxy(proxy_id: str) -> list[str]:
     """Xoá proxy; hồ sơ đang dùng nó chuyển về không proxy. Trả tên các hồ sơ bị bỏ proxy."""
     _save_proxies([p for p in list_proxies() if p.get("id") != proxy_id])
+    net = douyin_net()
+    if net.get("proxy_id") == proxy_id:
+        save_douyin_net("", bool(net.get("rotate_on_captcha")))
     names = []
     for p in browsers.list_profiles():
         m = read_meta(p["id"])
@@ -132,7 +323,7 @@ def check_proxy(proxy_id: str) -> dict:
     res = {"at": int(time.time())}
     t = time.time()
     try:
-        r = browsers.sdk().check_proxy(p["url"])
+        r = browsers.sdk().check_proxy(resolve(proxy_id))
         g = r["geo"]
         if not getattr(g, "ip", ""):
             raise RuntimeError("không lấy được IP qua proxy")
@@ -156,6 +347,49 @@ def proxy_usage() -> dict[str, list[str]]:
         if pid:
             use.setdefault(pid, []).append(p["name"])
     return use
+
+
+# ---------- tự gắn proxy tĩnh cho hồ sơ tài khoản mới ----------
+# Người dùng 2026-11-26: "mỗi lần đăng nhập facebook tiktok mới nó sẽ tự gắn 1 proxy tĩnh khác nhau trong danh sách vào
+# từng profile". Hồ sơ tạo mới cho tài khoản được đánh dấu dytool.json `auto_proxy: "pending"`; lần Đăng nhập đầu
+# (app.login) gọi assign_free_proxy: proxy TĨNH (không phải proxy xoay) chưa hồ sơ nào dùng, kiểm tra trước khi gắn
+# (chết thì thử cái kế, tối đa 6 cái); hết proxy trống -> không gắn, báo nhắc (người dùng chọn). Xong (gắn hay không)
+# -> "done": không tự đổi proxy của hồ sơ đã đăng nhập. Hồ sơ cũ (không có cờ) và hồ sơ đã có proxy: không đụng.
+_assign_lock = __import__("threading").Lock()
+ASSIGN_TRIES = 6
+
+
+def mark_auto_proxy(pid: str) -> None:
+    write_meta(pid, auto_proxy="pending")
+
+
+def assign_free_proxy(pid: str) -> tuple[dict | None, str]:
+    """Trả (proxy đã gắn | None, lời nhắn cho nhật ký). Chỉ chạy khi hồ sơ đang chờ gắn và chưa có proxy."""
+    meta = read_meta(pid)
+    if meta.get("auto_proxy") != "pending":
+        return None, ""
+    if meta.get("proxy_id"):
+        write_meta(pid, auto_proxy="done")
+        return None, ""
+    with _assign_lock:
+        used = set(proxy_usage())
+        free = [p for p in list_proxies() if not p.get("rot") and p["id"] not in used]
+        # đã kiểm tra chạy được trước, rồi chưa kiểm tra, lỗi lần trước để cuối
+        free.sort(key=lambda p: 0 if (p.get("check") or {}).get("ok") else (1 if not p.get("check") else 2))
+        dead = []
+        for p in free[:ASSIGN_TRIES]:
+            res = check_proxy(p["id"])
+            if res.get("ok"):
+                write_meta(pid, proxy_id=p["id"], webrtc=meta.get("webrtc") or "auto", auto_proxy="done")
+                where = ", ".join(x for x in (res.get("country"), res.get("ip")) if x)
+                return get_proxy(p["id"]), f"tự gắn proxy '{p.get('label') or mask(p['url'])}' ({where})"
+            dead.append(p.get("label") or mask(p["url"]))
+    write_meta(pid, auto_proxy="done")
+    if dead:
+        return None, (f"không gắn được proxy — proxy trống không chạy được: {', '.join(dead[:3])}; "
+                      "hồ sơ dùng IP máy. Thêm / sửa proxy ở Trình duyệt › Proxy rồi gắn tay trong cài đặt hồ sơ")
+    return None, ("hết proxy tĩnh trống (mỗi proxy đã gắn cho 1 hồ sơ) — hồ sơ dùng IP máy. Thêm proxy ở Trình duyệt "
+                  "› Proxy rồi gắn tay trong cài đặt hồ sơ")
 
 
 # ================= cài đặt hồ sơ =================

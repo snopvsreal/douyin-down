@@ -1672,8 +1672,10 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
     @app.get("/browsers/proxies", response_class=HTMLResponse)
     def browsers_proxies(request: Request):
         from .. import browser_mgr
+        from .. import proxy_rotate
         return render(request, "browser_proxies.html", usage=browser_mgr.proxy_usage(), checking=_proxy_checking,
-                      **_bctx())
+                      douyin_net=browser_mgr.douyin_net(), kinds=proxy_rotate.KINDS, providers=proxy_rotate.PROVIDERS,
+                      isps=proxy_rotate.PROXYVN_ISP, redact=proxy_rotate.redact, **_bctx())
 
     _proxy_checking: dict = {"on": False}
 
@@ -1686,6 +1688,43 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         store.log(f"Đã thêm {added} proxy" + (f" ({len(bad)} dòng lỗi: {'; '.join(bad[:3])})" if bad else ""),
                   "error" if bad else "info")
         return RedirectResponse("/browsers/proxies", 303)
+
+    @app.post("/browsers/proxies/add-rotating")
+    def proxies_add_rotating(kind: str = Form(""), provider: str = Form("proxyvn"), key: str = Form(""),
+                             new_url: str = Form(""), cur_url: str = Form(""), change_url: str = Form(""),
+                             fixed: str = Form(""), scheme: str = Form("http"), isp: str = Form("random"),
+                             region: str = Form("0"), label: str = Form("")):
+        """Thêm proxy xoay (proxy_rotate.py). Kiểu API: lấy proxy ngay (key sai thì hiện lỗi ở dòng proxy)."""
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.add_rotating(kind, provider, key, new_url, cur_url, change_url, fixed,
+                                                     scheme, isp, region, label),
+                    "/browsers/proxies", lambda p: f"Đã thêm proxy xoay '{p['label']}'")
+
+    @app.post("/browsers/proxies/{proxy_id}/rotate")
+    def proxies_rotate(proxy_id: str):
+        """Nút Đổi IP: đổi rồi kiểm tra luôn (hiện IP mới). Proxy đang dùng cho Douyin mà Douyin đang đòi captcha ->
+        tìm thử lại ngay."""
+        from .. import browser_mgr, proxy_rotate
+        try:
+            p = browser_mgr.rotate(proxy_id)
+        except (proxy_rotate.RotateError, ValueError) as e:
+            return PlainTextResponse(f"Không đổi được IP: {e}", 400)
+        except Exception as e:
+            return PlainTextResponse(str(e), 400)
+        if ((p.get("rot") or {}).get("kind")) == "link":
+            time.sleep(4)                       # cổng cố định: IP mới cần vài giây mới lên
+        res = browser_mgr.check_proxy(proxy_id)
+        store.log(f"Proxy '{p.get('label')}': đã đổi IP" + (f" — IP mới {res.get('ip')}" if res.get("ok") else
+                                                              f" — kiểm tra lỗi: {res.get('error')}"))
+        if worker.captcha and browser_mgr.douyin_net().get("proxy_id") == proxy_id:
+            threading.Thread(target=lambda: worker.check_captcha(force=True), daemon=True).start()
+        return RedirectResponse("/browsers/proxies", 303)
+
+    @app.post("/browsers/proxies/douyin")
+    def proxies_douyin(proxy_id: str = Form(""), rotate_on_captcha: str = Form("")):
+        from .. import browser_mgr
+        return _bop(lambda: browser_mgr.save_douyin_net(proxy_id, bool(rotate_on_captcha)), "/browsers/proxies",
+                    "Đã đổi proxy cho tìm / tải Douyin" if proxy_id else "Tìm / tải Douyin: không dùng proxy")
 
     @app.post("/browsers/proxies/check-all")
     def proxies_check_all():
@@ -1900,9 +1939,11 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         return _bop(lambda: browser_mgr.trash(pid), "/browsers",
                     f"Đã bỏ hồ sơ trình duyệt '{name}' vào thùng rác")
 
-    def _auto_profile(target: Path, name: str, who: str, quiet: bool = False, english: bool = False) -> bool:
-        """Chưa gắn hồ sơ -> tự tạo hồ sơ trình duyệt mới và gắn luôn (người dùng không phải liên kết tay)."""
-        from .. import browsers
+    def _auto_profile(target: Path, name: str, who: str, quiet: bool = False, english: bool = False,
+                      account: bool = False) -> bool:
+        """Chưa gắn hồ sơ -> tự tạo hồ sơ trình duyệt mới và gắn luôn (người dùng không phải liên kết tay).
+        account=True (tài khoản FB / TikTok): hồ sơ mới chờ tự gắn proxy tĩnh lúc Đăng nhập lần đầu (_auto_proxy)."""
+        from .. import browser_mgr, browsers
         try:
             c, new = browsers.ensure_profile(target, name, english=english)
         except browsers.BrowserError as e:
@@ -1910,8 +1951,23 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                 store.log(f"{who}: không tạo được hồ sơ trình duyệt — {e}", "error")
             return False
         if new:
+            if account:
+                browser_mgr.mark_auto_proxy(c["profile_id"])
             store.log(f"{who}: đã tạo hồ sơ trình duyệt '{c['profile_name']}'")
         return True
+
+    def _auto_proxy(target: Path, who: str) -> None:
+        """Hồ sơ tài khoản mới, chưa có proxy -> gắn 1 proxy tĩnh trống (kiểm tra trước). Hết proxy -> báo nhắc."""
+        from .. import browser_mgr, browsers
+        c = browsers.get_choice(target)
+        if not c:
+            return
+        try:
+            _p, msg = browser_mgr.assign_free_proxy(c["profile_id"])
+        except Exception as e:
+            msg, _p = f"không tự gắn được proxy — {e}", None
+        if msg:
+            store.log(f"{who}: {msg}", "info" if _p else "warn")
 
     def _acc_profile_name(acc) -> str:
         plat = "TikTok" if acc["platform"] == "tiktok" else "Facebook"
@@ -1926,7 +1982,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             acc_dir = store.account_dir(data, aid)
             old = browsers.get_choice(acc_dir)
             browsers.set_choice(acc_dir, "")
-            if not _auto_profile(acc_dir, _acc_profile_name(acc), f"Tài khoản #{aid}", english=acc["platform"] == "tiktok") and old:
+            if not _auto_profile(acc_dir, _acc_profile_name(acc), f"Tài khoản #{aid}", english=acc["platform"] == "tiktok", account=True) and old:
                 browsers.set_choice(acc_dir, old["profile_id"], old.get("profile_name", ""))
         return RedirectResponse("/accounts", 303)
 
@@ -1968,7 +2024,7 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         acc = store.one("SELECT * FROM accounts WHERE id=?", (aid,))
         # tạo sẵn hồ sơ trình duyệt (chỉ ghi file); không được thì để tới lúc bấm Đăng nhập
         _auto_profile(store.account_dir(data, aid), _acc_profile_name(acc), f"Tài khoản #{aid}", quiet=True,
-                      english=platform == "tiktok")
+                      english=platform == "tiktok", account=True)
         return RedirectResponse("/accounts" + ("#tiktok" if platform == "tiktok" else ""), 303)
 
     @app.post("/accounts/{aid}/login")
@@ -1978,8 +2034,10 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
         acc = store.one("SELECT * FROM accounts WHERE id=?", (aid,))
         if not acc:
             return RedirectResponse("/accounts", 303)
-        if not _auto_profile(acc_dir, _acc_profile_name(acc), f"Tài khoản #{aid}", english=acc["platform"] == "tiktok"):
+        if not _auto_profile(acc_dir, _acc_profile_name(acc), f"Tài khoản #{aid}", english=acc["platform"] == "tiktok",
+                             account=True):
             return RedirectResponse("/settings#trinh-duyet", 303)
+        _auto_proxy(acc_dir, f"Tài khoản #{aid}")       # lần đăng nhập đầu của hồ sơ mới: gắn proxy tĩnh trống
         from .. import loginstate
         if acc and acc["platform"] == "tiktok":
             code = ("import sys,json; from pathlib import Path; from dytool import tt_browser as t; "

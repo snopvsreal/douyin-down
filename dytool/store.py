@@ -104,7 +104,9 @@ DEFAULT_PAGE_SETTINGS = {
     "dub_enabled": True,
     "text_source": "auto",          # auto | ocr (phụ đề trên video) | asr (giọng nói)
     "dub_text_only": False,         # lồng tiếng cả video chỉ có chữ, không có lời
-    "dub_keep_sfx": True,           # giữ tiếng gốc không phải lời nói (mèo kêu, cười…) — chỉ tắt giọng Trung lúc có người nói
+    "dub_keep_sfx": True,
+    "dub_pace": "normal",           # tốc độ đọc lồng tiếng: slow | normal | fast (dub.PACES)
+    "dub_duck_bg": True,            # nhạc nền to hơn giọng thì hạ + nhỏ xuống lúc giọng Việt đang đọc           # giữ tiếng gốc không phải lời nói (mèo kêu, cười…) — chỉ tắt giọng Trung lúc có người nói
     "gender": "auto",
     "voice_male": "male, young adult, moderate pitch",
     "voice_female": "female, young adult, high pitch",

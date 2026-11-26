@@ -135,14 +135,14 @@ def _translate_claude(lines: list[str], cfg: dict, limits: list[int] | None = No
 
 
 def translate_utterances(lines: list[str], windows: list[float], cfg: dict,
-                         asr: list[str] | None = None) -> list[str]:
+                         asr: list[str] | None = None, rate: float | None = None) -> list[str]:
     """Dịch để LỒNG TIẾNG: mỗi lượt nói 1 câu tiếng Việt vừa thời lượng, dấu câu đặt đúng chỗ người Việt nghỉ."""
     from . import phrasing
     if not lines:
         return []
     if cfg.get("translator", "claude") != "claude":
         return translate(lines, cfg, windows)
-    items = [{"id": i, "zh": l, "giay": round(w, 2), "max_am_tiet": phrasing.max_syllables(w)}
+    items = [{"id": i, "zh": l, "giay": round(w, 2), "max_am_tiet": phrasing.max_syllables(w, rate or phrasing.ARTIC_RATE)}
              for i, (l, w) in enumerate(zip(lines, windows))]
     if asr and any(asr):
         for it, a in zip(items, asr):

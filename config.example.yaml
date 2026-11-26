@@ -73,9 +73,8 @@ edit:
     # Nhịp đọc (học từ giọng đọc tiếng Việt thật — xem dytool/phrasing.py)
     merge_gap: 0.35             # các câu gốc cách nhau < 0.35s được gom thành 1 lượt đọc liền
     max_utterance: 10           # 1 lượt đọc tối đa 10s
-    max_rate_boost: 1.2         # cho phép đọc nhanh hơn tốc độ tự nhiên tối đa 1.2x (qua tham số duration của OmniVoice)
+    # max_rate_boost / max_drift: thôi dùng — thay bằng Tốc độ đọc ở Cài đặt kênh (dub.PACES)
     max_shorten: 2              # vẫn dài -> Claude rút gọn rồi đọc lại, tối đa 2 lần
-    max_drift: 0.6              # giọng được trễ tối đa 0.6s so với hình
     num_step: 32                # chất lượng giọng OmniVoice (16 = nhanh, 32 = đẹp hơn)
     background_volume: 0.9      # nhạc nền (đã tách giọng Trung)
     voice_volume: 1.0

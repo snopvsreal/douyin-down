@@ -348,6 +348,14 @@
         <span>Lồng tiếng cả video chỉ có chữ, không có lời (đọc phụ đề thành giọng)</span></label>
       <label class="check"><input type="checkbox" name="dub_keep_sfx" {{ 'checked' if s.dub_keep_sfx }}>
         <span>Giữ tiếng gốc ngoài lời nói (tiếng mèo kêu, tiếng cười, tiếng động…) — chỉ tắt giọng Trung lúc có người nói</span></label>
+      <label class="check"><input type="checkbox" name="dub_duck_bg" {{ 'checked' if s.dub_duck_bg }}>
+        <span>Tự giảm nhạc nền: nhạc to hơn giọng đọc thì hạ xuống, và nhỏ đi lúc giọng Việt đang đọc</span></label>
+      <label for="dpace">Tốc độ đọc</label>
+      <select id="dpace" name="dub_pace">
+        <option value="slow" {{ 'selected' if s.dub_pace == 'slow' }}>Chậm rãi — đọc thong thả, câu dịch gọn hơn</option>
+        <option value="normal" {{ 'selected' if s.dub_pace not in ('slow', 'fast') }}>Vừa — tự nhiên, nghỉ rõ giữa các câu</option>
+        <option value="fast" {{ 'selected' if s.dub_pace == 'fast' }}>Nhanh — như bản cũ, dịch đầy đủ hơn nhưng đọc dồn</option>
+      </select>
       <label for="tsrc">Lấy lời để dịch từ</label>
       <select id="tsrc" name="text_source">
         <option value="auto" {{ 'selected' if s.text_source == 'auto' }}>Tự động: có phụ đề trên video thì đọc phụ đề, không có thì nghe giọng</option>

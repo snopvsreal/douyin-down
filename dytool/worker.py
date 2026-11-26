@@ -390,6 +390,8 @@ class Worker:
         dub["enabled"] = bool(s["dub_enabled"])
         dub["text_only"] = bool(s["dub_text_only"])
         dub["keep_sfx"] = bool(s.get("dub_keep_sfx", True))
+        dub["pace"] = s.get("dub_pace") or "normal"
+        dub["duck_bg"] = bool(s.get("dub_duck_bg", True))
         dub["gender"] = s["gender"]
         from .dub import page_voices
         dub["voices"] = page_voices(s)

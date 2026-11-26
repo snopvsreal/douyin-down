@@ -81,6 +81,19 @@ def _split_long(ws: list[str]) -> list[str]:
     return _split_long(left) + _split_long(ws[best:])
 
 
+SENT_GAP_MS = 150          # lặng chèn thêm giữa 2 câu (cộng phần model tự để ~0,3 s = ~0,45 s)
+_SENT_END_RE = re.compile(r"([.!?…]+)\s+(?=\S)")
+
+
+def with_pauses(text: str) -> str:
+    """Văn bản gửi máy chủ giọng nói: sau dấu kết câu (. ! ? …) GIỮA lượt nói chèn [pause …ms] = nghỉ thật SENT_PAUSE.
+    Để model tự nghỉ thì khi bị ép thời lượng nó nén mất chỗ nghỉ -> nghe dồn, ngắt sai chỗ (người dùng 2026-11-27).
+    Máy chủ đọc từng câu rồi chèn lặng; natural_duration đã tính phần nghỉ này."""
+    # model tự để lặng ~0,3 s ở cuối mỗi câu đọc riêng -> chỉ chèn thêm phần còn thiếu (đo: chèn 380 ms ra khoảng
+    # nghỉ 0,71 s, dài hơn người đọc thật 0,4–0,5 s)
+    return _SENT_END_RE.sub(lambda m: f"{m.group(1)} [pause {SENT_GAP_MS}ms] ", text.strip())
+
+
 def natural_duration(text: str, rate: float = ARTIC_RATE) -> float:
     """Thời lượng đọc tự nhiên (giây) của 1 lượt nói, gồm nghỉ ở dấu câu bên trong và kéo dài âm cuối cụm."""
     gs = groups(text)

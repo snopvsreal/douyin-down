@@ -13,6 +13,19 @@ class DubError(RuntimeError):
     pass
 
 
+# Tốc độ đọc (Cài đặt kênh › Tốc độ đọc). rate = âm tiết / giây dùng để tính bản dịch dài bao nhiêu và đọc bao lâu;
+# boost = được đọc nhanh hơn rate tối đa bao nhiêu để vừa khung (ép thời lượng -> model nén cả chỗ nghỉ, nghe dồn);
+# drift = giọng được trễ sau hình tối đa bao nhiêu giây. "fast" = cách cũ (tốc độ người đọc TikTok nhanh, 5,3 âm tiết / s
+# + ép 1,2 lần) — người dùng 2026-11-27 chê "đọc quá nhanh, dồn, ngắt nghỉ sai chỗ" -> mặc định "normal".
+PACES = {"slow": {"rate": 4.4, "boost": 1.0, "drift": 1.0, "label": "Chậm rãi"},
+         "normal": {"rate": 4.8, "boost": 1.08, "drift": 0.9, "label": "Vừa"},
+         "fast": {"rate": 5.29, "boost": 1.2, "drift": 0.6, "label": "Nhanh (như cũ)"}}
+
+
+def pace(cfg: dict) -> dict:
+    return PACES.get(str(cfg.get("pace") or "normal"), PACES["normal"])
+
+
 SPEAK_TIMEOUT = 1800       # giây chờ máy chủ đọc 1 lượt nói (CPU laptop có thể vài phút / câu)
 
 
@@ -204,10 +217,11 @@ class VoiceStudio:
         return name
 
     def speak(self, text: str, dest: Path, duration: float | None = None, voice: str | None = None) -> Path:
+        from .phrasing import with_pauses
         body = {
             "model": self.cfg.get("model", "omnivoice"),
             "voice": voice or self.voice,
-            "input": text,
+            "input": with_pauses(text),          # nghỉ thật giữa các câu trong lượt nói
             "language": self.cfg.get("language", "vi"),
             "seed": int(self.cfg.get("voice_seed", 42)),
             "response_format": "wav",
@@ -255,14 +269,15 @@ def make_line(vs: VoiceStudio, text: str, window: float, clip: Path, cfg: dict, 
     (qua tham số duration của VoiceStudio) -> vẫn dài thì nhờ Claude rút gọn rồi đọc lại."""
     from . import phrasing
     from .subtitles import shorten
-    boost = float(cfg.get("max_rate_boost", 1.2))
+    p = pace(cfg)
+    rate, boost = p["rate"], p["boost"]
     for attempt in range(int(cfg.get("max_shorten", 2)) + 1):
         text = phrasing.fix_commas(text)
-        nat = phrasing.natural_duration(text)
+        nat = phrasing.natural_duration(text, rate)
         dur = max(min(nat, window), nat / boost)
         if dur <= window + 0.05 or attempt == int(cfg.get("max_shorten", 2)):
             break
-        text = shorten(text, phrasing.max_syllables(window * boost), sub_cfg)
+        text = shorten(text, phrasing.max_syllables(window * boost, rate), sub_cfg)
     d = _duration(vs.speak(text, clip, dur, voice))
     return text, d
 
@@ -319,6 +334,58 @@ def align_subtitles(clip: Path, offset: float, text: str) -> list[dict]:
     return out
 
 
+BG_UNDER_DB = 10.0         # nhạc nền phải nhỏ hơn giọng đọc ít nhất bấy nhiêu dB (mức trung bình)
+
+
+def _mean_db(paths) -> float | None:
+    """Mức trung bình (dBFS) của các file âm thanh, cộng theo năng lượng, có trọng số độ dài (FFmpeg volumedetect)."""
+    import math
+    import re
+    tot_e = tot_t = 0.0
+    for p in paths:
+        try:
+            r = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(p), "-af", "volumedetect", "-f", "null",
+                                "-"], capture_output=True, text=True, timeout=300)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        # FFmpeg in 2 khối kết quả (khối đầu "n_samples: 0") -> lấy khối cuối
+        m = re.findall(r"mean_volume:\s*(-?[\d.]+) dB", r.stderr or "")
+        d = re.findall(r"n_samples:\s*(\d+)", r.stderr or "")
+        if not m:
+            continue
+        w = float(d[-1]) if d else 1.0
+        tot_e += w * 10 ** (float(m[-1]) / 10)
+        tot_t += w
+    return 10 * math.log10(tot_e / tot_t) if tot_t and tot_e > 0 else None
+
+
+def voice_spans(vocals: Path, coarse) -> list[tuple[float, float]]:
+    """Khúc có tiếng NGƯỜI trong phần giọng Demucs tách ra: VAD Silero (có sẵn trong faster-whisper) từng khúc ngắn,
+    chỉ lấy phần nằm trong các câu Whisper nghe được (nới 0,3 s) — ngoài câu nói thì dù VAD bắt nhầm (mèo kêu) vẫn
+    giữ. Câu Whisper gồm cả khoảng lặng / tiếng mèo giữa các từ; tắt cả câu thì mất tiếng mèo lúc đang lồng tiếng
+    (người dùng 2026-11-27). Lỗi VAD -> dùng nguyên các câu Whisper."""
+    coarse = [(float(a), float(b)) for a, b in coarse]
+    if not coarse:
+        return []
+    try:
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
+        from .subtitles import load_pcm
+        audio = load_pcm(vocals)
+        ts = get_speech_timestamps(audio, VadOptions(threshold=0.5, min_speech_duration_ms=100,
+                                                     min_silence_duration_ms=150, speech_pad_ms=50))
+        vad = [(t["start"] / 16000, t["end"] / 16000) for t in ts]
+    except Exception as e:                    # noqa: BLE001 — VAD chỉ để giữ thêm tiếng mèo, lỗi thì như cũ
+        print(f"VAD lỗi, tắt tiếng gốc theo cả câu: {e}", flush=True)
+        return coarse
+    out = []
+    for a, b in vad:
+        for c, d in coarse:
+            lo, hi = max(a, c - 0.3), min(b, d + 0.3)
+            if hi - lo > 0.05:
+                out.append((round(lo, 3), round(hi, 3)))
+    return out
+
+
 def mute_expr(spans, pad_before: float = 0.15, pad_after: float = 0.3, fade: float = 0.12,
               floor: float = 0.0) -> str:
     """Biểu thức FFmpeg `volume` (eval=frame): 1 ngoài các đoạn có người nói, `floor` trong đoạn, mép chuyển dần
@@ -370,11 +437,13 @@ def dub_audio(video: Path, segments: list[dict], work: Path, cfg: dict,
         genders = [mode] * len(utts)
     voice_names = {g: vs.ensure_voice(work, vs.voice_spec(g)) for g in set(genders)}
 
-    max_drift = float(cfg.get("max_drift", 0.6))
+    pc = pace(cfg)
+    max_drift = pc["drift"]
     windows = [((utts[i + 1]["start"] if i + 1 < len(utts) else total) - u["start"]) for i, u in enumerate(utts)]
     src_lines, asr = [u["text"] for u in utts], [u["asr"] for u in utts]
-    texts = steps.run("translate_dub", [src_lines, windows, asr, _ai_cfg(sub_cfg)],
-                      lambda: translate_utterances(src_lines, windows, sub_cfg, asr=asr),
+    # bản dịch dài vừa tốc độ đọc đã chọn (đọc chậm hơn -> câu dịch gọn hơn), không phải đọc ép
+    texts = steps.run("translate_dub", [src_lines, windows, asr, _ai_cfg(sub_cfg), pc["rate"]],
+                      lambda: translate_utterances(src_lines, windows, sub_cfg, asr=asr, rate=pc["rate"]),
                       label=f"Dịch sang tiếng Việt (Claude) · {len(utts)} lượt nói")
     progress.step("Lồng tiếng (OmniVoice)")
 
@@ -397,8 +466,8 @@ def dub_audio(video: Path, segments: list[dict], work: Path, cfg: dict,
         progress.detail(f"câu {i + 1}/{len(utts)}: {text[:60]}")
         voice = voice_names[genders[i]]
         # câu đã đọc ở lần trước (cùng chữ, khung thời gian, giọng, cài đặt đọc) -> dùng lại clip + mốc phụ đề
-        tts_cfg = {k: cfg.get(k) for k in ("max_rate_boost", "max_shorten", "num_step", "language", "voice_seed",
-                                           "model")}
+        tts_cfg = {k: cfg.get(k) for k in ("pace", "max_shorten", "num_step", "language", "voice_seed", "model")}
+        tts_cfg["v"] = 2                     # 2 = có [pause] giữa câu (clip đọc ở bản cũ không dùng lại)
 
         def read_line(text=text, window=window, clip=clip, voice=voice, start=start):
             t, dd = make_line(vs, text, window, clip, cfg, sub_cfg, voice)
@@ -423,33 +492,67 @@ def dub_audio(video: Path, segments: list[dict], work: Path, cfg: dict,
 
     progress.step("Trộn giọng Việt với nhạc nền")
     out = work / f"{video.stem}_dub.m4a"
-    bg_vol = cfg.get("background_volume", 0.9)
-    voice_vol = cfg.get("voice_volume", 1.0)
+    bg_vol = float(cfg.get("background_volume", 0.9))
+    voice_vol = float(cfg.get("voice_volume", 1.0))
     keep = float(cfg.get("original_voice_volume", 0.0))
     sfx = cfg.get("keep_sfx", True)
-    parts = list(filters)
+    duck = cfg.get("duck_bg", True) and bool(labels)
+    thr_bg, thr_sfx = 0.03, 0.05           # ngưỡng ducking (biên độ giọng Việt); đo được mức giọng thì tính theo nó
+    if duck:
+        # nhạc nền to hơn giọng đọc (người dùng 2026-11-27: "nhạc nền to quá thì giảm bớt") -> hạ cho thấp hơn giọng
+        # BG_UNDER_DB (so mức trung bình: nền cả bài, giọng = các câu đã đọc); không bao giờ tăng nhạc nền
+        v_db = _mean_db([Path(x) for x in inputs[3::2]])
+        b_db = _mean_db([background])
+        if v_db is not None:
+            # giọng đọc nhỏ / to khác nhau theo giọng mẫu -> ngưỡng theo mức giọng thật: nhạc nền nhỏ xuống ~9 dB
+            # khi giọng ở mức trung bình (dưới giọng 14 dB, tỉ lệ 3), tiếng mèo chỉ ~3 dB (dưới 6 dB, tỉ lệ 2)
+            v_lin = 10 ** (v_db / 20) * voice_vol
+            thr_bg, thr_sfx = max(1e-4, v_lin * 10 ** (-14 / 20)), max(1e-4, v_lin * 10 ** (-6 / 20))
+        if v_db is not None and b_db is not None:
+            import math
+            over = ((b_db + 20 * math.log10(max(bg_vol, 1e-4)))
+                    - (v_db + 20 * math.log10(max(voice_vol, 1e-4)) - BG_UNDER_DB))
+            if over > 0.5:
+                bg_vol *= 10 ** (-over / 20)
+                progress.detail(f"nhạc nền to hơn giọng đọc — giảm {over:.0f} dB")
+    parts = list(filters) + [f"[0:a]volume={bg_vol:.4f}[bg0]"]
+    bed = ["[bg0]"]
     if sfx:
         # Demucs xếp tiếng mèo kêu, tiếng cười, tiếng hát… vào phần "giọng" -> trước đây bỏ cả phần giọng thì mất
-        # luôn tiếng mèo (người dùng 2026-11-27). Giờ trả phần giọng gốc lại, CHỈ tắt ở các đoạn có người nói
-        # (Whisper nghe được) — mép mờ dần, không nghe "bụp". keep > 0 = vẫn để lọt chút giọng Trung khi đang nói.
-        spans = speech_spans if speech_spans is not None else [(s["start"], s["end"]) for s in segments]
+        # luôn tiếng mèo. Giờ trả phần giọng gốc lại, CHỈ tắt đúng các khúc có tiếng người (VAD trong câu Whisper
+        # nghe được — tiếng mèo xen giữa các từ vẫn còn), mép mờ dần. keep > 0 = vẫn để lọt chút giọng Trung.
+        coarse = speech_spans if speech_spans is not None else [(s["start"], s["end"]) for s in segments]
+        fine = steps.run("vad", [[[round(float(a), 3), round(float(b), 3)] for a, b in coarse]],
+                         lambda: [list(x) for x in voice_spans(vocals, coarse)])
         inputs += ["-i", str(vocals)]
         k = len(inputs) // 2 - 1
-        gain = mute_expr(spans, floor=keep)
-        parts += [f"[{k}:a]volume='{gain}':eval=frame,volume={float(cfg.get('sfx_volume', 1.0))}[sfx]",
-                  f"[0:a]volume={bg_vol}[bg0]", "[bg0][sfx]amix=inputs=2:normalize=0:duration=first[bg]"]
-    else:
-        if keep > 0:   # giữ lại chút giọng gốc nếu muốn
-            inputs += ["-i", str(vocals)]
-            k = len(inputs) // 2 - 1
-            parts.append(f"[{k}:a]volume={keep}[orig]")
-            labels.append("[orig]")
-        parts.append(f"[0:a]volume={bg_vol}[bg]")
+        gain = mute_expr(fine, pad_before=0.06, pad_after=0.12, fade=0.08, floor=keep)
+        parts.append(f"[{k}:a]volume='{gain}':eval=frame,volume={float(cfg.get('sfx_volume', 1.0))}[sfx0]")
+        bed.append("[sfx0]")
+    elif keep > 0:     # giữ lại chút giọng gốc nếu muốn
+        inputs += ["-i", str(vocals)]
+        k = len(inputs) // 2 - 1
+        parts.append(f"[{k}:a]volume={keep}[orig]")
+        labels.append("[orig]")
     if labels:
-        parts += [f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0,volume={voice_vol}[voice]",
-                  "[bg][voice]amix=inputs=2:normalize=0:duration=first[out]"]
+        # giọng Việt kéo đủ dài cả video (apad) để làm tín hiệu điều khiển ducking không cắt cụt nền
+        vb = f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0,volume={voice_vol},apad=whole_dur={total:.3f}"
+        if duck:
+            n_sc = len(bed)
+            parts.append(vb + f",asplit={n_sc + 1}[voice]" + "".join(f"[sc{j}]" for j in range(n_sc)))
+            # nhạc nền nhỏ xuống khi giọng Việt đang đọc, tiếng mèo chỉ hơi nhỏ, hết câu thì lên lại
+            parts.append(f"[bg0][sc0]sidechaincompress=threshold={thr_bg:.5f}:ratio=3:attack=20:release=400:knee=4[bgd]")
+            bed[0] = "[bgd]"
+            if len(bed) > 1:
+                parts.append(f"[sfx0][sc1]sidechaincompress=threshold={thr_sfx:.5f}:ratio=2:attack=20:release=300:knee=4[sfxd]")
+                bed[1] = "[sfxd]"
+        else:
+            parts.append(vb + "[voice]")
+    if len(bed) > 1:
+        parts.append(f"{''.join(bed)}amix=inputs={len(bed)}:normalize=0:duration=first[bed]")
     else:
-        parts += ["[bg]anull[out]"]
+        parts.append(f"{bed[0]}anull[bed]")
+    parts.append("[bed][voice]amix=inputs=2:normalize=0:duration=first[out]" if labels else "[bed]anull[out]")
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", ";".join(parts),
                     "-map", "[out]", "-t", f"{total:.3f}", "-c:a", "aac", "-b:a", "160k", str(out)], check=True)
     (work / f"{video.stem}_dub.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding="utf-8")

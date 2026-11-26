@@ -8,6 +8,14 @@ Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh h�
 
 ---
 
+## [0.5.4] — 2026-11-27
+
+**Lồng tiếng giữ lại tiếng mèo kêu, tiếng động gốc + hết lỗi "máy chủ giọng nói không trả lời" khi đọc bằng CPU**
+
+- 🛠️ **Không còn mất tiếng mèo**: bước tách giọng xếp tiếng mèo kêu, tiếng cười, tiếng hát vào phần "giọng" nên trước đây bị bỏ cùng giọng Trung. Giờ dytool giữ lại tiếng gốc, chỉ tắt đúng những đoạn có người nói (mép mờ dần, không nghe "bụp"). Bật sẵn cho mọi kênh; tắt ở Cài đặt kênh › Edit & lồng tiếng nếu muốn bỏ hẳn. Video đã edit trước đây: bấm Edit lại để có tiếng.
+- 🛠️ **Sửa lỗi "Máy chủ giọng nói không trả lời: timed out"** khi đọc bằng CPU: dytool chờ mỗi câu tới 30 phút (trước 5 phút) và không gửi lại câu khi máy chủ còn đang đọc. Bấm Dừng có tác dụng ngay cả lúc đang chờ; bảng tiến trình hiện "đang đọc N s".
+- ✨ Nhật ký trang Giọng nói ghi thời gian đọc từng câu (đọc bao nhiêu giây giọng mất bao lâu, trên card hay CPU).
+
 ## [0.5.3] — 2026-11-27
 
 **Edit lỗi bấm Thử lại thì chạy tiếp từ chỗ lỗi, không làm lại từ đầu**

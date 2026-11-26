@@ -282,32 +282,42 @@ def align_subtitles(clip: Path, offset: float, text: str) -> list[dict]:
 
 
 def dub_audio(video: Path, segments: list[dict], work: Path, cfg: dict,
-              sub_cfg: dict | None = None) -> tuple[Path, list[dict]]:
+              sub_cfg: dict | None = None, steps=None) -> tuple[Path, list[dict]]:
     """Lồng tiếng Việt. Trả về (file .m4a gồm nhạc nền + giọng Việt, các dòng phụ đề khớp giọng đọc).
     1. Gom đoạn Whisper thành lượt nói (đọc liền), nhận giọng nam/nữ từng lượt.
     2. Claude dịch từng lượt, có giới hạn âm tiết và quy tắc ngắt nghỉ học từ giọng đọc thật.
     3. OmniVoice đọc CẢ lượt trong 1 lần (ngữ điệu liền mạch), thời lượng = tốc độ người Việt thật.
-    4. Xếp lịch tuần tự: không chồng giọng, nghỉ giữa các lượt như người thật, trễ tối đa max_drift."""
+    4. Xếp lịch tuần tự: không chồng giọng, nghỉ giữa các lượt như người thật, trễ tối đa max_drift.
+    steps (stepcache.Steps): bước nào xong ở lần trước (Demucs, nam / nữ, dịch, từng câu đọc) thì dùng lại."""
     from . import phrasing
     from .gender import detect_genders
+    from .stepcache import NoSteps
     from .subtitles import translate_utterances
+    from .editor import _ai_cfg
     sub_cfg = sub_cfg or {}
+    steps = steps or NoSteps()
     vs = VoiceStudio(cfg)
     vs.check()
     from . import progress
-    progress.step("Tách giọng gốc khỏi nhạc nền (Demucs)")
-    vocals, background = separate(video, work)
+    sep = steps.run("demucs", [], lambda: [str(p) for p in separate(video, work)],
+                    label="Tách giọng gốc khỏi nhạc nền (Demucs)", files=lambda v: v)
+    vocals, background = Path(sep[0]), Path(sep[1])
     total = _duration(video)
     utts = group_utterances(segments, float(cfg.get("merge_gap", 0.35)), float(cfg.get("max_utterance", 10.0)))
     mode = cfg.get("gender", "auto")
-    progress.step("Nhận giọng nam/nữ")
-    genders = detect_genders(vocals, utts) if mode == "auto" else [mode] * len(utts)
+    if mode == "auto":
+        genders = steps.run("gender", [[[u["start"], u["end"]] for u in utts]],
+                            lambda: detect_genders(vocals, utts), label="Nhận giọng nam/nữ")
+    else:
+        genders = [mode] * len(utts)
     voice_names = {g: vs.ensure_voice(work, vs.voice_spec(g)) for g in set(genders)}
 
     max_drift = float(cfg.get("max_drift", 0.6))
     windows = [((utts[i + 1]["start"] if i + 1 < len(utts) else total) - u["start"]) for i, u in enumerate(utts)]
-    progress.step("Dịch sang tiếng Việt (Claude)", f"{len(utts)} lượt nói")
-    texts = translate_utterances([u["text"] for u in utts], windows, sub_cfg, asr=[u["asr"] for u in utts])
+    src_lines, asr = [u["text"] for u in utts], [u["asr"] for u in utts]
+    texts = steps.run("translate_dub", [src_lines, windows, asr, _ai_cfg(sub_cfg)],
+                      lambda: translate_utterances(src_lines, windows, sub_cfg, asr=asr),
+                      label=f"Dịch sang tiếng Việt (Claude) · {len(utts)} lượt nói")
     progress.step("Lồng tiếng (OmniVoice)")
 
     clip_dir = work / f"{video.stem}_tts"
@@ -327,7 +337,17 @@ def dub_audio(video: Path, segments: list[dict], work: Path, cfg: dict,
         window = max(0.4, min(total, nxt + max_drift) - start - phrasing.COMMA_PAUSE * 0.5)
         clip = clip_dir / f"{i:03d}.wav"
         progress.detail(f"câu {i + 1}/{len(utts)}: {text[:60]}")
-        text, d = make_line(vs, text, window, clip, cfg, sub_cfg, voice_names[genders[i]])
+        voice = voice_names[genders[i]]
+        # câu đã đọc ở lần trước (cùng chữ, khung thời gian, giọng, cài đặt đọc) -> dùng lại clip + mốc phụ đề
+        tts_cfg = {k: cfg.get(k) for k in ("max_rate_boost", "max_shorten", "num_step", "language", "voice_seed",
+                                           "model")}
+
+        def read_line(text=text, window=window, clip=clip, voice=voice, start=start):
+            t, dd = make_line(vs, text, window, clip, cfg, sub_cfg, voice)
+            return {"text": t, "d": dd, "subs": align_subtitles(clip, start, t)}
+        line = steps.run(f"tts_{i:03d}", [text, round(window, 3), round(start, 3), voice, tts_cfg, _ai_cfg(sub_cfg)],
+                         read_line, files=lambda v, clip=clip: [clip])
+        text, d = line["text"], line["d"]
         d = min(d, total - start)
         if d <= 0.05:
             continue
@@ -336,7 +356,7 @@ def dub_audio(video: Path, segments: list[dict], work: Path, cfg: dict,
         delay = int(start * 1000)
         filters.append(f"[{n}:a]atrim=0:{d:.3f},aresample=44100,adelay={delay}|{delay}[v{n}]")
         labels.append(f"[v{n}]")
-        subs += align_subtitles(clip, start, text)
+        subs += line["subs"]
         plan.append({"start": round(start, 2), "end": round(start + d, 2), "src": [round(u["start"], 2), round(u["end"], 2)],
                      "zh": u["text"], "vi": text, "gender": genders[i], "voice": voice_names[genders[i]],
                      "rate_syl_s": round(phrasing.syl(text) / max(d, 0.1), 2)})

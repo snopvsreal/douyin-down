@@ -138,22 +138,32 @@ def build_filter(w: int, h: int, cfg: dict, ass_name: str | None, src_size: tupl
     return "[0:v]" + ",".join(chain) + "[v]"
 
 
-def pick_source(src: Path, band, src_size, work: Path, sub_cfg: dict, mode: str = "auto"):
+def _ai_cfg(sub_cfg: dict) -> dict:
+    """Phần cài đặt phụ đề ảnh hưởng tới bản dịch (khoá lưu kết quả dịch): bỏ cách trình bày (font, cỡ, vị trí…)
+    để sửa kiểu chữ sau khi lỗi không làm mất bản dịch đã có."""
+    skip = ("font", "size", "color", "outline", "shadow", "margin", "style", "band", "pos", "box", "bold", "align")
+    return {k: v for k, v in sub_cfg.items() if not any(w in k for w in skip)}
+
+
+def pick_source(src: Path, band, src_size, work: Path, sub_cfg: dict, mode: str = "auto", steps=None):
     """Chọn nguồn chữ để dịch. Trả về (các câu [{start,end,text,asr?}], "ocr"|"asr", có_giọng_nói).
     - Có phụ đề in cứng (OCR đọc được): dùng chữ OCR làm chính, đính kèm lời Whisper nghe được cùng
       khoảng thời gian để Claude đối chiếu (OCR đúng chữ hơn nhưng đôi khi đọc lỗi).
     - Không có phụ đề: dùng giọng nói (Whisper).
     - Chỉ có chữ, không có lời: vẫn dùng OCR (has_speech=False -> chỉ làm phụ đề, trừ khi bật dub.text_only)."""
-    progress.step("Nghe giọng nói (Whisper)")
-    speech = subtitles.transcribe(src, work, sub_cfg.get("whisper_model", "small"),
-                                  sub_cfg.get("source_lang", "zh"), split=False)
+    from .stepcache import NoSteps
+    steps = steps or NoSteps()
+    model, lang = sub_cfg.get("whisper_model", "small"), sub_cfg.get("source_lang", "zh")
+    speech = steps.run("whisper", [model, lang],
+                       lambda: subtitles.transcribe(src, work, model, lang, split=False),
+                       label="Nghe giọng nói (Whisper)")
     speech_secs = sum(x["end"] - x["start"] for x in speech)
     has_speech = speech_secs >= 1.0
     cues = []
     if band and mode in ("auto", "ocr"):
         from .hardsub import extract_cues
-        progress.step("Đọc phụ đề trên video (OCR)")
-        cues = extract_cues(src, band, *src_size, duration(src))
+        cues = steps.run("ocr", [list(band)], lambda: extract_cues(src, band, *src_size, duration(src)),
+                         label="Đọc phụ đề trên video (OCR)")
     total = duration(src)
     use_ocr = mode == "ocr" or (mode == "auto" and cues and
                                 sum(c["end"] - c["start"] for c in cues) >= min(3.0, 0.15 * total))
@@ -166,7 +176,10 @@ def pick_source(src: Path, band, src_size, work: Path, sub_cfg: dict, mode: str 
 
 
 def edit(src: Path, dst: Path, work: Path, cfg: dict) -> dict:
-    """Trả về thông tin phụ: số câu sub."""
+    """Trả về thông tin phụ: số câu sub. Kết quả từng bước tốn thời gian lưu ở work/<id>_steps (stepcache):
+    edit lỗi / bị Dừng rồi Thử lại thì dùng lại, không chạy lại từ đầu; edit xong thì xoá."""
+    from .stepcache import Steps
+    steps = Steps(work, src)
     src_size = probe(src)
     w, h = target_size(*src_size, cfg)
     ass_name = None
@@ -181,8 +194,9 @@ def edit(src: Path, dst: Path, work: Path, cfg: dict) -> dict:
         band = (hs["y_from"], hs["y_to"])
     elif mode == "auto":
         from .hardsub import detect_band
-        progress.step("Dò vị trí phụ đề Trung")
-        band = detect_band(src, duration(src), *src_size)
+        band = steps.run("band", [], lambda: detect_band(src, duration(src), *src_size),
+                         label="Dò vị trí phụ đề Trung")
+        band = tuple(band) if band else None          # JSON trả list
     if band:
         # đặt sub tiếng Việt đè lên đúng chỗ sub Trung cũ: căn giữa dải (write_ass dùng sub_cfg["band"])
         sub_cfg["margin_v_pct"] = max(0.02, 1 - band[1] + 0.005)
@@ -191,22 +205,24 @@ def edit(src: Path, dst: Path, work: Path, cfg: dict) -> dict:
     dub_track = None
     source = "none"
     if sub_cfg.get("enabled") or dub_cfg.get("enabled"):
-        segs, source, has_speech = pick_source(src, band, src_size, work, sub_cfg, cfg.get("text_source", "auto"))
+        segs, source, has_speech = pick_source(src, band, src_size, work, sub_cfg, cfg.get("text_source", "auto"),
+                                               steps)
         # 3 trường hợp: có sub -> chữ OCR (+ giọng để đối chiếu) | không sub -> giọng nói | chỉ có chữ -> OCR
         want_dub = dub_cfg.get("enabled") and segs and (has_speech or dub_cfg.get("text_only", False))
         if want_dub:
             from .dub import dub_audio
-            dub_track, sub_lines = dub_audio(src, segs, work, dub_cfg, sub_cfg)
+            dub_track, sub_lines = dub_audio(src, segs, work, dub_cfg, sub_cfg, steps)
             n_lines = len(sub_lines)
             if sub_cfg.get("enabled") and sub_lines:
                 ass_name = subtitles.write_ass(sub_lines, [x["text"] for x in sub_lines],
                                                work / f"{src.stem}.ass", w, h, sub_cfg).name
         elif sub_cfg.get("enabled") and segs:
             n_lines = len(segs)
-            progress.step("Dịch phụ đề (Claude)")
-            texts = subtitles.translate_utterances([x["text"] for x in segs],
-                                                   [x["end"] - x["start"] + 0.3 for x in segs], sub_cfg,
-                                                   asr=[x.get("asr", "") for x in segs])
+            lines, wins = [x["text"] for x in segs], [x["end"] - x["start"] + 0.3 for x in segs]
+            asr = [x.get("asr", "") for x in segs]
+            texts = steps.run("translate_sub", [lines, wins, asr, _ai_cfg(sub_cfg)],
+                              lambda: subtitles.translate_utterances(lines, wins, sub_cfg, asr=asr),
+                              label="Dịch phụ đề (Claude)")
             ass_name = subtitles.write_ass(segs, texts, work / f"{src.stem}.ass", w, h, sub_cfg).name
 
     feather = 0
@@ -247,4 +263,5 @@ def edit(src: Path, dst: Path, work: Path, cfg: dict) -> dict:
                             preset=out.get("preset", "medium"))
         finally:
             dst.unlink(missing_ok=True)
+    steps.clear()            # edit xong: lần Edit lại sau dịch / đọc mới
     return {"sub_lines": n_lines, "band": band, "dubbed": bool(dub_track), "text_source": source}

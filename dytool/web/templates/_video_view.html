@@ -99,6 +99,11 @@
     <div class="row" style="gap:6px; margin-top:14px; flex-wrap:wrap">
       {% if v.status in ('new', 'downloaded') %}
         {% with pid=v.page_id, vid=v.id %}{% include "_edit_btn.html" %}{% endwith %}
+      {% elif v.status in ('review', 'approved', 'publish_now', 'schedule_pending') and raw %}
+        <button class="btn sm ghost" hx-post="/videos/{{ v.page_id }}/{{ v.id }}/reedit" hx-target="#vview" hx-swap="innerHTML"
+                hx-disabled-elt="this" data-confirm-ok="Edit lại"
+                hx-confirm="Edit lại video này theo cài đặt kênh hiện tại? Bản edit cũ sẽ được thay, edit xong phải duyệt lại."
+                title="Làm lại bản edit theo cài đặt kênh hiện tại (vd. sau khi đổi giọng, bật giữ tiếng mèo)">Edit lại</button>
       {% elif v.status == 'scheduled' %}
         {% if tt %}
           <a class="btn sm" target="_blank" rel="noopener" href="https://www.tiktok.com/tiktokstudio/content">Xem trong TikTok Studio ↗</a>

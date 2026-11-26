@@ -3094,6 +3094,34 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
                   + (" — chờ việc đang chạy xong" if r == "queued" else ""), page_id=pid)
         return render(request, "_edit_btn.html", pid=pid, vid=vid)
 
+    @app.post("/videos/{pid}/{vid}/reedit", response_class=HTMLResponse)
+    def video_reedit(request: Request, pid: int, vid: str):
+        """Nút "Edit lại" (hộp xem): video đã edit nhưng CHƯA gửi lên nền tảng (Chờ duyệt / Đã duyệt / chờ gửi lịch)
+        -> về "Đã tải" rồi vào hàng chờ Edit ngay, edit lại theo cài đặt kênh hiện tại (vd. sau khi bật giữ tiếng
+        mèo, 2026-11-27). Đổi trạng thái bằng set_video_if: video worker đang đăng (uploading) / đã gửi (scheduled)
+        không bị đụng. Bản edit mới xong thì phải duyệt lại."""
+        row = store.one("SELECT v.status, p.name FROM videos v JOIN pages p ON p.id=v.page_id "
+                        "WHERE v.id=? AND v.page_id=?", (vid, pid))
+        if not row:
+            return PlainTextResponse("Không tìm thấy video", 404)
+        allowed = ("review",) + QUEUED
+        if row["status"] not in allowed:
+            return PlainTextResponse(f'Chỉ edit lại được video chưa gửi lên nền tảng — video này đang ở '
+                                     f'"{STATUS_VI.get(row["status"], row["status"])}".', 400)
+        if not (data / "raw" / f"{vid}.mp4").exists():
+            return PlainTextResponse("Không còn file video gốc trên máy (đã bị dọn) nên không edit lại được.", 400)
+        if not store.set_video_if(vid, pid, allowed, status="downloaded", error=None):
+            return PlainTextResponse("Video vừa đổi trạng thái (có thể đang được đăng) — tải lại trang để xem mới.", 400)
+        try:
+            r = worker.request_edit(pid, vid)
+        except RuntimeError as e:
+            store.set_video_if(vid, pid, ("downloaded",), status=row["status"])
+            return PlainTextResponse(str(e), 400)
+        store.log(f"[{row['name']}] Bấm Edit lại {vid} (đang ở {STATUS_VI.get(row['status'], row['status'])})"
+                  + (" — chờ việc đang chạy xong" if r == "queued" else ""), page_id=pid)
+        return view_html(request, pid, vid, msg="Đã đưa vào hàng chờ edit lại theo cài đặt kênh hiện tại — "
+                                                "edit xong video về Chờ duyệt (bản edit cũ được thay)")
+
     @app.post("/videos/{pid}/{vid}/edit-cancel", response_class=HTMLResponse)
     def video_edit_cancel(request: Request, pid: int, vid: str):
         """Bỏ video khỏi hàng chờ Edit ngay (đang edit rồi thì dùng nút Dừng)."""

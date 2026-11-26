@@ -502,6 +502,9 @@ class Worker:
             p = self.data / "edited" / f"p{r['page_id']}_{r['id']}.mp4"
             if p.exists():
                 rm(p)
+        for p in (self.data / "thumbs").glob("*.jpg") if (self.data / "thumbs").is_dir() else ():
+            if not (self.data / "edited" / f"{p.stem}.mp4").exists() or now - p.stat().st_mtime > 30 * 86400:
+                rm(p)          # ảnh thu nhỏ (/media/thumb) của bản edit đã xoá
         for logs in list((self.data / "accounts").glob("*/fb_logs")) + list((self.data / "accounts").glob("*/tt_logs")):
             for p in logs.iterdir():
                 if now - p.stat().st_mtime > 14 * 86400:

@@ -55,7 +55,8 @@
 {% macro rq_card(v, seq) %}
 <div class="rq-item" data-vview="{{ v.key }}" {% if seq %}data-vseq="{{ seq }}"{% endif %} tabindex="0" role="button"
      aria-label="Xem và duyệt: {{ (v.caption or v.desc or v.id)[:80] }}">
-  <span class="rv-thumb"><video src="/media/edited/p{{ v.page_id }}_{{ v.id }}.mp4#t=1" preload="metadata" muted></video>
+  {# ảnh JPG (/media/thumb) thay <video>: trang tự vẽ lại không bắt WebView2 mở lại + giải mã từng mp4 #}
+  <span class="rv-thumb">{% set tu = thumb_url(v.page_id, v.id) %}{% if tu %}<img src="{{ tu }}" alt="" loading="lazy" decoding="async">{% endif %}
     <span class="rv-dur num">{{ (v.duration or 0)|round|int }}s</span>
     <span class="rv-chan" style="--c: {{ colors.get(v.page_id, 'var(--primary)') }}">{{ v.page_name }}</span></span>
   <span class="rv-meta"><b class="clamp2">{{ v.caption or v.desc or v.id }}</b>

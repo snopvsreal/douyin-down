@@ -8,6 +8,13 @@ Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh h�
 
 ---
 
+## [0.4.2] — 2026-11-26
+
+**App nhẹ hơn khi đang chạy tự động**
+
+- ⚡ **App nhẹ hơn khi đang chạy tự động**: trang không còn vẽ lại mỗi 3 giây chỉ vì có dòng nhật ký mới — đo trên trang Hôm nay với 40 video chờ duyệt: CPU của cửa sổ giảm từ ~16% xuống ~1% một nhân, số lần vẽ lại trang 13 → 4 lần / 40 giây.
+- ⚡ Video chờ duyệt hiện bằng **ảnh thu nhỏ** thay cho trình phát video: cửa sổ không phải mở lại và giải mã từng file video mỗi lần cập nhật (số phần tử trang giảm ~10 lần).
+
 ## [0.4.1] — 2026-11-26
 
 **Trang Hướng dẫn trong app**
@@ -120,6 +127,7 @@ Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh h�
 - ✨ **TikTok**: kênh riêng hoặc đăng kèm cùng giờ với Page Facebook.
 - ✨ Mỗi tài khoản 1 hồ sơ trình duyệt chống phát hiện riêng, tự tạo khi Đăng nhập.
 
+[0.4.2]: https://github.com/snopvsreal/dytool/releases/tag/v0.4.2
 [0.4.1]: https://github.com/snopvsreal/dytool/releases/tag/v0.4.1
 [0.4.0]: https://github.com/snopvsreal/dytool/releases/tag/v0.4.0
 [0.3.13]: https://github.com/snopvsreal/dytool/releases/tag/v0.3.13

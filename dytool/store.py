@@ -149,6 +149,7 @@ class Store:
     def __init__(self, path: Path):
         self.path = path
         self.lock = threading.RLock()
+        self._log_rows = 0          # số dòng nhật ký đã ghi — rev() trừ đi (xem rev)
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys=ON")
@@ -251,9 +252,11 @@ class Store:
 
     def rev(self) -> int:
         """Phiên bản dữ liệu: tổng số dòng đã ghi (thêm / sửa / xoá) qua kết nối này — mọi lần ghi của app lẫn worker
-        đều qua 1 kết nối, nên số này đổi đúng khi có gì thay đổi. Giao diện hỏi số này để tự vẽ lại (cập nhật trực tiếp)."""
+        đều qua 1 kết nối, nên số này đổi đúng khi có gì thay đổi. Giao diện hỏi số này để tự vẽ lại (cập nhật trực tiếp).
+        KHÔNG tính dòng nhật ký: worker ghi nhật ký mỗi vài giây -> trước đây trang vẽ lại cả trang 3 s / lần suốt lúc
+        chạy (đo: 13 lần / 40 s, trang tốn ~16% 1 nhân). Nhật ký có ô tự hỏi riêng (hộp Nhật ký) / hiện ở lần đổi kế."""
         with self.lock:
-            return self.conn.total_changes
+            return self.conn.total_changes - self._log_rows
 
     def counts(self, page_id: int | None = None) -> dict:
         sql = "SELECT status, COUNT(*) n FROM videos" + (" WHERE page_id=?" if page_id else "") + " GROUP BY status"
@@ -302,5 +305,7 @@ class Store:
 
     # ---- logs ----
     def log(self, msg: str, level: str = "info", page_id: int | None = None) -> None:
-        self.x("INSERT INTO logs(ts, level, page_id, msg) VALUES (?,?,?,?)", (int(time.time()), level, page_id, msg))
+        with self.lock:
+            self.x("INSERT INTO logs(ts, level, page_id, msg) VALUES (?,?,?,?)", (int(time.time()), level, page_id, msg))
+            self._log_rows += 1
         print(time.strftime("%H:%M:%S"), level.upper(), msg, flush=True)

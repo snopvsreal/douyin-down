@@ -1,6 +1,7 @@
 """Giao diện web quản lý nhiều tài khoản Facebook / nhiều Page.  Chạy: uv run dytool ui  -> http://127.0.0.1:8000"""
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -2759,6 +2760,45 @@ def create_app(config_path: str = "config.yaml", autostart: bool = False, lan: b
             store.log(f"Hoàn tác duyệt {vid}", page_id=pid)
         return view_html(request, pid, vid, seq=seq, msg_ok=ok,
                          msg="Đã hoàn tác" if ok else "Không hoàn tác được — tool đã nhận video này đi đăng")
+
+    # ---- Ảnh thu nhỏ của video đã edit (dải Chờ duyệt trang Hôm nay). Trước dùng <video preload=metadata>: mỗi lần trang
+    # tự vẽ lại, WebView2 mở lại từng file mp4 + giải mã khung hình (40 video = 40 bộ giải mã). Giờ 1 ảnh JPG tạo 1 lần
+    # bằng ffmpeg (data/thumbs, tạo lại khi bản edit mới hơn), trình duyệt giữ trong cache (?v = giờ sửa bản edit).
+    _thumb_sem = threading.Semaphore(3)
+
+    def thumb_url(pid: int, vid: str) -> str:
+        try:
+            return f"/media/thumb/{int(pid)}/{vid}?v={int((data / 'edited' / f'p{int(pid)}_{vid}.mp4').stat().st_mtime)}"
+        except OSError:
+            return ""
+    tpl.env.globals["thumb_url"] = thumb_url
+
+    @app.get("/media/thumb/{pid}/{vid}")
+    def media_thumb(pid: int, vid: str):
+        import re
+        from fastapi.responses import FileResponse
+        if not re.fullmatch(r"\d{6,30}", vid):
+            return PlainTextResponse("", 404)
+        src = data / "edited" / f"p{pid}_{vid}.mp4"
+        dst = data / "thumbs" / f"p{pid}_{vid}.jpg"
+        try:
+            src_mtime = src.stat().st_mtime
+        except OSError:
+            return PlainTextResponse("", 404)
+        if not dst.is_file() or dst.stat().st_mtime < src_mtime:
+            dst.parent.mkdir(exist_ok=True)
+            tmp = dst.with_name(f"{dst.stem}.{threading.get_ident()}.tmp.jpg")
+            with _thumb_sem:
+                for at in ("1", "0"):          # video < 1 s: lấy khung đầu
+                    r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", at, "-i", str(src), "-frames:v", "1",
+                                        "-vf", "scale=360:-2", "-q:v", "4", str(tmp)], capture_output=True, timeout=30)
+                    if r.returncode == 0 and tmp.is_file() and tmp.stat().st_size:
+                        break
+            if not tmp.is_file() or not tmp.stat().st_size:
+                tmp.unlink(missing_ok=True)
+                return PlainTextResponse("", 404)
+            os.replace(tmp, dst)
+        return FileResponse(dst, media_type="image/jpeg", headers={"Cache-Control": "max-age=604800"})
 
     @app.get("/media/raw/{vid}")
     def media_raw(vid: str):

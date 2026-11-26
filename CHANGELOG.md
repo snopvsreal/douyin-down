@@ -8,6 +8,14 @@ Ký hiệu: ✨ mới · 🎨 giao diện · 🛠️ sửa lỗi · ⚡ nhanh h�
 
 ---
 
+## [0.5.2] — 2026-11-27
+
+**Lồng tiếng chạy được trên máy có card đồ hoạ hay lỗi + chọn chạy bằng CPU hoặc card đồ hoạ**
+
+- 🛠️ **Sửa lỗi 500 "illegal memory access"** (gặp trên RTX 3050 Ti): lỗi này làm hỏng card cho cả máy chủ giọng nói nên bản 0.5.1 chuyển CPU vẫn lỗi. Giờ máy chủ giọng nói tự khởi động lại chạy bằng CPU, dytool chờ nạp xong (khoảng 1 phút) rồi đọc lại đúng câu đó — video không bị lỗi. Máy nhớ chạy CPU trong 24 giờ.
+- ✨ **Chọn chạy lồng tiếng bằng gì** ở Cài đặt › Dịch & lồng tiếng: **Tự động** (card đồ hoạ, lỗi thì tự chuyển CPU), **Card đồ hoạ (GPU)** (luôn dùng card), **CPU** (không dùng card — cả tách giọng; chậm hơn, hợp máy có card hay lỗi). Đổi lúc giọng nói đang bật thì tự khởi động lại.
+- 🛠️ Nút **Thử lại card đồ hoạ** ở trang Giọng nói giờ khởi động lại máy chủ giọng nói để dùng lại card thật sự.
+
 ## [0.5.1] — 2026-11-27
 
 **Lồng tiếng không còn lỗi 500 khi card đồ hoạ trục trặc**

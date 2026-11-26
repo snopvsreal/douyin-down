@@ -82,7 +82,10 @@
       {# hx-preserve: chuyển tab (hx-boost thay body) giữ nguyên chip đang hiện, không trống rồi hiện lại (nháy) #}
       <div class="svc-chips" id="svc-chips" hx-preserve="true" hx-get="/partials/services" hx-swap="innerHTML"
            hx-trigger="load, every 5s [!document.hidden], visibilitychange[!document.hidden] from:document"></div>
-      {# app desktop: thanh này là thanh tiêu đề (kéo / nhấp đúp phóng to), 3 nút cửa sổ ở góc (desktop.py WindowApi) #}
+    </header>
+    {# app desktop: thanh trên là thanh tiêu đề (kéo / nhấp đúp phóng to), 3 nút cửa sổ ở góc (desktop.py WindowApi).
+       ĐỪNG đặt trong .topbar: backdrop-filter của nó làm position:fixed bám theo thanh (hẹp hơn cửa sổ đúng bằng thanh
+       cuộn của .content) -> nút lệch khỏi góc ~12px #}
       <div class="winctl" role="group" aria-label="Cửa sổ">
         <button type="button" data-win="min" title="Thu nhỏ" aria-label="Thu nhỏ">
           <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M0 5.5h10"/></svg></button>
@@ -92,7 +95,6 @@
         <button type="button" data-win="close" class="close" title="Đóng — dytool vẫn chạy ở khay hệ thống" aria-label="Đóng">
           <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="m.5.5 9 9M9.5.5l-9 9"/></svg></button>
       </div>
-    </header>
     <main>
     {% if setup_failed and request.url.path in ('/', '/settings') %}
     {# cập nhật im lặng mà bước cài thư viện lỗi: trước không ai biết, app chạy hỏng ngầm #}
